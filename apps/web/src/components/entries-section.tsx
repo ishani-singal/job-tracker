@@ -9,6 +9,13 @@ import type {
   ProjectEntry,
   WorkExperienceEntry,
 } from '@job-tracker/shared-types';
+import {
+  DateRangeFields,
+  DateRangeFormState,
+  EMPTY_DATE_RANGE,
+  dateRangeToPayload,
+  formatEntryDateRange,
+} from './date-range-fields';
 
 export function EntriesSection() {
   return (
@@ -30,41 +37,76 @@ export function EntriesSection() {
   );
 }
 
+// ---------- Work Experience ----------
+
+interface WorkExperienceForm extends DateRangeFormState {
+  company: string;
+  title: string;
+  required: boolean;
+}
+
+const EMPTY_WORK_FORM: WorkExperienceForm = {
+  ...EMPTY_DATE_RANGE,
+  company: '',
+  title: '',
+  required: true,
+};
+
+function workExperienceToForm(e: WorkExperienceEntry): WorkExperienceForm {
+  return {
+    company: e.company,
+    title: e.title ?? '',
+    location: e.location ?? '',
+    startMonth: e.startMonth ? String(e.startMonth) : '',
+    startYear: e.startYear ? String(e.startYear) : '',
+    endMonth: e.endMonth ? String(e.endMonth) : '',
+    endYear: e.endYear ? String(e.endYear) : '',
+    isPresent: e.isPresent,
+    required: e.required,
+  };
+}
+
 function WorkExperienceList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['work-experience'], queryFn: api.listWorkExperience });
-  const [form, setForm] = useState({
-    company: '',
-    title: '',
-    yearIn: '',
-    yearOut: '',
-    required: true,
-  });
+  const [form, setForm] = useState<WorkExperienceForm>(EMPTY_WORK_FORM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['work-experience'] });
 
   const create = useMutation({
     mutationFn: () =>
       api.createWorkExperience({
         company: form.company,
         title: form.title || undefined,
-        yearIn: form.yearIn ? Number(form.yearIn) : undefined,
-        yearOut: form.yearOut ? Number(form.yearOut) : undefined,
         required: form.required,
+        ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
-      setForm({ company: '', title: '', yearIn: '', yearOut: '', required: true });
-      queryClient.invalidateQueries({ queryKey: ['work-experience'] });
+      setForm(EMPTY_WORK_FORM);
+      invalidate();
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: () =>
+      api.updateWorkExperience(editingId!, {
+        company: form.company,
+        title: form.title || undefined,
+        required: form.required,
+        ...dateRangeToPayload(form),
+      }),
+    onSuccess: () => {
+      setForm(EMPTY_WORK_FORM);
+      setEditingId(null);
+      invalidate();
     },
   });
 
   const toggleRequired = (entry: WorkExperienceEntry) =>
-    api
-      .updateWorkExperience(entry.id, { required: !entry.required })
-      .then(() => queryClient.invalidateQueries({ queryKey: ['work-experience'] }));
+    api.updateWorkExperience(entry.id, { required: !entry.required }).then(invalidate);
 
-  const remove = (id: string) =>
-    api.deleteWorkExperience(id).then(() =>
-      queryClient.invalidateQueries({ queryKey: ['work-experience'] }),
-    );
+  const remove = (id: string) => api.deleteWorkExperience(id).then(invalidate);
 
   return (
     <div className="flex flex-col gap-2">
@@ -73,9 +115,13 @@ function WorkExperienceList() {
         <EntryRow
           key={entry.id}
           label={`${entry.company}${entry.title ? ` — ${entry.title}` : ''}`}
-          sublabel={`${entry.yearIn ?? '?'} – ${entry.yearOut ?? 'present'}`}
+          sublabel={[entry.location, formatEntryDateRange(entry)].filter(Boolean).join(' · ')}
           required={entry.required}
           onToggleRequired={() => toggleRequired(entry)}
+          onEdit={() => {
+            setEditingId(entry.id);
+            setForm(workExperienceToForm(entry));
+          }}
           onDelete={() => remove(entry.id)}
         />
       ))}
@@ -92,18 +138,7 @@ function WorkExperienceList() {
           value={form.title}
           onChange={(e) => setForm({ ...form, title: e.target.value })}
         />
-        <input
-          className="border rounded px-2 py-1 text-sm bg-transparent"
-          placeholder="Year in"
-          value={form.yearIn}
-          onChange={(e) => setForm({ ...form, yearIn: e.target.value })}
-        />
-        <input
-          className="border rounded px-2 py-1 text-sm bg-transparent"
-          placeholder="Year out"
-          value={form.yearOut}
-          onChange={(e) => setForm({ ...form, yearOut: e.target.value })}
-        />
+        <DateRangeFields form={form} onChange={setForm} />
         <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
           <input
             type="checkbox"
@@ -112,44 +147,95 @@ function WorkExperienceList() {
           />
           Required
         </label>
-        <button
-          className="col-span-2 px-2 py-1 text-sm rounded border"
-          onClick={() => create.mutate()}
-          disabled={!form.company || create.isPending}
-        >
-          Add
-        </button>
+        <FormButtons
+          editing={!!editingId}
+          disabled={!form.company}
+          onSubmit={() => (editingId ? update.mutate() : create.mutate())}
+          onCancel={() => {
+            setEditingId(null);
+            setForm(EMPTY_WORK_FORM);
+          }}
+        />
       </div>
     </div>
   );
 }
 
+// ---------- Education ----------
+
+interface EducationForm extends DateRangeFormState {
+  school: string;
+  degree: string;
+  field: string;
+  required: boolean;
+}
+
+const EMPTY_EDUCATION_FORM: EducationForm = {
+  ...EMPTY_DATE_RANGE,
+  school: '',
+  degree: '',
+  field: '',
+  required: true,
+};
+
+function educationToForm(e: EducationEntry): EducationForm {
+  return {
+    school: e.school,
+    degree: e.degree ?? '',
+    field: e.field ?? '',
+    location: e.location ?? '',
+    startMonth: e.startMonth ? String(e.startMonth) : '',
+    startYear: e.startYear ? String(e.startYear) : '',
+    endMonth: e.endMonth ? String(e.endMonth) : '',
+    endYear: e.endYear ? String(e.endYear) : '',
+    isPresent: e.isPresent,
+    required: e.required,
+  };
+}
+
 function EducationList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['education'], queryFn: api.listEducation });
-  const [form, setForm] = useState({ school: '', degree: '', year: '', required: true });
+  const [form, setForm] = useState<EducationForm>(EMPTY_EDUCATION_FORM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['education'] });
 
   const create = useMutation({
     mutationFn: () =>
       api.createEducation({
         school: form.school,
         degree: form.degree || undefined,
-        year: form.year ? Number(form.year) : undefined,
+        field: form.field || undefined,
         required: form.required,
+        ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
-      setForm({ school: '', degree: '', year: '', required: true });
-      queryClient.invalidateQueries({ queryKey: ['education'] });
+      setForm(EMPTY_EDUCATION_FORM);
+      invalidate();
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: () =>
+      api.updateEducation(editingId!, {
+        school: form.school,
+        degree: form.degree || undefined,
+        field: form.field || undefined,
+        required: form.required,
+        ...dateRangeToPayload(form),
+      }),
+    onSuccess: () => {
+      setForm(EMPTY_EDUCATION_FORM);
+      setEditingId(null);
+      invalidate();
     },
   });
 
   const toggleRequired = (entry: EducationEntry) =>
-    api
-      .updateEducation(entry.id, { required: !entry.required })
-      .then(() => queryClient.invalidateQueries({ queryKey: ['education'] }));
+    api.updateEducation(entry.id, { required: !entry.required }).then(invalidate);
 
-  const remove = (id: string) =>
-    api.deleteEducation(id).then(() => queryClient.invalidateQueries({ queryKey: ['education'] }));
+  const remove = (id: string) => api.deleteEducation(id).then(invalidate);
 
   return (
     <div className="flex flex-col gap-2">
@@ -157,10 +243,14 @@ function EducationList() {
       {data?.map((entry) => (
         <EntryRow
           key={entry.id}
-          label={`${entry.school}${entry.degree ? ` — ${entry.degree}` : ''}`}
-          sublabel={entry.year ? `${entry.year}` : ''}
+          label={`${entry.school}${entry.degree ? ` — ${entry.degree}` : ''}${entry.field ? ` in ${entry.field}` : ''}`}
+          sublabel={[entry.location, formatEntryDateRange(entry)].filter(Boolean).join(' · ')}
           required={entry.required}
           onToggleRequired={() => toggleRequired(entry)}
+          onEdit={() => {
+            setEditingId(entry.id);
+            setForm(educationToForm(entry));
+          }}
           onDelete={() => remove(entry.id)}
         />
       ))}
@@ -179,11 +269,12 @@ function EducationList() {
         />
         <input
           className="border rounded px-2 py-1 text-sm bg-transparent"
-          placeholder="Year"
-          value={form.year}
-          onChange={(e) => setForm({ ...form, year: e.target.value })}
+          placeholder="Field of study"
+          value={form.field}
+          onChange={(e) => setForm({ ...form, field: e.target.value })}
         />
-        <label className="flex items-center gap-1 text-xs col-span-4 cursor-pointer">
+        <DateRangeFields form={form} onChange={setForm} />
+        <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
           <input
             type="checkbox"
             checked={form.required}
@@ -191,45 +282,85 @@ function EducationList() {
           />
           Required
         </label>
-        <button
-          className="col-span-4 px-2 py-1 text-sm rounded border"
-          onClick={() => create.mutate()}
-          disabled={!form.school || create.isPending}
-        >
-          Add
-        </button>
+        <FormButtons
+          editing={!!editingId}
+          disabled={!form.school}
+          onSubmit={() => (editingId ? update.mutate() : create.mutate())}
+          onCancel={() => {
+            setEditingId(null);
+            setForm(EMPTY_EDUCATION_FORM);
+          }}
+        />
       </div>
     </div>
   );
 }
 
+// ---------- Internships ----------
+
+interface InternshipForm extends DateRangeFormState {
+  company: string;
+  required: boolean;
+}
+
+const EMPTY_INTERNSHIP_FORM: InternshipForm = {
+  ...EMPTY_DATE_RANGE,
+  company: '',
+  required: false,
+};
+
+function internshipToForm(e: InternshipEntry): InternshipForm {
+  return {
+    company: e.company,
+    location: e.location ?? '',
+    startMonth: e.startMonth ? String(e.startMonth) : '',
+    startYear: e.startYear ? String(e.startYear) : '',
+    endMonth: e.endMonth ? String(e.endMonth) : '',
+    endYear: e.endYear ? String(e.endYear) : '',
+    isPresent: e.isPresent,
+    required: e.required,
+  };
+}
+
 function InternshipList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['internships'], queryFn: api.listInternships });
-  const [form, setForm] = useState({ company: '', year: '', required: false });
+  const [form, setForm] = useState<InternshipForm>(EMPTY_INTERNSHIP_FORM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['internships'] });
 
   const create = useMutation({
     mutationFn: () =>
       api.createInternship({
         company: form.company,
-        year: form.year ? Number(form.year) : undefined,
         required: form.required,
+        ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
-      setForm({ company: '', year: '', required: false });
-      queryClient.invalidateQueries({ queryKey: ['internships'] });
+      setForm(EMPTY_INTERNSHIP_FORM);
+      invalidate();
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: () =>
+      api.updateInternship(editingId!, {
+        company: form.company,
+        required: form.required,
+        ...dateRangeToPayload(form),
+      }),
+    onSuccess: () => {
+      setForm(EMPTY_INTERNSHIP_FORM);
+      setEditingId(null);
+      invalidate();
     },
   });
 
   const toggleRequired = (entry: InternshipEntry) =>
-    api
-      .updateInternship(entry.id, { required: !entry.required })
-      .then(() => queryClient.invalidateQueries({ queryKey: ['internships'] }));
+    api.updateInternship(entry.id, { required: !entry.required }).then(invalidate);
 
-  const remove = (id: string) =>
-    api
-      .deleteInternship(id)
-      .then(() => queryClient.invalidateQueries({ queryKey: ['internships'] }));
+  const remove = (id: string) => api.deleteInternship(id).then(invalidate);
 
   return (
     <div className="flex flex-col gap-2">
@@ -238,26 +369,25 @@ function InternshipList() {
         <EntryRow
           key={entry.id}
           label={entry.company}
-          sublabel={entry.year ? `${entry.year}` : ''}
+          sublabel={[entry.location, formatEntryDateRange(entry)].filter(Boolean).join(' · ')}
           required={entry.required}
           onToggleRequired={() => toggleRequired(entry)}
+          onEdit={() => {
+            setEditingId(entry.id);
+            setForm(internshipToForm(entry));
+          }}
           onDelete={() => remove(entry.id)}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
         <input
-          className="border rounded px-2 py-1 text-sm bg-transparent col-span-3"
+          className="border rounded px-2 py-1 text-sm bg-transparent col-span-4"
           placeholder="Company"
           value={form.company}
           onChange={(e) => setForm({ ...form, company: e.target.value })}
         />
-        <input
-          className="border rounded px-2 py-1 text-sm bg-transparent"
-          placeholder="Year"
-          value={form.year}
-          onChange={(e) => setForm({ ...form, year: e.target.value })}
-        />
-        <label className="flex items-center gap-1 text-xs col-span-4 cursor-pointer">
+        <DateRangeFields form={form} onChange={setForm} />
+        <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
           <input
             type="checkbox"
             checked={form.required}
@@ -265,28 +395,63 @@ function InternshipList() {
           />
           Required
         </label>
-        <button
-          className="col-span-4 px-2 py-1 text-sm rounded border"
-          onClick={() => create.mutate()}
-          disabled={!form.company || create.isPending}
-        >
-          Add
-        </button>
+        <FormButtons
+          editing={!!editingId}
+          disabled={!form.company}
+          onSubmit={() => (editingId ? update.mutate() : create.mutate())}
+          onCancel={() => {
+            setEditingId(null);
+            setForm(EMPTY_INTERNSHIP_FORM);
+          }}
+        />
       </div>
     </div>
   );
 }
 
+// ---------- Projects ----------
+
+interface ProjectForm extends DateRangeFormState {
+  name: string;
+  repoUrl: string;
+  liveUrl: string;
+  required: boolean;
+}
+
+const EMPTY_PROJECT_FORM: ProjectForm = {
+  ...EMPTY_DATE_RANGE,
+  name: '',
+  repoUrl: '',
+  liveUrl: '',
+  required: false,
+};
+
+function projectToForm(e: ProjectEntry): ProjectForm {
+  return {
+    name: e.name,
+    repoUrl: e.repoUrl ?? '',
+    liveUrl: e.liveUrl ?? '',
+    location: e.location ?? '',
+    startMonth: e.startMonth ? String(e.startMonth) : '',
+    startYear: e.startYear ? String(e.startYear) : '',
+    endMonth: e.endMonth ? String(e.endMonth) : '',
+    endYear: e.endYear ? String(e.endYear) : '',
+    isPresent: e.isPresent,
+    required: e.required,
+  };
+}
+
 function ProjectList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
-  const [form, setForm] = useState({
-    name: '',
-    repoUrl: '',
-    liveUrl: '',
-    year: '',
-    required: false,
+  const { data: connectedRepos } = useQuery({
+    queryKey: ['github-connected-repos'],
+    queryFn: api.listConnectedRepos,
   });
+  const [form, setForm] = useState<ProjectForm>(EMPTY_PROJECT_FORM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['projects'] });
 
   const create = useMutation({
     mutationFn: () =>
@@ -294,22 +459,37 @@ function ProjectList() {
         name: form.name,
         repoUrl: form.repoUrl || undefined,
         liveUrl: form.liveUrl || undefined,
-        year: form.year ? Number(form.year) : undefined,
         required: form.required,
+        ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
-      setForm({ name: '', repoUrl: '', liveUrl: '', year: '', required: false });
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setForm(EMPTY_PROJECT_FORM);
+      invalidate();
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: () =>
+      api.updateProject(editingId!, {
+        name: form.name,
+        repoUrl: form.repoUrl || undefined,
+        liveUrl: form.liveUrl || undefined,
+        required: form.required,
+        ...dateRangeToPayload(form),
+      }),
+    onSuccess: () => {
+      setForm(EMPTY_PROJECT_FORM);
+      setEditingId(null);
+      invalidate();
     },
   });
 
   const toggleRequired = (entry: ProjectEntry) =>
-    api
-      .updateProject(entry.id, { required: !entry.required })
-      .then(() => queryClient.invalidateQueries({ queryKey: ['projects'] }));
+    api.updateProject(entry.id, { required: !entry.required }).then(invalidate);
 
-  const remove = (id: string) =>
-    api.deleteProject(id).then(() => queryClient.invalidateQueries({ queryKey: ['projects'] }));
+  const remove = (id: string) => api.deleteProject(id).then(invalidate);
+
+  const hasConnectedRepos = (connectedRepos?.length ?? 0) > 0;
 
   return (
     <div className="flex flex-col gap-2">
@@ -318,11 +498,15 @@ function ProjectList() {
         <EntryRow
           key={entry.id}
           label={entry.name}
-          sublabel={[entry.repoUrl, entry.liveUrl, entry.year ? `${entry.year}` : '']
+          sublabel={[entry.repoUrl, entry.liveUrl, entry.location, formatEntryDateRange(entry)]
             .filter(Boolean)
             .join(' · ')}
           required={entry.required}
           onToggleRequired={() => toggleRequired(entry)}
+          onEdit={() => {
+            setEditingId(entry.id);
+            setForm(projectToForm(entry));
+          }}
           onDelete={() => remove(entry.id)}
         />
       ))}
@@ -333,25 +517,35 @@ function ProjectList() {
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
         />
+        {hasConnectedRepos ? (
+          <select
+            className="border rounded px-2 py-1 text-sm bg-transparent col-span-2"
+            value={form.repoUrl}
+            onChange={(e) => setForm({ ...form, repoUrl: e.target.value })}
+          >
+            <option value="">Repo (none)</option>
+            {connectedRepos!.map((r) => (
+              <option key={r.fullName} value={`https://github.com/${r.fullName}`}>
+                {r.fullName}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            className="border rounded px-2 py-1 text-sm bg-transparent col-span-2"
+            placeholder="Repo URL"
+            value={form.repoUrl}
+            onChange={(e) => setForm({ ...form, repoUrl: e.target.value })}
+          />
+        )}
         <input
-          className="border rounded px-2 py-1 text-sm bg-transparent col-span-2"
-          placeholder="Repo URL"
-          value={form.repoUrl}
-          onChange={(e) => setForm({ ...form, repoUrl: e.target.value })}
-        />
-        <input
-          className="border rounded px-2 py-1 text-sm bg-transparent col-span-3"
+          className="border rounded px-2 py-1 text-sm bg-transparent col-span-4"
           placeholder="Live link"
           value={form.liveUrl}
           onChange={(e) => setForm({ ...form, liveUrl: e.target.value })}
         />
-        <input
-          className="border rounded px-2 py-1 text-sm bg-transparent"
-          placeholder="Year"
-          value={form.year}
-          onChange={(e) => setForm({ ...form, year: e.target.value })}
-        />
-        <label className="flex items-center gap-1 text-xs col-span-4 cursor-pointer">
+        <DateRangeFields form={form} onChange={setForm} />
+        <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
           <input
             type="checkbox"
             checked={form.required}
@@ -359,14 +553,47 @@ function ProjectList() {
           />
           Required
         </label>
-        <button
-          className="col-span-4 px-2 py-1 text-sm rounded border"
-          onClick={() => create.mutate()}
-          disabled={!form.name || create.isPending}
-        >
-          Add
-        </button>
+        <FormButtons
+          editing={!!editingId}
+          disabled={!form.name}
+          onSubmit={() => (editingId ? update.mutate() : create.mutate())}
+          onCancel={() => {
+            setEditingId(null);
+            setForm(EMPTY_PROJECT_FORM);
+          }}
+        />
       </div>
+    </div>
+  );
+}
+
+// ---------- Shared ----------
+
+function FormButtons({
+  editing,
+  disabled,
+  onSubmit,
+  onCancel,
+}: {
+  editing: boolean;
+  disabled: boolean;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="col-span-4 flex gap-2">
+      <button
+        className="flex-1 px-2 py-1 text-sm rounded border"
+        onClick={onSubmit}
+        disabled={disabled}
+      >
+        {editing ? 'Save Changes' : 'Add'}
+      </button>
+      {editing && (
+        <button className="px-2 py-1 text-sm rounded border" onClick={onCancel}>
+          Cancel
+        </button>
+      )}
     </div>
   );
 }
@@ -376,12 +603,14 @@ function EntryRow({
   sublabel,
   required,
   onToggleRequired,
+  onEdit,
   onDelete,
 }: {
   label: string;
   sublabel: string;
   required: boolean;
   onToggleRequired: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -395,6 +624,9 @@ function EntryRow({
           <input type="checkbox" checked={required} onChange={onToggleRequired} />
           Required
         </label>
+        <button className="text-xs opacity-70 hover:opacity-100" onClick={onEdit}>
+          Edit
+        </button>
         <button className="text-xs text-red-600 dark:text-red-400" onClick={onDelete}>
           Delete
         </button>

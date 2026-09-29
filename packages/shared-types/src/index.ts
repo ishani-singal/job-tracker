@@ -56,39 +56,44 @@ export interface ResumeProfile {
   matchScoreTarget: number;
 }
 
-export interface WorkExperienceEntry {
+interface DateRangeFields {
+  location: string | null;
+  startMonth: number | null;
+  startYear: number | null;
+  endMonth: number | null;
+  endYear: number | null;
+  isPresent: boolean;
+}
+
+export interface WorkExperienceEntry extends DateRangeFields {
   id: string;
   company: string;
   title: string | null;
-  yearIn: number | null;
-  yearOut: number | null;
   required: boolean;
   sortOrder: number;
 }
 
-export interface EducationEntry {
+export interface EducationEntry extends DateRangeFields {
   id: string;
   school: string;
   degree: string | null;
-  year: number | null;
+  field: string | null;
   required: boolean;
   sortOrder: number;
 }
 
-export interface InternshipEntry {
+export interface InternshipEntry extends DateRangeFields {
   id: string;
   company: string;
-  year: number | null;
   required: boolean;
   sortOrder: number;
 }
 
-export interface ProjectEntry {
+export interface ProjectEntry extends DateRangeFields {
   id: string;
   name: string;
   repoUrl: string | null;
   liveUrl: string | null;
-  year: number | null;
   required: boolean;
   sortOrder: number;
 }

@@ -116,6 +116,7 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
     locationZip: profile.locationZip ?? '',
     maxYearsExperience: profile.maxYearsExperience?.toString() ?? '',
     matchScoreTarget: profile.matchScoreTarget?.toString() ?? '93',
+    templateBody: profile.templateBody ?? '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -131,8 +132,10 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
         locationZip: form.locationZip,
         maxYearsExperience: form.maxYearsExperience ? Number(form.maxYearsExperience) : undefined,
         matchScoreTarget: form.matchScoreTarget ? Number(form.matchScoreTarget) : undefined,
+        templateBody: form.templateBody,
       });
       queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['prompt-preview'] });
     } finally {
       setSaving(false);
     }
@@ -190,6 +193,19 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
       <p className="text-xs opacity-60">
         93% is a reasonable default for most ATS systems — higher targets push the agent to
         incorporate more exact JD phrasing, which can read as less natural.
+      </p>
+
+      <Field label="Resume Generation Process (editable)">
+        <textarea
+          className="border rounded px-2 py-1 text-sm w-full h-64 bg-transparent font-mono"
+          value={form.templateBody}
+          onChange={(e) => setForm({ ...form, templateBody: e.target.value })}
+        />
+      </Field>
+      <p className="text-xs opacity-60">
+        This is the fixed process the agent follows every generation (the 7-step ATS
+        workflow). Edit it directly if you want to change the process itself, not just the
+        facts above.
       </p>
 
       <button

@@ -1,35 +1,40 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-export interface WorkExperienceInput {
+interface DateRangeFields {
+  location?: string;
+  startMonth?: number;
+  startYear?: number;
+  endMonth?: number;
+  endYear?: number;
+  isPresent?: boolean;
+}
+
+export interface WorkExperienceInput extends DateRangeFields {
   company: string;
   title?: string;
-  yearIn?: number;
-  yearOut?: number;
   required?: boolean;
   sortOrder?: number;
 }
 
-export interface EducationInput {
+export interface EducationInput extends DateRangeFields {
   school: string;
   degree?: string;
-  year?: number;
+  field?: string;
   required?: boolean;
   sortOrder?: number;
 }
 
-export interface InternshipInput {
+export interface InternshipInput extends DateRangeFields {
   company: string;
-  year?: number;
   required?: boolean;
   sortOrder?: number;
 }
 
-export interface ProjectInput {
+export interface ProjectInput extends DateRangeFields {
   name: string;
   repoUrl?: string;
   liveUrl?: string;
-  year?: number;
   required?: boolean;
   sortOrder?: number;
 }

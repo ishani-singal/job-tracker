@@ -80,6 +80,23 @@ def build_profile_context(profile: dict, entries: dict | None = None) -> str:
     )
 
 
+_MONTH_NAMES = [
+    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
+
+
+def _format_date_range(e: dict) -> str:
+    def fmt(month: int | None, year: int | None) -> str:
+        if not year:
+            return "?"
+        return f"{_MONTH_NAMES[month]} {year}" if month else str(year)
+
+    start = fmt(e.get("startMonth"), e.get("startYear"))
+    end = "Present" if e.get("isPresent") else fmt(e.get("endMonth"), e.get("endYear"))
+    return f"{start}–{end}"
+
+
 def _render_entries(entries: dict) -> str:
     """Renders work experience/education/internships/projects, split into
     required (must appear) vs optional (include only if relevant to the JD).
@@ -106,19 +123,24 @@ def _render_entries(entries: dict) -> str:
         entries.get("workExperience", []),
         lambda e: f"{e['company']}"
         + (f" — {e['title']}" if e.get("title") else "")
-        + f" ({e.get('yearIn', '?')}–{e.get('yearOut') or 'present'})",
+        + (f" ({e['location']})" if e.get("location") else "")
+        + f" [{_format_date_range(e)}]",
     )
     education = render_group(
         "Education",
         entries.get("education", []),
         lambda e: f"{e['school']}"
         + (f" — {e['degree']}" if e.get("degree") else "")
-        + (f" ({e['year']})" if e.get("year") else ""),
+        + (f" in {e['field']}" if e.get("field") else "")
+        + (f" ({e['location']})" if e.get("location") else "")
+        + f" [{_format_date_range(e)}]",
     )
     internships = render_group(
         "Internships",
         entries.get("internships", []),
-        lambda e: f"{e['company']}" + (f" ({e['year']})" if e.get("year") else ""),
+        lambda e: f"{e['company']}"
+        + (f" ({e['location']})" if e.get("location") else "")
+        + f" [{_format_date_range(e)}]",
     )
     projects = render_group(
         "Projects",
@@ -126,7 +148,8 @@ def _render_entries(entries: dict) -> str:
         lambda e: f"{e['name']}"
         + (f" — {e['repoUrl']}" if e.get("repoUrl") else "")
         + (f" — live: {e['liveUrl']}" if e.get("liveUrl") else "")
-        + (f" ({e['year']})" if e.get("year") else ""),
+        + (f" ({e['location']})" if e.get("location") else "")
+        + f" [{_format_date_range(e)}]",
     )
 
     return f"## Candidate background\n\n{work}{education}{internships}{projects}"
