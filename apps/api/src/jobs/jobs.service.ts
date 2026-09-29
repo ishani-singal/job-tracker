@@ -67,7 +67,10 @@ export class JobsService {
       throw new Error('AZURE_LLM_ENDPOINT / AZURE_LLM_API_KEY not configured');
     }
 
-    const url = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+    // AZURE_LLM_ENDPOINT may already include a trailing /openai (as Soma's own env
+    // does) — strip it so we don't end up with .../openai/openai/deployments/...
+    const baseEndpoint = endpoint.replace(/\/openai\/?$/, '');
+    const url = `${baseEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
