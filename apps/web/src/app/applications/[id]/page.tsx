@@ -5,6 +5,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Application } from '@job-tracker/shared-types';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
+
 export default function ApplicationDetailPage({
   params,
 }: {
@@ -88,17 +90,27 @@ export default function ApplicationDetailPage({
       <div>
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-sm font-medium">Generated Resume</h2>
-          <button
-            className="px-2 py-1 text-xs rounded border"
-            onClick={handleGenerateResume}
-            disabled={generating}
-          >
-            {generating
-              ? 'Generating...'
-              : application.resumeContent
-                ? 'Regenerate Resume'
-                : 'Generate Resume'}
-          </button>
+          <div className="flex gap-2">
+            {application.resumeContent && (
+              <a
+                href={`${API_BASE}/applications/${id}/resume.pdf`}
+                className="px-2 py-1 text-xs rounded border"
+              >
+                Download PDF
+              </a>
+            )}
+            <button
+              className="px-2 py-1 text-xs rounded border"
+              onClick={handleGenerateResume}
+              disabled={generating}
+            >
+              {generating
+                ? 'Generating...'
+                : application.resumeContent
+                  ? 'Regenerate Resume'
+                  : 'Generate Resume'}
+            </button>
+          </div>
         </div>
         {application.resumeContent ? (
           <pre className="text-sm whitespace-pre-wrap border rounded p-3">

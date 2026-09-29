@@ -3,16 +3,20 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
+  Res,
 } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import {
   ApplicationsService,
   CreateApplicationInput,
   UpdateApplicationInput,
 } from './applications.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { renderResumePdf } from './resume-pdf';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
@@ -62,5 +66,22 @@ export class ApplicationsController {
     }
     const { resume } = (await response.json()) as { resume: string };
     return this.applications.saveGeneratedResume(id, resume);
+  }
+
+  @Get(':id/resume.pdf')
+  async downloadResumePdf(@Param('id') id: string, @Res() res: FastifyReply) {
+    const application = await this.applications.get(id);
+    if (!application.resumeContent) {
+      throw new NotFoundException('No resume has been generated for this application yet');
+    }
+
+    const title = [application.company, application.role].filter(Boolean).join(' — ');
+    const pdf = await renderResumePdf(title || 'Resume', application.resumeContent);
+
+    const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
+    res
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="${safeName}-resume.pdf"`)
+      .send(pdf);
   }
 }
