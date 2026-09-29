@@ -33,7 +33,13 @@ export function EntriesSection() {
 function WorkExperienceList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['work-experience'], queryFn: api.listWorkExperience });
-  const [form, setForm] = useState({ company: '', title: '', yearIn: '', yearOut: '' });
+  const [form, setForm] = useState({
+    company: '',
+    title: '',
+    yearIn: '',
+    yearOut: '',
+    required: true,
+  });
 
   const create = useMutation({
     mutationFn: () =>
@@ -42,10 +48,10 @@ function WorkExperienceList() {
         title: form.title || undefined,
         yearIn: form.yearIn ? Number(form.yearIn) : undefined,
         yearOut: form.yearOut ? Number(form.yearOut) : undefined,
-        required: true,
+        required: form.required,
       }),
     onSuccess: () => {
-      setForm({ company: '', title: '', yearIn: '', yearOut: '' });
+      setForm({ company: '', title: '', yearIn: '', yearOut: '', required: true });
       queryClient.invalidateQueries({ queryKey: ['work-experience'] });
     },
   });
@@ -98,6 +104,14 @@ function WorkExperienceList() {
           value={form.yearOut}
           onChange={(e) => setForm({ ...form, yearOut: e.target.value })}
         />
+        <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.required}
+            onChange={(e) => setForm({ ...form, required: e.target.checked })}
+          />
+          Required
+        </label>
         <button
           className="col-span-2 px-2 py-1 text-sm rounded border"
           onClick={() => create.mutate()}
@@ -113,7 +127,7 @@ function WorkExperienceList() {
 function EducationList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['education'], queryFn: api.listEducation });
-  const [form, setForm] = useState({ school: '', degree: '', year: '' });
+  const [form, setForm] = useState({ school: '', degree: '', year: '', required: true });
 
   const create = useMutation({
     mutationFn: () =>
@@ -121,10 +135,10 @@ function EducationList() {
         school: form.school,
         degree: form.degree || undefined,
         year: form.year ? Number(form.year) : undefined,
-        required: true,
+        required: form.required,
       }),
     onSuccess: () => {
-      setForm({ school: '', degree: '', year: '' });
+      setForm({ school: '', degree: '', year: '', required: true });
       queryClient.invalidateQueries({ queryKey: ['education'] });
     },
   });
@@ -169,6 +183,14 @@ function EducationList() {
           value={form.year}
           onChange={(e) => setForm({ ...form, year: e.target.value })}
         />
+        <label className="flex items-center gap-1 text-xs col-span-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.required}
+            onChange={(e) => setForm({ ...form, required: e.target.checked })}
+          />
+          Required
+        </label>
         <button
           className="col-span-4 px-2 py-1 text-sm rounded border"
           onClick={() => create.mutate()}
@@ -184,17 +206,17 @@ function EducationList() {
 function InternshipList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['internships'], queryFn: api.listInternships });
-  const [form, setForm] = useState({ company: '', year: '' });
+  const [form, setForm] = useState({ company: '', year: '', required: false });
 
   const create = useMutation({
     mutationFn: () =>
       api.createInternship({
         company: form.company,
         year: form.year ? Number(form.year) : undefined,
-        required: false,
+        required: form.required,
       }),
     onSuccess: () => {
-      setForm({ company: '', year: '' });
+      setForm({ company: '', year: '', required: false });
       queryClient.invalidateQueries({ queryKey: ['internships'] });
     },
   });
@@ -235,6 +257,14 @@ function InternshipList() {
           value={form.year}
           onChange={(e) => setForm({ ...form, year: e.target.value })}
         />
+        <label className="flex items-center gap-1 text-xs col-span-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.required}
+            onChange={(e) => setForm({ ...form, required: e.target.checked })}
+          />
+          Required
+        </label>
         <button
           className="col-span-4 px-2 py-1 text-sm rounded border"
           onClick={() => create.mutate()}
@@ -250,7 +280,13 @@ function InternshipList() {
 function ProjectList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
-  const [form, setForm] = useState({ name: '', repoUrl: '', liveUrl: '', year: '' });
+  const [form, setForm] = useState({
+    name: '',
+    repoUrl: '',
+    liveUrl: '',
+    year: '',
+    required: false,
+  });
 
   const create = useMutation({
     mutationFn: () =>
@@ -259,10 +295,10 @@ function ProjectList() {
         repoUrl: form.repoUrl || undefined,
         liveUrl: form.liveUrl || undefined,
         year: form.year ? Number(form.year) : undefined,
-        required: false,
+        required: form.required,
       }),
     onSuccess: () => {
-      setForm({ name: '', repoUrl: '', liveUrl: '', year: '' });
+      setForm({ name: '', repoUrl: '', liveUrl: '', year: '', required: false });
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });
@@ -315,6 +351,14 @@ function ProjectList() {
           value={form.year}
           onChange={(e) => setForm({ ...form, year: e.target.value })}
         />
+        <label className="flex items-center gap-1 text-xs col-span-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.required}
+            onChange={(e) => setForm({ ...form, required: e.target.checked })}
+          />
+          Required
+        </label>
         <button
           className="col-span-4 px-2 py-1 text-sm rounded border"
           onClick={() => create.mutate()}
