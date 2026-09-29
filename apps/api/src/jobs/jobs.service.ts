@@ -62,8 +62,14 @@ export class JobsService implements OnModuleDestroy {
         await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
         const html = await page.content();
         const $ = cheerio.load(html);
+        // Some SPAs (e.g. Workday) render the visible JD into a client-side
+        // root that isn't captured by page.content()'s serialized body, but
+        // still populate a full-text og:description meta tag server-side for
+        // link previews/SEO — fall back to it when the body has no real text.
+        const ogDescription = $('meta[property="og:description"]').attr('content')?.trim();
         $('script, style, nav, footer, header, noscript').remove();
-        pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 60000);
+        const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
+        pageText = (bodyText.length > 200 ? bodyText : ogDescription || bodyText).slice(0, 60000);
       } finally {
         await page.close();
       }
