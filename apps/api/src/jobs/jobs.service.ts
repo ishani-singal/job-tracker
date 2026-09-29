@@ -58,15 +58,16 @@ export class JobsService {
   }
 
   private async extractWithLlm(pageText: string): Promise<Omit<ParsedJob, 'fetchFailed'>> {
-    const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    const apiKey = process.env.AZURE_OPENAI_API_KEY;
-    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT ?? 'gpt-4.1';
+    const endpoint = process.env.AZURE_LLM_ENDPOINT;
+    const apiKey = process.env.AZURE_LLM_API_KEY;
+    const deployment = process.env.AZURE_LLM_DEPLOYMENT_NAME ?? 'gpt-4.1';
+    const apiVersion = process.env.AZURE_LLM_API_VERSION ?? '2024-12-01-preview';
 
     if (!endpoint || !apiKey) {
-      throw new Error('AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY not configured');
+      throw new Error('AZURE_LLM_ENDPOINT / AZURE_LLM_API_KEY not configured');
     }
 
-    const url = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-08-01-preview`;
+    const url = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': apiKey },

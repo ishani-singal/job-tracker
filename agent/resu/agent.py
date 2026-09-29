@@ -18,10 +18,11 @@ from .deps import ResuDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS, build_profile_context
 
 _model = OpenAIModel(
-    os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1"),
+    os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
     provider=AzureProvider(
-        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-        api_key=os.environ["AZURE_OPENAI_API_KEY"],
+        azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
+        api_key=os.environ["AZURE_LLM_API_KEY"],
+        api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
     ),
 )
 
