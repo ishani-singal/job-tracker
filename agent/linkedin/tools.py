@@ -37,6 +37,9 @@ async def fetch_structured_entries(ctx: RunContext[LinkedinDeps]) -> dict:
     missing id means an incomplete profile, not an intentional omission.
     Treat internships as part of work experience: merge them into the same
     chronological history as regular jobs rather than a separate section.
+    Every project entry gets exactly 3 bullets: one explaining the project/
+    problem/tech stack, then two resume-style bullets each with a real
+    quantitative impact value.
     """
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{ctx.deps.api_base_url}/entries")
