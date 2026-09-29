@@ -7,7 +7,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import * as cheerio from 'cheerio';
-import { Browser, chromium } from 'playwright';
+import { Browser, chromium, Page } from 'playwright';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApplicationsService } from '../applications/applications.service';
 
@@ -97,6 +97,22 @@ const CAREER_URL_GUESSES = (company: string): string[] => {
  * broken "Next" link (e.g. one that points back to itself) can't loop
  * forever. Most boards' open-role counts fit well within this. */
 const MAX_LISTING_PAGES = 10;
+
+/** Some career boards (e.g. many custom/Workday-embedded sites) don't paginate
+ * via a "Next page" link at all — they use a "Show more"/"Load more" button or
+ * true infinite scroll that appends more roles into the same page. Those never
+ * produce a nextPageUrl for extractRolesWithLlm to follow, so paginateRoles
+ * alone would silently stop after the first batch. This caps how many
+ * click-or-scroll rounds we try to expand such a listing before reading its
+ * text, mirroring MAX_LISTING_PAGES' role as a safety cap, not a target. */
+const MAX_LOAD_MORE_ROUNDS = 15;
+
+/** Case-insensitive substrings matched against a clickable element's visible
+ * text to find a "load more roles" control — deliberately broad since boards
+ * word this differently ("Show more", "Load more jobs", "View more positions").
+ * Not matched: "view all"/"see all" — those usually navigate to a different
+ * page rather than expanding this one in place. */
+const LOAD_MORE_TEXT_PATTERN = /\b(show|load|see|view)\s+more\b/i;
 
 function buildRoleListExtractionPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
@@ -359,7 +375,7 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     for (const url of candidates) {
       try {
-        const pageText = await this.renderPageText(url);
+        const pageText = await this.renderPageText(url, { expandShowMoreListing: true });
         if (!pageText || pageText.length < 200) continue;
 
         const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url);
@@ -405,7 +421,7 @@ export class CompanyRolesService implements OnModuleDestroy {
       if (currentNextUrl === previousUrl) break;
 
       try {
-        const pageText = await this.renderPageText(currentNextUrl);
+        const pageText = await this.renderPageText(currentNextUrl, { expandShowMoreListing: true });
         if (!pageText || pageText.length < 200) break;
 
         const { roles: pageRoles, nextPageUrl: followingUrl } = await this.extractRolesWithLlm(
@@ -429,13 +445,19 @@ export class CompanyRolesService implements OnModuleDestroy {
     return allRoles;
   }
 
-  private async renderPageText(url: string, opts?: { requireSameOrigin?: boolean }): Promise<string> {
+  private async renderPageText(
+    url: string,
+    opts?: { requireSameOrigin?: boolean; expandShowMoreListing?: boolean },
+  ): Promise<string> {
     const browser = await this.getBrowser();
     const page = await browser.newPage({
       userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)',
     });
     try {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+      if (opts?.expandShowMoreListing) {
+        await this.expandShowMoreListing(page);
+      }
       if (opts?.requireSameOrigin) {
         // Some career boards (e.g. certain Greenhouse embeds) silently
         // redirect every individual job URL to the company's own generic
@@ -467,6 +489,49 @@ export class CompanyRolesService implements OnModuleDestroy {
       return (bodyText.length > 200 ? bodyText : ogDescription || bodyText).slice(0, 60000);
     } finally {
       await page.close();
+    }
+  }
+
+  /** Expands a "Show more"/"Load more"/infinite-scroll listing in place before
+   * its text is read — some career boards append roles into the same DOM
+   * instead of exposing real pagination, so extractRolesWithLlm would only
+   * ever see the first batch otherwise (there's no nextPageUrl for
+   * paginateRoles to follow). Each round: scroll to the bottom (triggers
+   * scroll-based lazy loading), then click a "show/load/view more" button if
+   * one is now visible, then wait briefly for new content. Stops once a round
+   * adds nothing new, or after MAX_LOAD_MORE_ROUNDS regardless — a listing
+   * that keeps growing every round (e.g. a broken loader re-appending the same
+   * roles) must not be followed forever. */
+  private async expandShowMoreListing(page: Page): Promise<void> {
+    let previousHeight = 0;
+    for (let round = 0; round < MAX_LOAD_MORE_ROUNDS; round++) {
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(500);
+
+      const clicked = await page.evaluate((pattern) => {
+        const regex = new RegExp(pattern, 'i');
+        const candidates = Array.from(
+          document.querySelectorAll<HTMLElement>('button, a, [role="button"]'),
+        );
+        const target = candidates.find(
+          (el) => el.offsetParent !== null && regex.test(el.textContent ?? ''),
+        );
+        if (!target) return false;
+        target.click();
+        return true;
+      }, LOAD_MORE_TEXT_PATTERN.source);
+
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 5000 });
+      } catch {
+        // Some infinite-scroll boards never go fully idle (polling/analytics)
+        // — a fixed settle delay below still lets the new roles render.
+      }
+      await page.waitForTimeout(500);
+
+      const newHeight = await page.evaluate(() => document.body.scrollHeight);
+      if (!clicked && newHeight <= previousHeight) break;
+      previousHeight = newHeight;
     }
   }
 
@@ -505,14 +570,25 @@ export class CompanyRolesService implements OnModuleDestroy {
     };
   }
 
-  listRoles(params: { unselectedOnly?: boolean; selectedOnly?: boolean }) {
-    return this.prisma.discoveredRole.findMany({
+  async listRoles(params: { unselectedOnly?: boolean; selectedOnly?: boolean }) {
+    const roles = await this.prisma.discoveredRole.findMany({
       where: {
         ...(params.unselectedOnly && { applicationId: null }),
         ...(params.selectedOnly && { applicationId: { not: null } }),
       },
       include: { company: true },
       orderBy: [{ postedDate: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    // Highest ATS match first so the best-fit open roles surface at the top
+    // instead of being ordered purely by posting recency; unscored roles
+    // (still being scored, or scoring failed) sort after every scored role
+    // rather than before, since a null score isn't "better" than a low one.
+    return [...roles].sort((a, b) => {
+      if (a.atsScore === null && b.atsScore === null) return 0;
+      if (a.atsScore === null) return 1;
+      if (b.atsScore === null) return -1;
+      return b.atsScore - a.atsScore;
     });
   }
 

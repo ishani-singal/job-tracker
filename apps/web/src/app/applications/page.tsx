@@ -30,6 +30,10 @@ export default function ApplicationsPage() {
   const { data: selectedRoles } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
     queryFn: () => api.listDiscoveredRoles('selected'),
+    refetchInterval: (query) => {
+      const anyUnscored = query.state.data?.some((r) => r.atsScore === null);
+      return anyUnscored ? 4000 : false;
+    },
   });
 
   const scoreByApplicationId = new Map(
@@ -37,9 +41,22 @@ export default function ApplicationsPage() {
       .filter((r) => r.applicationId)
       .map((r) => [r.applicationId as string, r.atsScore]),
   );
+  const roleIdByApplicationId = new Map(
+    (selectedRoles ?? [])
+      .filter((r) => r.applicationId)
+      .map((r) => [r.applicationId as string, r.id]),
+  );
 
   const selectRole = useMutation({
     mutationFn: (id: string) => api.selectRole(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['discovered-roles'] });
+      queryClient.invalidateQueries({ queryKey: ['applications'] });
+    },
+  });
+
+  const unselectRole = useMutation({
+    mutationFn: (id: string) => api.unselectRole(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['discovered-roles'] });
       queryClient.invalidateQueries({ queryKey: ['applications'] });
@@ -84,16 +101,23 @@ export default function ApplicationsPage() {
             Selected ({applications?.length ?? 0})
           </h2>
           <div className="flex flex-col gap-2">
-            {applications?.map((app) => (
-              <div key={app.id} className="flex flex-col gap-1">
-                <ApplicationRow application={app} />
-                {scoreByApplicationId.has(app.id) && (
-                  <div className="px-4">
-                    <AtsScoreBadge score={scoreByApplicationId.get(app.id) ?? null} />
-                  </div>
-                )}
-              </div>
-            ))}
+            {applications?.map((app) => {
+              const roleId = roleIdByApplicationId.get(app.id);
+              return (
+                <div key={app.id} className="flex flex-col gap-1">
+                  <ApplicationRow
+                    application={app}
+                    onUnselect={roleId ? () => unselectRole.mutate(roleId) : undefined}
+                    unselecting={unselectRole.isPending}
+                  />
+                  {scoreByApplicationId.has(app.id) && (
+                    <div className="px-4">
+                      <AtsScoreBadge score={scoreByApplicationId.get(app.id) ?? null} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {applications?.length === 0 && (
               <p className="text-sm opacity-60">
                 No applications yet — add one above or select a role on the left.

@@ -18,7 +18,15 @@ function rowBackgroundClass(application: Application): string {
   return '';
 }
 
-export function ApplicationRow({ application }: { application: Application }) {
+export function ApplicationRow({
+  application,
+  onUnselect,
+  unselecting,
+}: {
+  application: Application;
+  onUnselect?: () => void;
+  unselecting?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
   const { openPanel } = useSessionsPanel();
@@ -90,6 +98,15 @@ export function ApplicationRow({ application }: { application: Application }) {
         <button className="px-2 py-1 text-xs rounded border" onClick={() => setEditOpen(true)}>
           Edit
         </button>
+        {onUnselect && (
+          <button
+            className="px-2 py-1 text-xs rounded border"
+            onClick={onUnselect}
+            disabled={unselecting}
+          >
+            {unselecting ? 'Unselecting...' : 'Unselect'}
+          </button>
+        )}
         <button
           className="px-2 py-1 text-xs rounded border text-red-600 dark:text-red-400"
           onClick={handleDelete}
