@@ -17,6 +17,11 @@ model Application {
   company     String
   role        String?
   jobUrl      String?
+  // The posting's own job/req ID (e.g. Workday's "JR355248"), extracted from
+  // the URL at parse time — used for dedup since the same posting is often
+  // reached via different tracking-parameter-laden URLs (utm_*, source=,
+  // etc.), so jobUrl alone isn't a reliable duplicate key.
+  jobId       String?
   jdText      String?
   postedDate  DateTime?
   applyByDate DateTime?
@@ -36,6 +41,7 @@ model Application {
 
   @@index([company])
   @@index([status])
+  @@index([jobId])
 }
 
 model StoryFile {

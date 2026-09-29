@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApplicationStatus, Prisma } from '@prisma/client';
 
@@ -6,11 +6,16 @@ export interface CreateApplicationInput {
   company: string;
   role?: string;
   jobUrl?: string;
+  jobId?: string;
   jdText?: string;
   postedDate?: string;
   applyByDate?: string;
   salaryRange?: string;
   experienceLevel?: string;
+  /** Set true to create anyway even if an Application with the same jobId
+   * already exists — the caller (e.g. the "Add Application" dialog or the
+   * browser extension) shows the duplicate and asks the user to confirm. */
+  allowDuplicate?: boolean;
 }
 
 export interface UpdateApplicationInput extends Partial<CreateApplicationInput> {
@@ -34,11 +39,29 @@ export class ApplicationsService {
     return app;
   }
 
-  create(input: CreateApplicationInput) {
+  async findDuplicateByJobId(jobId: string) {
+    return this.prisma.application.findFirst({
+      where: { jobId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async create(input: CreateApplicationInput) {
+    if (input.jobId && !input.allowDuplicate) {
+      const existing = await this.findDuplicateByJobId(input.jobId);
+      if (existing) {
+        throw new ConflictException({
+          message: `An application for this posting (job ID ${input.jobId}) already exists.`,
+          duplicateOf: existing,
+        });
+      }
+    }
+
     const data: Prisma.ApplicationCreateInput = {
       company: input.company,
       role: input.role,
       jobUrl: input.jobUrl,
+      jobId: input.jobId,
       jdText: input.jdText,
       postedDate: input.postedDate ? new Date(input.postedDate) : undefined,
       applyByDate: input.applyByDate ? new Date(input.applyByDate) : undefined,
@@ -54,6 +77,7 @@ export class ApplicationsService {
       ...(input.company !== undefined && { company: input.company }),
       ...(input.role !== undefined && { role: input.role }),
       ...(input.jobUrl !== undefined && { jobUrl: input.jobUrl }),
+      ...(input.jobId !== undefined && { jobId: input.jobId }),
       ...(input.jdText !== undefined && { jdText: input.jdText }),
       ...(input.salaryRange !== undefined && { salaryRange: input.salaryRange }),
       ...(input.experienceLevel !== undefined && { experienceLevel: input.experienceLevel }),

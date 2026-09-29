@@ -6,6 +6,7 @@ export interface Application {
   company: string;
   role: string | null;
   jobUrl: string | null;
+  jobId: string | null;
   jdText: string | null;
   postedDate: string | null;
   applyByDate: string | null;
@@ -110,6 +111,7 @@ export interface ParsedJob {
   applyByDate?: string;
   salaryRange?: string;
   experienceLevel?: string;
+  jobId?: string;
   fetchFailed: boolean;
 }
 

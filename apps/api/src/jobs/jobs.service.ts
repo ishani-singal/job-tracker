@@ -10,7 +10,34 @@ export interface ParsedJob {
   applyByDate?: string;
   salaryRange?: string;
   experienceLevel?: string;
+  /** The posting's own job/req ID (e.g. Workday's "JR355248", Amazon's
+   * "10562837") — used for dedup since the same posting is often reached via
+   * different tracking-parameter-laden URLs (utm_*, source=, etc.). */
+  jobId?: string;
   fetchFailed: boolean;
+}
+
+/**
+ * Extracts a platform-native job/req ID straight from the URL structure —
+ * deliberately regex-based rather than LLM-inferred, since these IDs are
+ * reliably embedded in the URL path/query on every major ATS and a regex
+ * match is exact where an LLM guess could hallucinate or normalize it
+ * differently across runs, breaking dedup.
+ */
+function extractJobIdFromUrl(url: string): string | undefined {
+  const patterns: RegExp[] = [
+    /_(JR\d+)(?:[/?]|$)/i, // Workday: .../Some-Title_JR355248
+    /\/jobs\/(\d+)/i, // Amazon, Greenhouse, Lever, SmartRecruiters: /jobs/10562837
+    /\/view\/(\d+)/i, // LinkedIn: /jobs/view/1234567890
+    /[?&]gh_jid=(\d+)/i, // Greenhouse embedded boards
+    /[?&]jobId=([\w-]+)/i, // generic query param some ATSes use
+    /-(R\d{4,})(?:[/?]|$)/i, // Workday alt format: ...-R12345
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
 }
 
 const EXTRACTION_SYSTEM_PROMPT = `You extract structured job-posting fields from raw page
@@ -80,12 +107,14 @@ export class JobsService implements OnModuleDestroy {
 
     if (!pageText) return { fetchFailed: true };
 
+    const jobId = extractJobIdFromUrl(url);
+
     try {
       const extracted = await this.extractWithLlm(pageText);
-      return { ...extracted, fetchFailed: false };
+      return { ...extracted, jobId, fetchFailed: false };
     } catch (err) {
       this.logger.warn(`LLM extraction failed for ${url}: ${err}`);
-      return { fetchFailed: true };
+      return { jobId, fetchFailed: true };
     }
   }
 

@@ -21,6 +21,7 @@ const fields = {
 
 let currentUrl = '';
 let parsedExtra = {};
+let allowDuplicate = false;
 
 function showState(name) {
   for (const el of [loadingEl, errorEl, formEl, successEl]) {
@@ -65,9 +66,11 @@ async function parseCurrentTab() {
     fields.salaryRange.value = parsed.salaryRange || '';
     fields.experienceLevel.value = parsed.experienceLevel || '';
     parsedExtra = {
+      jobId: parsed.jobId,
       postedDate: parsed.postedDate,
       applyByDate: parsed.applyByDate,
     };
+    allowDuplicate = false;
 
     parseWarningEl.classList.toggle('hidden', !parsed.fetchFailed);
     showState('form');
@@ -87,11 +90,13 @@ async function saveApplication(event) {
     company: fields.company.value.trim(),
     role: fields.role.value.trim() || undefined,
     jobUrl: currentUrl,
+    jobId: parsedExtra.jobId || undefined,
     jdText: fields.jdText.value.trim() || undefined,
     salaryRange: fields.salaryRange.value.trim() || undefined,
     experienceLevel: fields.experienceLevel.value.trim() || undefined,
     postedDate: parsedExtra.postedDate || undefined,
     applyByDate: parsedExtra.applyByDate || undefined,
+    allowDuplicate,
   };
 
   try {
@@ -100,6 +105,24 @@ async function saveApplication(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (res.status === 409) {
+      const data = await res.json().catch(() => ({}));
+      const dup = data.duplicateOf;
+      const proceed = confirm(
+        dup
+          ? `You already have an application for this posting: ${dup.company}${dup.role ? ` — ${dup.role}` : ''}. Save anyway?`
+          : 'This looks like a duplicate. Save anyway?',
+      );
+      if (proceed) {
+        allowDuplicate = true;
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Application';
+        return saveApplication(event);
+      }
+      errorTextEl.textContent = 'Not saved — duplicate skipped.';
+      showState('error');
+      return;
+    }
     if (!res.ok) throw new Error(`Save failed: ${res.status}`);
     showState('success');
     setTimeout(() => window.close(), 900);

@@ -20,6 +20,16 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 
+export class ApiError extends Error {
+  status: number;
+  body: unknown;
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -28,14 +38,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
-  if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} failed: ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => undefined);
+    throw new ApiError(
+      (body as { message?: string })?.message ?? `${init?.method ?? 'GET'} ${path} failed: ${res.status}`,
+      res.status,
+      body,
+    );
+  }
   return res.json() as Promise<T>;
 }
 
 export const api = {
   listApplications: () => request<Application[]>('/applications'),
   getApplication: (id: string) => request<Application>(`/applications/${id}`),
-  createApplication: (data: Partial<Application>) =>
+  createApplication: (data: Partial<Application> & { allowDuplicate?: boolean }) =>
     request<Application>('/applications', { method: 'POST', body: JSON.stringify(data) }),
   updateApplication: (id: string, data: Partial<Application>) =>
     request<Application>(`/applications/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

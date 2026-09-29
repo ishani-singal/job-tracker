@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import type { Application, ParsedJob } from '@job-tracker/shared-types';
 
 interface FormState {
   company: string;
   role: string;
   jobUrl: string;
+  jobId: string;
   jdText: string;
   postedDate: string;
   applyByDate: string;
@@ -20,6 +21,7 @@ const EMPTY_FORM: FormState = {
   company: '',
   role: '',
   jobUrl: '',
+  jobId: '',
   jdText: '',
   postedDate: '',
   applyByDate: '',
@@ -32,6 +34,7 @@ function toFormState(app: Application): FormState {
     company: app.company,
     role: app.role ?? '',
     jobUrl: app.jobUrl ?? '',
+    jobId: app.jobId ?? '',
     jdText: app.jdText ?? '',
     postedDate: app.postedDate ? app.postedDate.slice(0, 10) : '',
     applyByDate: app.applyByDate ? app.applyByDate.slice(0, 10) : '',
@@ -59,6 +62,7 @@ export function AddApplicationDialog({ onSaved, editApplication, open, onOpenCha
   const [parseFailed, setParseFailed] = useState(false);
   const [form, setForm] = useState<FormState>(editApplication ? toFormState(editApplication) : EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [duplicateOf, setDuplicateOf] = useState<Application | null>(null);
 
   useEffect(() => {
     if (editApplication) {
@@ -71,12 +75,14 @@ export function AddApplicationDialog({ onSaved, editApplication, open, onOpenCha
     if (!url) return;
     setParsing(true);
     setParseFailed(false);
+    setDuplicateOf(null);
     try {
       const parsed: ParsedJob = await api.parseJobUrl(url);
       setParseFailed(parsed.fetchFailed);
       setForm((prev) => ({
         ...prev,
         jobUrl: url,
+        jobId: parsed.jobId ?? prev.jobId,
         company: parsed.company ?? prev.company,
         role: parsed.role ?? prev.role,
         jdText: parsed.jdText ?? prev.jdText,
@@ -93,19 +99,26 @@ export function AddApplicationDialog({ onSaved, editApplication, open, onOpenCha
     }
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(allowDuplicate = false) {
     if (!form.company) return;
     setSubmitting(true);
     try {
       if (isEditMode) {
         await api.updateApplication(editApplication.id, form);
       } else {
-        await api.createApplication(form);
+        await api.createApplication({ ...form, allowDuplicate });
         setForm(EMPTY_FORM);
         setUrl('');
       }
+      setDuplicateOf(null);
       setDialogOpen(false);
       onSaved();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setDuplicateOf((err.body as { duplicateOf?: Application })?.duplicateOf ?? null);
+        return;
+      }
+      throw err;
     } finally {
       setSubmitting(false);
     }
@@ -147,6 +160,15 @@ export function AddApplicationDialog({ onSaved, editApplication, open, onOpenCha
           {parseFailed && (
             <p className="text-xs text-amber-600">
               Couldn&apos;t auto-parse this posting — fill in the fields manually below.
+            </p>
+          )}
+
+          {duplicateOf && (
+            <p className="text-xs text-amber-600 border border-amber-200 dark:border-amber-900 rounded px-3 py-2">
+              You already have an application for this posting: {duplicateOf.company}
+              {duplicateOf.role ? ` — ${duplicateOf.role}` : ''} (added{' '}
+              {new Date(duplicateOf.createdAt).toLocaleDateString()}). Save anyway to create a
+              second entry, or cancel.
             </p>
           )}
 
@@ -210,13 +232,23 @@ export function AddApplicationDialog({ onSaved, editApplication, open, onOpenCha
             <Dialog.Close asChild>
               <button className="px-3 py-1.5 text-sm rounded border">Cancel</button>
             </Dialog.Close>
-            <button
-              className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black"
-              onClick={handleSubmit}
-              disabled={submitting || !form.company}
-            >
-              {submitting ? 'Saving...' : isEditMode ? 'Save Changes' : 'Save Application'}
-            </button>
+            {duplicateOf ? (
+              <button
+                className="px-3 py-1.5 text-sm rounded bg-amber-600 text-white"
+                onClick={() => handleSubmit(true)}
+                disabled={submitting}
+              >
+                {submitting ? 'Saving...' : 'Save Anyway'}
+              </button>
+            ) : (
+              <button
+                className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black"
+                onClick={() => handleSubmit(false)}
+                disabled={submitting || !form.company}
+              >
+                {submitting ? 'Saving...' : isEditMode ? 'Save Changes' : 'Save Application'}
+              </button>
+            )}
           </div>
         </Dialog.Content>
       </Dialog.Portal>
