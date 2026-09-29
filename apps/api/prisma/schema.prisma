@@ -139,3 +139,51 @@ model ConnectedRepo {
   fullName  String   @unique // "owner/repo"
   addedAt   DateTime @default(now())
 }
+
+enum GenerationSessionStatus {
+  RUNNING
+  WAITING_FOR_INPUT
+  DONE
+  ACCEPTED
+  ERROR
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  TOOL
+}
+
+// One chat-style generation run for a given application. Tracks live status for
+// the right-pane UI (orange = running/waiting, green = done, none = accepted)
+// and holds the full conversation so a multi-turn run (agent asks a clarifying
+// question, user answers, agent continues) can be resumed via PydanticAI's
+// message_history.
+model GenerationSession {
+  id            String                  @id @default(cuid())
+  applicationId String
+  status        GenerationSessionStatus @default(RUNNING)
+  errorMessage  String?
+  // Opaque PydanticAI message-history JSON blob (from AgentRunResult.all_messages(),
+  // round-tripped via TypeAdapter) — needed to resume the same reasoning thread
+  // on the next turn. Not rendered; SessionMessage below is the UI-facing log.
+  messageHistoryJson String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  messages SessionMessage[]
+
+  @@index([applicationId])
+  @@index([createdAt])
+}
+
+model SessionMessage {
+  id        String            @id @default(cuid())
+  sessionId String
+  session   GenerationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      MessageRole
+  content   String
+  createdAt DateTime          @default(now())
+
+  @@index([sessionId])
+}

@@ -103,3 +103,30 @@ export interface ParsedJob {
   experienceLevel?: string;
   fetchFailed: boolean;
 }
+
+export type GenerationSessionStatus =
+  | 'RUNNING'
+  | 'WAITING_FOR_INPUT'
+  | 'DONE'
+  | 'ACCEPTED'
+  | 'ERROR';
+
+export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
+
+export interface SessionMessage {
+  id: string;
+  sessionId: string;
+  role: MessageRole;
+  content: string;
+  createdAt: string;
+}
+
+export interface GenerationSession {
+  id: string;
+  applicationId: string;
+  status: GenerationSessionStatus;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: SessionMessage[];
+}

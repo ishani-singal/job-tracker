@@ -7,6 +7,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { GithubModule } from './github/github.module';
 import { EntriesModule } from './entries/entries.module';
+import { SessionsModule } from './sessions/sessions.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { EntriesModule } from './entries/entries.module';
     AnalyticsModule,
     GithubModule,
     EntriesModule,
+    SessionsModule,
   ],
 })
 export class AppModule {}

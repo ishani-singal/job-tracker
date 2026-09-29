@@ -4,6 +4,7 @@ import type {
   Application,
   AppSettings,
   EducationEntry,
+  GenerationSession,
   InternshipEntry,
   ParsedJob,
   ProjectEntry,
@@ -34,8 +35,6 @@ export const api = {
     request<Application>(`/applications/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteApplication: (id: string) =>
     request<void>(`/applications/${id}`, { method: 'DELETE' }),
-  generateResume: (id: string) =>
-    request<Application>(`/applications/${id}/generate-resume`, { method: 'POST' }),
 
   parseJobUrl: (url: string) =>
     request<ParsedJob>('/jobs/parse', { method: 'POST', body: JSON.stringify({ url }) }),
@@ -128,4 +127,19 @@ export const api = {
     }),
   deleteProject: (id: string) =>
     request<void>(`/entries/projects/${id}`, { method: 'DELETE' }),
+
+  listSessions: () => request<GenerationSession[]>('/sessions'),
+  getSession: (id: string) => request<GenerationSession>(`/sessions/${id}`),
+  startSession: (applicationId: string) =>
+    request<GenerationSession>('/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ applicationId }),
+    }),
+  replyToSession: (id: string, message: string) =>
+    request<GenerationSession>(`/sessions/${id}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+  acceptSession: (id: string) =>
+    request<GenerationSession>(`/sessions/${id}/accept`, { method: 'POST' }),
 };

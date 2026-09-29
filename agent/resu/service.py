@@ -1,41 +1,70 @@
 """FastAPI wrapper exposing Resu over HTTP for the NestJS API to call.
 
-Standalone-repo-only glue — in Soma this goes away entirely and generate_resume()
-is called in-process by whatever surfaces the "Generate Resume" action there.
+Standalone-repo-only glue — in Soma this goes away entirely and run_turn() is
+called in-process by whatever surfaces the "Generate Resume" action there.
+
+Stateless by design: the NestJS API is the source of truth for session/message
+persistence (Postgres, survives restarts of this process). Each call here is
+"run one turn of this conversation" — takes the prior serialized message
+history (or none, for a fresh session) and returns the new state.
 """
 from __future__ import annotations
 
 import os
 
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
+from pydantic_ai.messages import ModelMessage
 
 import httpx
 
-from .agent import generate_resume
+from .agent import ResuTurnOutput, run_turn
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, build_profile_context
 
 app = FastAPI(title="resu-agent")
 
 API_BASE_URL = os.environ.get("JOB_TRACKER_API_URL", "http://localhost:4100")
 
+_messages_adapter = TypeAdapter(list[ModelMessage])
 
-class GenerateResumeRequest(BaseModel):
+
+class RunTurnRequest(BaseModel):
     application_id: str
+    # JSON-encoded prior message history (from a previous turn's response),
+    # or None to start a fresh session.
+    message_history_json: str | None = None
+    # The user's reply to the agent's last question; None on the first turn.
+    user_reply: str | None = None
 
 
-class GenerateResumeResponse(BaseModel):
-    resume: str
+class RunTurnResponse(BaseModel):
+    done: bool
+    resume: str | None
+    question: str | None
+    # JSON-encoded message history to pass back in on the next turn.
+    message_history_json: str
 
 
 class PromptPreviewResponse(BaseModel):
     prompt: str
 
 
-@app.post("/generate-resume", response_model=GenerateResumeResponse)
-async def generate_resume_endpoint(body: GenerateResumeRequest) -> GenerateResumeResponse:
-    resume = await generate_resume(body.application_id, API_BASE_URL)
-    return GenerateResumeResponse(resume=resume)
+@app.post("/sessions/run-turn", response_model=RunTurnResponse)
+async def run_turn_endpoint(body: RunTurnRequest) -> RunTurnResponse:
+    history = (
+        _messages_adapter.validate_json(body.message_history_json)
+        if body.message_history_json
+        else None
+    )
+    output, new_history = await run_turn(
+        body.application_id, API_BASE_URL, history, body.user_reply
+    )
+    return RunTurnResponse(
+        done=output.done,
+        resume=output.resume,
+        question=output.question,
+        message_history_json=_messages_adapter.dump_json(new_history).decode("utf-8"),
+    )
 
 
 @app.get("/prompt-preview", response_model=PromptPreviewResponse)

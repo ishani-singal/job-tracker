@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Application } from '@job-tracker/shared-types';
 import { api } from '@/lib/api';
 import { AddApplicationDialog } from './add-application-dialog';
+import { useSessionsPanel } from '@/lib/sessions-panel-context';
 
 function rowBackgroundClass(application: Application): string {
   if (application.derivedStatus === 'rejected' || application.derivedStatus === 'inactive') {
@@ -19,8 +20,8 @@ function rowBackgroundClass(application: Application): string {
 
 export function ApplicationRow({ application }: { application: Application }) {
   const queryClient = useQueryClient();
-  const [generating, setGenerating] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const { openPanel } = useSessionsPanel();
 
   const markApplied = useMutation({
     mutationFn: () =>
@@ -36,15 +37,13 @@ export function ApplicationRow({ application }: { application: Application }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['applications'] }),
   });
 
-  async function handleGenerateResume() {
-    setGenerating(true);
-    try {
-      await api.generateResume(application.id);
-      queryClient.invalidateQueries({ queryKey: ['applications'] });
-    } finally {
-      setGenerating(false);
-    }
-  }
+  const startSession = useMutation({
+    mutationFn: () => api.startSession(application.id),
+    onSuccess: (session) => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      openPanel(session.id);
+    },
+  });
 
   function handleDelete() {
     if (confirm(`Delete application at ${application.company}? This can't be undone.`)) {
@@ -83,10 +82,10 @@ export function ApplicationRow({ application }: { application: Application }) {
         )}
         <button
           className="px-2 py-1 text-xs rounded border"
-          onClick={handleGenerateResume}
-          disabled={generating}
+          onClick={() => startSession.mutate()}
+          disabled={startSession.isPending}
         >
-          {generating ? 'Generating...' : 'Generate Resume'}
+          {startSession.isPending ? 'Starting...' : 'Generate Resume'}
         </button>
         <button className="px-2 py-1 text-xs rounded border" onClick={() => setEditOpen(true)}>
           Edit

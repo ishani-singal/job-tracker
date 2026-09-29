@@ -1,9 +1,10 @@
 'use client';
 
-import { use, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { use } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Application } from '@job-tracker/shared-types';
+import { useSessionsPanel } from '@/lib/sessions-panel-context';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 
@@ -14,11 +15,19 @@ export default function ApplicationDetailPage({
 }) {
   const { id } = use(params);
   const queryClient = useQueryClient();
+  const { openPanel } = useSessionsPanel();
   const { data: application } = useQuery({
     queryKey: ['applications', id],
     queryFn: () => api.getApplication(id),
   });
-  const [generating, setGenerating] = useState(false);
+
+  const startSession = useMutation({
+    mutationFn: () => api.startSession(id),
+    onSuccess: (session) => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      openPanel(session.id);
+    },
+  });
 
   if (!application) return <p className="text-sm opacity-60">Loading...</p>;
 
@@ -26,16 +35,6 @@ export default function ApplicationDetailPage({
     await api.updateApplication(id, patch);
     queryClient.invalidateQueries({ queryKey: ['applications', id] });
     queryClient.invalidateQueries({ queryKey: ['applications'] });
-  }
-
-  async function handleGenerateResume() {
-    setGenerating(true);
-    try {
-      await api.generateResume(id);
-      queryClient.invalidateQueries({ queryKey: ['applications', id] });
-    } finally {
-      setGenerating(false);
-    }
   }
 
   return (
@@ -101,11 +100,11 @@ export default function ApplicationDetailPage({
             )}
             <button
               className="px-2 py-1 text-xs rounded border"
-              onClick={handleGenerateResume}
-              disabled={generating}
+              onClick={() => startSession.mutate()}
+              disabled={startSession.isPending}
             >
-              {generating
-                ? 'Generating...'
+              {startSession.isPending
+                ? 'Starting...'
                 : application.resumeContent
                   ? 'Regenerate Resume'
                   : 'Generate Resume'}

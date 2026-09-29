@@ -83,12 +83,4 @@ export class ApplicationsService {
     await this.get(id);
     return this.prisma.application.delete({ where: { id } });
   }
-
-  async saveGeneratedResume(id: string, resumeContent: string) {
-    await this.get(id);
-    return this.prisma.application.update({
-      where: { id },
-      data: { resumeContent, resumeGeneratedAt: new Date() },
-    });
-  }
 }

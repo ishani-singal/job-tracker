@@ -18,8 +18,6 @@ import {
 import { AnalyticsService } from '../analytics/analytics.service';
 import { renderResumePdf } from './resume-pdf';
 
-const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
-
 @Controller('applications')
 export class ApplicationsController {
   constructor(
@@ -51,21 +49,6 @@ export class ApplicationsController {
   @Delete(':id')
   delete(@Param('id') id: string) {
     return this.applications.delete(id);
-  }
-
-  @Post(':id/generate-resume')
-  async generateResume(@Param('id') id: string) {
-    await this.applications.get(id);
-    const response = await fetch(`${AGENT_SERVICE_URL}/generate-resume`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ application_id: id }),
-    });
-    if (!response.ok) {
-      throw new Error(`Resume agent request failed: ${response.status}`);
-    }
-    const { resume } = (await response.json()) as { resume: string };
-    return this.applications.saveGeneratedResume(id, resume);
   }
 
   @Get(':id/resume.pdf')

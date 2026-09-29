@@ -1,4 +1,4 @@
-from .agent import generate_resume, resu_agent
+from .agent import ResuTurnOutput, resu_agent, run_turn
 from .deps import ResuDeps
 
-__all__ = ["resu_agent", "generate_resume", "ResuDeps"]
+__all__ = ["resu_agent", "run_turn", "ResuTurnOutput", "ResuDeps"]

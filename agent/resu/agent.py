@@ -1,9 +1,11 @@
 """Resu's Agent instance + entry point.
 
-Internal/background-style agent (no user-facing chat, no streaming) — called
-synchronously by the "Generate Resume" button via the FastAPI service in
-service.py. Entry point shape matches the new-agent skill's guidance for
-internal agents: a single async run function, not stream_in_chat.
+Multi-turn: each call to run_turn() is one full agent run (it always finishes —
+PydanticAI has no mid-execution pause), but the agent's *structured output*
+tells the caller whether it's actually done (resume finalized) or needs the
+user to answer something before it can finish. The caller persists
+message_history and, on a reply, calls run_turn() again with that history so
+the model continues the same reasoning thread rather than starting over.
 """
 from __future__ import annotations
 
@@ -14,7 +16,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import httpx
+from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 
@@ -30,11 +34,34 @@ _model = OpenAIChatModel(
     ),
 )
 
-_BASE_SYSTEM_PROMPT = f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}"
+
+class ResuTurnOutput(BaseModel):
+    """What the agent produces each turn. `done=False` means `question` holds
+    something the user must answer before the resume can be finalized (e.g.
+    the Step 7 clarifying questions, or a disqualifier-keyword stop). `done=True`
+    means `resume` holds the finished, ready-to-save resume text.
+    """
+
+    done: bool
+    resume: str | None = None
+    question: str | None = None
+
+
+_BASE_SYSTEM_PROMPT = (
+    f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}\n\n"
+    "Respond with structured output every turn: set done=true and put the "
+    "complete finished resume in `resume` once you've gone through the full "
+    "process template with no open questions. If you still need something "
+    "from the user (answers to Step 7 questions, or you hit a disqualifier "
+    "stop and want to confirm before continuing), set done=false and put "
+    "exactly one clear question in `question` — the user will reply and you "
+    "will continue from there in the next turn."
+)
 
 resu_agent = Agent(
     model=_model,
     deps_type=ResuDeps,
+    output_type=ResuTurnOutput,
     system_prompt=_BASE_SYSTEM_PROMPT,
     tools=TOOLS,
 )
@@ -58,11 +85,28 @@ async def _inject_profile(ctx: RunContext[ResuDeps]) -> str:
     return build_profile_context(profile, entries)
 
 
-async def generate_resume(application_id: str, api_base_url: str) -> str:
-    """One-shot: generate a tailored resume for the given application id."""
+async def run_turn(
+    application_id: str,
+    api_base_url: str,
+    message_history: list[ModelMessage] | None,
+    user_reply: str | None,
+) -> tuple[ResuTurnOutput, list[ModelMessage]]:
+    """Runs one turn of the generation conversation.
+
+    First turn: message_history=None, user_reply=None — starts fresh.
+    Later turns: message_history from the prior turn's all_messages(),
+    user_reply is what the user typed in response to the agent's question.
+    Returns (output, updated_message_history) — the caller persists both.
+    """
     deps = ResuDeps(api_base_url=api_base_url)
-    result = await resu_agent.run(
-        f"Generate a tailored resume for application {application_id}.",
-        deps=deps,
+    prompt = (
+        user_reply
+        if message_history
+        else f"Generate a tailored resume for application {application_id}."
     )
-    return result.output
+    result = await resu_agent.run(
+        prompt,
+        deps=deps,
+        message_history=message_history,
+    )
+    return result.output, result.all_messages()
