@@ -138,10 +138,33 @@ export class CompanyRolesService implements OnModuleDestroy {
     return this.browser;
   }
 
-  listCompanies() {
-    return this.prisma.trackedCompany.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { roles: true } } },
+  /** One row per tracked company, combining open-role discovery status with
+   * resume status — the single unified list the Company Resumes page shows
+   * (previously two separate lists: tracked companies here, and a resume
+   * list independently re-derived from Application.company, which could
+   * show "Amazon" and "Amazon.com Services LLC" as two different rows since
+   * it wasn't using the same normalized-name matching as company tracking).
+   * Resume rows are matched to a TrackedCompany by normalized name, same
+   * logic used everywhere else a company name gets deduped. */
+  async listCompanies() {
+    const [companies, resumes] = await Promise.all([
+      this.prisma.trackedCompany.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: { _count: { select: { roles: true } } },
+      }),
+      this.prisma.companyResume.findMany(),
+    ]);
+
+    const resumeByKey = new Map(resumes.map((r) => [normalizeCompanyKey(r.company), r]));
+
+    return companies.map((company) => {
+      const resume = resumeByKey.get(normalizeCompanyKey(company.name));
+      return {
+        ...company,
+        hasResume: !!resume,
+        resumeCompanyKey: resume?.company ?? company.name,
+        resumeUpdatedAt: resume?.updatedAt ?? null,
+      };
     });
   }
 
