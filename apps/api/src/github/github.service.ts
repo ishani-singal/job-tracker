@@ -107,8 +107,11 @@ export class GithubService {
     });
   }
 
-  async getConnection() {
-    return this.prisma.githubConnection.findFirst();
+  /** Connection status for the frontend — deliberately omits accessToken. */
+  async getConnection(): Promise<{ githubLogin: string; connectedAt: Date } | null> {
+    const connection = await this.prisma.githubConnection.findFirst();
+    if (!connection) return null;
+    return { githubLogin: connection.githubLogin, connectedAt: connection.connectedAt };
   }
 
   async disconnect() {
@@ -117,7 +120,7 @@ export class GithubService {
   }
 
   private async requireToken(): Promise<string> {
-    const connection = await this.getConnection();
+    const connection = await this.prisma.githubConnection.findFirst();
     if (!connection) {
       throw new UnauthorizedException('GitHub not connected — connect it in Settings first');
     }
