@@ -4,9 +4,9 @@ services:
     container_name: job-tracker-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: jobtracker
-      POSTGRES_PASSWORD: jobtracker_dev_password
-      POSTGRES_DB: jobtracker
+      POSTGRES_USER: ${POSTGRES_USER:-jobtracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in a .env file}
+      POSTGRES_DB: ${POSTGRES_DB:-jobtracker}
     ports:
       - "5433:5432"
     volumes:

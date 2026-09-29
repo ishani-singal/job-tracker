@@ -12,10 +12,10 @@ review the auto-parsed fields, and save it straight to job-tracker as a new Appl
 
 ## Configuration
 
-The extension defaults to `http://100.96.199.11:4100` (job-tracker's API on the
-Tailscale network). If that address ever changes, click the gear icon in the popup
-(or right-click the extension icon → Options) and update it — stored via
-`chrome.storage.sync`, so it follows you across signed-in browser instances.
+The extension defaults to `http://localhost:4100`. To point it at a real server
+(e.g. over Tailscale), click the gear icon in the popup (or right-click the extension
+icon → Options) and update the API base URL — stored via `chrome.storage.sync`, so it
+follows you across signed-in browser instances.
 
 ## Usage
 

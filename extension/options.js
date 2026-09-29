@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = 'http://100.96.199.11:4100';
+const DEFAULT_API_BASE = 'http://localhost:4100';
 
 const input = document.getElementById('apiBase');
 const saveBtn = document.getElementById('saveBtn');

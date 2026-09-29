@@ -14,7 +14,7 @@ plan doc this was scaffolded from for the full design rationale.
 
 ## Deployment
 
-Runs on `pavan-mazumdar-server` (`100.96.199.11`) alongside Finra, managed by PM2:
+Runs on a personal server (`<your-host>`) managed by PM2:
 
 | Service | PM2 name | Port |
 |---|---|---|
@@ -33,15 +33,15 @@ real deploy script exists (see Finra's `deploy.sh` for the pattern to follow onc
 graduates past manual scp'ing).
 
 **Important**: `apps/web/.env.local` must point `NEXT_PUBLIC_API_URL` at the server's
-address (`http://100.96.199.11:4100`), not `localhost` — it's baked into the client bundle
+address (e.g. `http://<your-host>:4100`), not `localhost` — it's baked into the client bundle
 at build time and read from the *browser*, so `localhost` there means the visitor's own
 machine, not the server. Getting this wrong makes API calls (uploads, etc.) fail silently
 with no visible error unless the caller checks `res.ok`.
 
 To redeploy after a code change:
 ```bash
-scp <changed file> pavan-mazumdar@pavan-mazumdar-server:~/job-tracker/<same path>
-ssh pavan-mazumdar@pavan-mazumdar-server
+scp <changed file> <user>@<your-host>:~/job-tracker/<same path>
+ssh <user>@<your-host>
 cd ~/job-tracker/apps/api && pnpm build   # if API changed
 pm2 restart job-tracker-api job-tracker-web job-tracker-agent
 ```
@@ -49,10 +49,11 @@ pm2 restart job-tracker-api job-tracker-web job-tracker-agent
 ## Local setup (alternative — if not using the server)
 
 ```bash
+cp .env.example .env          # set POSTGRES_PASSWORD
 docker compose up -d          # Postgres on :5433
 pnpm install
 
-cp apps/api/.env.example apps/api/.env      # fill in Azure OpenAI creds (AZURE_LLM_*)
+cp apps/api/.env.example apps/api/.env      # fill in DATABASE_URL (match POSTGRES_* above) + Azure OpenAI creds (AZURE_LLM_*)
 cp agent/.env.example agent/.env
 
 cd apps/api && pnpm db:migrate && cd ../..
