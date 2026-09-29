@@ -10,6 +10,37 @@ import { ApplicationsService } from '../applications/applications.service';
  * since we can't tell either way. */
 const MAX_ROLE_AGE_DAYS = 30;
 
+/** Strips common legal-entity suffixes and normalizes case/punctuation so
+ * "Amazon" and "Amazon.com Services LLC" collapse to the same key. Not
+ * exhaustive — good enough to catch the common patterns without an external
+ * company-name-resolution service. */
+function normalizeCompanyKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\.com\b/g, '')
+    .replace(/\b(inc|llc|ltd|corp|corporation|co|company|services|group|holdings|plc)\b\.?/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
+}
+
+/** Collapses near-identical company name variants (see normalizeCompanyKey)
+ * to one canonical name per group — picks the shortest surviving name as
+ * canonical, since legal-suffix variants are usually longer than the plain
+ * brand name. */
+function dedupeCompanyNames(names: string[]): string[] {
+  const groups = new Map<string, string[]>();
+  for (const name of names) {
+    const key = normalizeCompanyKey(name);
+    if (!key) continue;
+    const group = groups.get(key) ?? [];
+    group.push(name);
+    groups.set(key, group);
+  }
+  return Array.from(groups.values()).map(
+    (variants) => variants.sort((a, b) => a.length - b.length)[0],
+  );
+}
+
 const CAREER_URL_GUESSES = (company: string): string[] => {
   const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '');
   const slugDashed = company.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -73,14 +104,31 @@ export class CompanyRolesService implements OnModuleDestroy {
    * kicks off discovery for each in the background. Returns the created rows
    * immediately — callers poll discoveryStatus rather than waiting here. */
   async addCompanies(rawInput: string): Promise<{ created: string[]; skipped: string[] }> {
-    const names = Array.from(
-      new Set(
-        rawInput
-          .split(/[\n,]+/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      ),
-    );
+    const names = rawInput
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return this.trackCompanies(names);
+  }
+
+  /** Creates a TrackedCompany for every distinct Application.company not
+   * already tracked, and kicks off discovery for each — a one-click way to
+   * bring the existing application pipeline's companies into the "Track
+   * Companies for Open Roles" feature instead of retyping them by hand.
+   * Dedupes near-identical legal-name variants first (e.g. "Amazon" vs
+   * "Amazon.com Services LLC") so they don't become two separate tracked
+   * companies with two redundant career-page discovery runs. */
+  async importCompaniesFromApplications(): Promise<{ created: string[]; skipped: string[] }> {
+    const applications = await this.prisma.application.findMany({
+      select: { company: true },
+      distinct: ['company'],
+    });
+    const names = dedupeCompanyNames(applications.map((a) => a.company).filter(Boolean));
+    return this.trackCompanies(names);
+  }
+
+  private async trackCompanies(rawNames: string[]): Promise<{ created: string[]; skipped: string[] }> {
+    const names = Array.from(new Set(rawNames.map((n) => n.trim()).filter(Boolean)));
 
     const created: string[] = [];
     const skipped: string[] = [];
