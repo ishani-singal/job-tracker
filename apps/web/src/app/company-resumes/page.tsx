@@ -150,6 +150,8 @@ function CompanyCard({
 }) {
   const queryClient = useQueryClient();
   const { openPanel } = useSessionsPanel();
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [urlDraft, setUrlDraft] = useState(company.careerPageUrl ?? '');
 
   const { data: resume } = useQuery({
     queryKey: ['company-resume', company.resumeCompanyKey],
@@ -160,6 +162,14 @@ function CompanyCard({
   const rediscover = useMutation({
     mutationFn: (id: string) => api.rediscoverCompany(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tracked-companies'] }),
+  });
+
+  const setCareerUrl = useMutation({
+    mutationFn: () => api.addCompanyWithCareerUrl(company.name, urlDraft),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tracked-companies'] });
+      setEditingUrl(false);
+    },
   });
 
   const removeCompany = useMutation({
@@ -181,17 +191,29 @@ function CompanyCard({
   return (
     <div className="border rounded">
       <div className="flex items-center justify-between px-4 py-3 gap-3">
-        <button
-          className="flex-1 text-left min-w-0"
-          onClick={onToggleExpand}
-          disabled={!company.hasResume}
-        >
-          <div className="font-medium text-sm hover:underline truncate">{company.name}</div>
-          <div className="flex items-center gap-2 text-xs opacity-60 mt-0.5">
-            <StatusBadge status={company.discoveryStatus} />
-            <span>{company._count?.roles ?? 0} open roles found</span>
-          </div>
-        </button>
+        <div className="flex-1 min-w-0">
+          <button
+            className="block w-full text-left"
+            onClick={onToggleExpand}
+            disabled={!company.hasResume}
+          >
+            <div className="font-medium text-sm hover:underline truncate">{company.name}</div>
+            <div className="flex items-center gap-2 text-xs opacity-60 mt-0.5">
+              <StatusBadge status={company.discoveryStatus} />
+              <span>{company._count?.roles ?? 0} open roles found</span>
+            </div>
+          </button>
+          {company.careerPageUrl && (
+            <a
+              href={company.careerPageUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-xs text-blue-600 dark:text-blue-400 hover:underline truncate mt-0.5"
+            >
+              {company.careerPageUrl}
+            </a>
+          )}
+        </div>
         <div className="flex items-center gap-2 shrink-0">
           {company.resumeUpdatedAt && (
             <span className="text-xs opacity-60">
@@ -221,6 +243,15 @@ function CompanyCard({
             Re-scan
           </button>
           <button
+            className="px-2 py-1 text-xs rounded border"
+            onClick={() => {
+              setUrlDraft(company.careerPageUrl ?? '');
+              setEditingUrl((v) => !v);
+            }}
+          >
+            {company.careerPageUrl ? 'Edit Career Page' : 'Set Career Page'}
+          </button>
+          <button
             className="px-2 py-1 text-xs rounded border text-red-600 dark:text-red-400"
             onClick={() => {
               if (confirm(`Stop tracking ${company.name}? Its unselected open roles will be removed.`)) {
@@ -232,6 +263,29 @@ function CompanyCard({
           </button>
         </div>
       </div>
+      {editingUrl && (
+        <div className="border-t p-3 flex items-center gap-2 bg-neutral-50 dark:bg-neutral-900">
+          <input
+            className="flex-1 border rounded px-2 py-1 text-sm bg-transparent"
+            placeholder="https://company.com/careers"
+            value={urlDraft}
+            onChange={(e) => setUrlDraft(e.target.value)}
+          />
+          <button
+            className="px-2 py-1 text-xs rounded bg-black text-white dark:bg-white dark:text-black shrink-0"
+            onClick={() => urlDraft.trim() && setCareerUrl.mutate()}
+            disabled={setCareerUrl.isPending || !urlDraft.trim()}
+          >
+            {setCareerUrl.isPending ? 'Saving...' : 'Save & Re-scan'}
+          </button>
+          <button
+            className="px-2 py-1 text-xs rounded border shrink-0"
+            onClick={() => setEditingUrl(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {expanded && resume && (
         <pre className="text-sm whitespace-pre-wrap border-t p-3">{resume.resumeContent}</pre>
       )}
