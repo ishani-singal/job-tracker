@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { MessageRole } from '@prisma/client';
+import { GenerationSessionScope, MessageRole } from '@prisma/client';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
@@ -11,13 +11,22 @@ interface RunTurnResponse {
   message_history_json: string;
 }
 
+interface LinkedinRunTurnResponse {
+  done: boolean;
+  headline: string | null;
+  about: string | null;
+  entry_bullets: { entry_type: string; entry_id: string; bullets: string[] }[] | null;
+  question: string | null;
+  message_history_json: string;
+}
+
 @Injectable()
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Sessions grouped by application, newest first — what the side panel lists. */
+  /** All sessions across all scopes, newest first — what the side panel lists. */
   listAll() {
     return this.prisma.generationSession.findMany({
       orderBy: { createdAt: 'desc' },
@@ -38,11 +47,18 @@ export class SessionsService {
    * Creates a session and kicks off the first agent turn in the background
    * (doesn't block the HTTP response — the frontend polls get() for status).
    */
-  async start(applicationId: string) {
+  async start(scope: GenerationSessionScope, applicationId?: string, company?: string) {
+    if (scope === 'APPLICATION' && !applicationId) {
+      throw new Error('applicationId is required for scope=APPLICATION');
+    }
+    if (scope === 'COMPANY' && !company) {
+      throw new Error('company is required for scope=COMPANY');
+    }
+
     const session = await this.prisma.generationSession.create({
-      data: { applicationId, status: 'RUNNING' },
+      data: { scope, applicationId, company, status: 'RUNNING' },
     });
-    this.runTurnInBackground(session.id, applicationId, null, null);
+    this.runTurnInBackground(session, null, null);
     return session;
   }
 
@@ -61,16 +77,14 @@ export class SessionsService {
       data: { status: 'RUNNING' },
     });
 
-    this.runTurnInBackground(
-      sessionId,
-      session.applicationId,
-      session.messageHistoryJson,
-      userReply,
-    );
+    this.runTurnInBackground(session, session.messageHistoryJson, userReply);
     return this.get(sessionId);
   }
 
-  /** Saves the session's finished resume onto the application and marks it accepted. */
+  /**
+   * Saves the session's finished output to the right place depending on scope,
+   * and marks the session accepted.
+   */
   async accept(sessionId: string) {
     const session = await this.get(sessionId);
     if (session.status !== 'DONE') {
@@ -83,61 +97,179 @@ export class SessionsService {
       throw new Error(`Session ${sessionId} has no assistant output to accept`);
     }
 
-    await this.prisma.application.update({
-      where: { id: session.applicationId },
-      data: {
-        resumeContent: lastAssistantMessage.content,
-        resumeGeneratedAt: new Date(),
-      },
-    });
+    if (session.scope === 'APPLICATION') {
+      await this.prisma.application.update({
+        where: { id: session.applicationId! },
+        data: { resumeContent: lastAssistantMessage.content, resumeGeneratedAt: new Date() },
+      });
+    } else if (session.scope === 'COMPANY') {
+      await this.prisma.companyResume.upsert({
+        where: { company: session.company! },
+        create: { company: session.company!, resumeContent: lastAssistantMessage.content },
+        update: { resumeContent: lastAssistantMessage.content },
+      });
+    } else if (session.scope === 'LINKEDIN') {
+      const parsed = this.parseLinkedinContent(lastAssistantMessage.content);
+      const existing = await this.prisma.linkedinProfile.findFirst();
+      if (existing) {
+        await this.prisma.linkedinProfile.update({ where: { id: existing.id }, data: parsed });
+      } else {
+        await this.prisma.linkedinProfile.create({ data: parsed });
+      }
+    }
+
     return this.prisma.generationSession.update({
       where: { id: sessionId },
       data: { status: 'ACCEPTED' },
     });
   }
 
+  /**
+   * The LinkedIn chat message is stored as JSON-encoded LinkedinTurnOutput
+   * fields (see runTurnInBackground) so it can be parsed back out on accept.
+   */
+  private parseLinkedinContent(content: string) {
+    try {
+      const parsed = JSON.parse(content) as {
+        headline: string | null;
+        about: string | null;
+        entry_bullets: unknown;
+      };
+      return {
+        headline: parsed.headline,
+        about: parsed.about,
+        entryBullets: parsed.entry_bullets ?? [],
+      };
+    } catch {
+      return { headline: null, about: null, entryBullets: [] };
+    }
+  }
+
   private async runTurnInBackground(
+    session: { id: string; scope: GenerationSessionScope; applicationId: string | null; company: string | null },
+    priorHistoryJson: string | null,
+    userReply: string | null,
+  ) {
+    try {
+      if (session.scope === 'LINKEDIN') {
+        await this.runLinkedinTurn(session.id, priorHistoryJson, userReply);
+      } else if (session.scope === 'COMPANY') {
+        await this.runCompanyTurn(session.id, session.company!, priorHistoryJson, userReply);
+      } else {
+        await this.runApplicationTurn(session.id, session.applicationId!, priorHistoryJson, userReply);
+      }
+    } catch (err) {
+      this.logger.error(`Session ${session.id} turn failed: ${err}`);
+      await this.prisma.generationSession.update({
+        where: { id: session.id },
+        data: { status: 'ERROR', errorMessage: String(err) },
+      });
+    }
+  }
+
+  private async runApplicationTurn(
     sessionId: string,
     applicationId: string,
     priorHistoryJson: string | null,
     userReply: string | null,
   ) {
-    try {
-      const response = await fetch(`${AGENT_SERVICE_URL}/sessions/run-turn`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          application_id: applicationId,
-          message_history_json: priorHistoryJson,
-          user_reply: userReply,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Agent run-turn failed: ${response.status}`);
-      }
-      const result = (await response.json()) as RunTurnResponse;
+    const response = await fetch(`${AGENT_SERVICE_URL}/sessions/run-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        application_id: applicationId,
+        message_history_json: priorHistoryJson,
+        user_reply: userReply,
+      }),
+    });
+    if (!response.ok) throw new Error(`Agent run-turn failed: ${response.status}`);
+    const result = (await response.json()) as RunTurnResponse;
 
-      const content = result.done ? result.resume : result.question;
-      await this.prisma.sessionMessage.create({
-        data: {
-          sessionId,
-          role: MessageRole.ASSISTANT,
-          content: content ?? '(no output)',
-        },
-      });
-      await this.prisma.generationSession.update({
-        where: { id: sessionId },
-        data: {
-          status: result.done ? 'DONE' : 'WAITING_FOR_INPUT',
-          messageHistoryJson: result.message_history_json,
-        },
-      });
-    } catch (err) {
-      this.logger.error(`Session ${sessionId} turn failed: ${err}`);
-      await this.prisma.generationSession.update({
-        where: { id: sessionId },
-        data: { status: 'ERROR', errorMessage: String(err) },
-      });
-    }
+    await this.prisma.sessionMessage.create({
+      data: {
+        sessionId,
+        role: MessageRole.ASSISTANT,
+        content: (result.done ? result.resume : result.question) ?? '(no output)',
+      },
+    });
+    await this.prisma.generationSession.update({
+      where: { id: sessionId },
+      data: {
+        status: result.done ? 'DONE' : 'WAITING_FOR_INPUT',
+        messageHistoryJson: result.message_history_json,
+      },
+    });
+  }
+
+  private async runCompanyTurn(
+    sessionId: string,
+    company: string,
+    priorHistoryJson: string | null,
+    userReply: string | null,
+  ) {
+    const response = await fetch(`${AGENT_SERVICE_URL}/sessions/run-company-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company,
+        message_history_json: priorHistoryJson,
+        user_reply: userReply,
+      }),
+    });
+    if (!response.ok) throw new Error(`Agent run-company-turn failed: ${response.status}`);
+    const result = (await response.json()) as RunTurnResponse;
+
+    await this.prisma.sessionMessage.create({
+      data: {
+        sessionId,
+        role: MessageRole.ASSISTANT,
+        content: (result.done ? result.resume : result.question) ?? '(no output)',
+      },
+    });
+    await this.prisma.generationSession.update({
+      where: { id: sessionId },
+      data: {
+        status: result.done ? 'DONE' : 'WAITING_FOR_INPUT',
+        messageHistoryJson: result.message_history_json,
+      },
+    });
+  }
+
+  private async runLinkedinTurn(
+    sessionId: string,
+    priorHistoryJson: string | null,
+    userReply: string | null,
+  ) {
+    const response = await fetch(`${AGENT_SERVICE_URL}/linkedin/run-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message_history_json: priorHistoryJson,
+        user_reply: userReply,
+      }),
+    });
+    if (!response.ok) throw new Error(`Agent linkedin run-turn failed: ${response.status}`);
+    const result = (await response.json()) as LinkedinRunTurnResponse;
+
+    // Store the structured fields as JSON so accept() can parse them back out
+    // and so the chat log has something readable to render in the meantime.
+    const content = result.done
+      ? JSON.stringify({
+          headline: result.headline,
+          about: result.about,
+          entry_bullets: result.entry_bullets,
+        })
+      : (result.question ?? '(no output)');
+
+    await this.prisma.sessionMessage.create({
+      data: { sessionId, role: MessageRole.ASSISTANT, content },
+    });
+    await this.prisma.generationSession.update({
+      where: { id: sessionId },
+      data: {
+        status: result.done ? 'DONE' : 'WAITING_FOR_INPUT',
+        messageHistoryJson: result.message_history_json,
+      },
+    });
   }
 }

@@ -79,6 +79,34 @@ async def fetch_candidate_resume(ctx: RunContext[ResuDeps]) -> str:
         return resp.json().get("text", "")
 
 
+async def fetch_company_job_descriptions(ctx: RunContext[ResuDeps], company: str) -> dict:
+    """Fetch job descriptions for a specific company, for building one common
+    resume shared across all of that company's applications — not a single-job
+    tailored resume. Only call this for the company-resume workflow, not the
+    per-application one.
+
+    Prefers APPLIED applications for that company if any exist (stronger
+    signal — roles actually pursued); falls back to all of that company's
+    saved applications if none are applied yet. Returns
+    {stage: "applied" | "all", jds: [...]}. Company match is case-sensitive,
+    same convention used elsewhere in this app.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{ctx.deps.api_base_url}/applications")
+        resp.raise_for_status()
+        applications = resp.json()
+
+    company_apps = [a for a in applications if a.get("company") == company]
+    applied = [a for a in company_apps if a.get("status") == "APPLIED"]
+
+    if applied:
+        jds = [a["jdText"] for a in applied if a.get("jdText")]
+        return {"stage": "applied", "jds": jds}
+
+    jds = [a["jdText"] for a in company_apps if a.get("jdText")]
+    return {"stage": "all", "jds": jds}
+
+
 async def fetch_connected_repo_readmes(ctx: RunContext[ResuDeps]) -> list[dict]:
     """Fetch READMEs from the candidate's connected GitHub repos (configured in
     Settings). Each entry is {repo, readme}. Treat this as supplementary Stories

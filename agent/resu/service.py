@@ -18,10 +18,17 @@ from pydantic_ai.messages import ModelMessage
 
 import httpx
 
-from .agent import ResuTurnOutput, run_turn
+from .agent import ResuTurnOutput, run_company_turn, run_turn
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, build_profile_context
 
 app = FastAPI(title="resu-agent")
+
+# The LinkedIn Description Agent shares this same process/app (see
+# agent/linkedin/service.py) — mounted here rather than run as a separate
+# uvicorn process, per the plan's "one Python process serves both agents".
+from linkedin.service import router as linkedin_router  # noqa: E402
+
+app.include_router(linkedin_router)
 
 API_BASE_URL = os.environ.get("JOB_TRACKER_API_URL", "http://localhost:4100")
 
@@ -34,6 +41,12 @@ class RunTurnRequest(BaseModel):
     # or None to start a fresh session.
     message_history_json: str | None = None
     # The user's reply to the agent's last question; None on the first turn.
+    user_reply: str | None = None
+
+
+class RunCompanyTurnRequest(BaseModel):
+    company: str
+    message_history_json: str | None = None
     user_reply: str | None = None
 
 
@@ -63,6 +76,24 @@ async def run_turn_endpoint(body: RunTurnRequest) -> RunTurnResponse:
     )
     output, new_history = await run_turn(
         body.application_id, API_BASE_URL, history, body.user_reply
+    )
+    return RunTurnResponse(
+        done=output.done,
+        resume=output.resume,
+        question=output.question,
+        message_history_json=_messages_adapter.dump_json(new_history).decode("utf-8"),
+    )
+
+
+@app.post("/sessions/run-company-turn", response_model=RunTurnResponse)
+async def run_company_turn_endpoint(body: RunCompanyTurnRequest) -> RunTurnResponse:
+    history = (
+        _messages_adapter.validate_json(body.message_history_json)
+        if body.message_history_json
+        else None
+    )
+    output, new_history = await run_company_turn(
+        body.company, API_BASE_URL, history, body.user_reply
     )
     return RunTurnResponse(
         done=output.done,

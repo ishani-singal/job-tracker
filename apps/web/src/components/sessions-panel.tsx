@@ -21,6 +21,50 @@ function statusDotClass(status: GenerationSession['status']): string {
   }
 }
 
+function acceptLabel(scope: GenerationSession['scope']): string {
+  switch (scope) {
+    case 'LINKEDIN':
+      return 'Accept LinkedIn Draft';
+    case 'COMPANY':
+      return 'Accept Company Resume';
+    default:
+      return 'Accept Resume for This Application';
+  }
+}
+
+function formatLinkedinMessage(content: string): string {
+  // Done-turn messages are JSON-encoded {headline, about, entry_bullets} (see
+  // SessionsService.runLinkedinTurn on the backend); a question is plain text
+  // and won't parse as that shape, so just fall back to showing it as-is.
+  try {
+    const parsed = JSON.parse(content) as {
+      headline?: string;
+      about?: string;
+      entry_bullets?: { entry_type: string; bullets: string[] }[];
+    };
+    if (!parsed.headline && !parsed.about) return content;
+    const sections = [
+      parsed.headline ? `Headline:\n${parsed.headline}` : '',
+      parsed.about ? `About:\n${parsed.about}` : '',
+      ...(parsed.entry_bullets ?? []).map(
+        (eb) => `${eb.entry_type}:\n${eb.bullets.map((b) => `• ${b}`).join('\n')}`,
+      ),
+    ].filter(Boolean);
+    return sections.join('\n\n');
+  } catch {
+    return content;
+  }
+}
+
+function sessionLabel(session: GenerationSession): string {
+  if (session.scope === 'LINKEDIN') return 'LinkedIn';
+  if (session.scope === 'COMPANY') return session.company ?? 'Company';
+  return new Date(session.createdAt).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function groupByDate(sessions: GenerationSession[]): [string, GenerationSession[]][] {
   const groups = new Map<string, GenerationSession[]>();
   for (const session of sessions) {
@@ -77,12 +121,7 @@ export function SessionsPanel() {
                   <span
                     className={`inline-block w-2 h-2 rounded-full shrink-0 ${statusDotClass(session.status)}`}
                   />
-                  <span className="truncate">
-                    {new Date(session.createdAt).toLocaleTimeString(undefined, {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </span>
+                  <span className="truncate">{sessionLabel(session)}</span>
                 </button>
               ))}
             </div>
@@ -120,8 +159,16 @@ function SessionChat({ session }: { session: GenerationSession }) {
     mutationFn: () => api.acceptSession(session.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      queryClient.invalidateQueries({ queryKey: ['applications'] });
-      queryClient.invalidateQueries({ queryKey: ['applications', session.applicationId] });
+      if (session.scope === 'APPLICATION') {
+        queryClient.invalidateQueries({ queryKey: ['applications'] });
+        queryClient.invalidateQueries({ queryKey: ['applications', session.applicationId] });
+      } else if (session.scope === 'LINKEDIN') {
+        queryClient.invalidateQueries({ queryKey: ['linkedin-profile'] });
+        queryClient.invalidateQueries({ queryKey: ['linkedin-staleness'] });
+      } else if (session.scope === 'COMPANY') {
+        queryClient.invalidateQueries({ queryKey: ['company-resumes'] });
+        queryClient.invalidateQueries({ queryKey: ['company-resume', session.company] });
+      }
     },
   });
 
@@ -141,7 +188,9 @@ function SessionChat({ session }: { session: GenerationSession }) {
                 : 'bg-black/5 dark:bg-white/5 self-start max-w-[90%]'
             }`}
           >
-            {message.content}
+            {session.scope === 'LINKEDIN' && message.role === 'ASSISTANT'
+              ? formatLinkedinMessage(message.content)
+              : message.content}
           </div>
         ))}
         {isRunning && (
@@ -183,14 +232,18 @@ function SessionChat({ session }: { session: GenerationSession }) {
             onClick={() => acceptMutation.mutate()}
             disabled={acceptMutation.isPending}
           >
-            {acceptMutation.isPending ? 'Saving...' : 'Accept Resume for This Application'}
+            {acceptMutation.isPending ? 'Saving...' : acceptLabel(session.scope)}
           </button>
         </div>
       )}
 
       {session.status === 'ACCEPTED' && (
         <div className="border-t p-3 text-xs text-center opacity-60">
-          Accepted — saved to the application.
+          {session.scope === 'LINKEDIN'
+            ? 'Accepted — saved to your LinkedIn profile draft.'
+            : session.scope === 'COMPANY'
+              ? `Accepted — saved as the common resume for ${session.company}.`
+              : 'Accepted — saved to the application.'}
         </div>
       )}
     </div>

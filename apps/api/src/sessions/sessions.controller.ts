@@ -1,5 +1,12 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { GenerationSessionScope } from '@prisma/client';
 import { SessionsService } from './sessions.service';
+
+interface StartSessionBody {
+  applicationId?: string;
+  company?: string;
+  scope?: GenerationSessionScope;
+}
 
 @Controller('sessions')
 export class SessionsController {
@@ -16,8 +23,12 @@ export class SessionsController {
   }
 
   @Post()
-  start(@Body() body: { applicationId: string }) {
-    return this.sessions.start(body.applicationId);
+  start(@Body() body: StartSessionBody) {
+    // Backward compatible: existing frontend calls this with just
+    // { applicationId } and no scope, which means scope=APPLICATION.
+    const scope = body.scope ?? (body.applicationId ? 'APPLICATION' : undefined);
+    if (!scope) throw new Error('scope is required (or pass applicationId for APPLICATION scope)');
+    return this.sessions.start(scope, body.applicationId, body.company);
   }
 
   @Post(':id/reply')

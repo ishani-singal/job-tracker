@@ -20,6 +20,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/applications">Applications</Link>
               <Link href="/resumes">Resumes</Link>
               <Link href="/dashboard">Dashboard</Link>
+              <Link href="/linkedin">LinkedIn</Link>
+              <Link href="/company-resumes">Company Resumes</Link>
             </nav>
             <main className="p-6">{children}</main>
             <SessionsPanel />

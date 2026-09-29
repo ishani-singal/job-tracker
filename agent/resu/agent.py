@@ -110,3 +110,28 @@ async def run_turn(
         message_history=message_history,
     )
     return result.output, result.all_messages()
+
+
+async def run_company_turn(
+    company: str,
+    api_base_url: str,
+    message_history: list[ModelMessage] | None,
+    user_reply: str | None,
+) -> tuple[ResuTurnOutput, list[ModelMessage]]:
+    """Same as run_turn, but for the company-resume workflow: one common
+    resume built from all of a company's applications rather than one
+    application. Uses fetch_company_job_descriptions instead of
+    fetch_job_description.
+    """
+    deps = ResuDeps(api_base_url=api_base_url)
+    prompt = (
+        user_reply
+        if message_history
+        else f"Generate one common resume covering all applications at {company}."
+    )
+    result = await resu_agent.run(
+        prompt,
+        deps=deps,
+        message_history=message_history,
+    )
+    return result.output, result.all_messages()

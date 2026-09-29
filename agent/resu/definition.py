@@ -16,6 +16,7 @@ from .tools import (
     fetch_candidate_profile,
     fetch_candidate_resume,
     fetch_candidate_stories,
+    fetch_company_job_descriptions,
     fetch_connected_repo_readmes,
     fetch_job_description,
     fetch_structured_entries,
@@ -35,9 +36,14 @@ IDENTITY = (
 )
 
 INSTRUCTIONS = (
-    "Always call fetch_job_description for the application you were asked about, "
-    "and fetch_candidate_stories / fetch_candidate_resume for source material — "
-    "your profile facts and process template are already provided below. Also "
+    "If you were asked to generate a resume for one specific application, call "
+    "fetch_job_description for that application. If instead you were asked to "
+    "generate one common resume shared across all of a company's applications, "
+    "call fetch_company_job_descriptions for that company instead — do not call "
+    "both in the same run, only the one matching the task you were actually "
+    "given. Also call fetch_candidate_stories / fetch_candidate_resume for "
+    "source material — your profile facts and process template are already "
+    "provided below. Also "
     "call fetch_connected_repo_readmes — if the candidate has connected GitHub "
     "repos, their READMEs are real, verifiable project material worth pulling "
     "into project/internship bullets alongside Stories; an empty result just "
@@ -167,6 +173,7 @@ TOOLS = [
     fetch_candidate_profile,
     fetch_structured_entries,
     fetch_job_description,
+    fetch_company_job_descriptions,
     fetch_candidate_stories,
     fetch_candidate_resume,
     fetch_connected_repo_readmes,

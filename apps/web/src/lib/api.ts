@@ -3,9 +3,11 @@ import type {
   AnalyticsTimeseriesPoint,
   Application,
   AppSettings,
+  CompanyResume,
   EducationEntry,
   GenerationSession,
   InternshipEntry,
+  LinkedinProfile,
   ParsedJob,
   ProjectEntry,
   ResumeProfile,
@@ -140,6 +142,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ applicationId }),
     }),
+  startLinkedinSession: () =>
+    request<GenerationSession>('/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'LINKEDIN' }),
+    }),
+  startCompanySession: (company: string) =>
+    request<GenerationSession>('/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'COMPANY', company }),
+    }),
   replyToSession: (id: string, message: string) =>
     request<GenerationSession>(`/sessions/${id}/reply`, {
       method: 'POST',
@@ -152,4 +164,16 @@ export const api = {
     request<{ label: string; city: string; region: string | null; country: string }[]>(
       `/locations/search?q=${encodeURIComponent(q)}`,
     ),
+
+  getLinkedinProfile: () => request<LinkedinProfile | null>('/linkedin/profile'),
+  getLinkedinStaleness: () =>
+    request<{ stale: boolean; lastGeneratedAt: string | null }>('/linkedin/staleness'),
+  getLinkedinPromptPreview: () => request<{ prompt: string }>('/linkedin/prompt-preview'),
+
+  listCompanyResumes: () =>
+    request<{ company: string; hasResume: boolean; updatedAt: string | null }[]>(
+      '/company-resumes',
+    ),
+  getCompanyResume: (company: string) =>
+    request<CompanyResume>(`/company-resumes/${encodeURIComponent(company)}`),
 };

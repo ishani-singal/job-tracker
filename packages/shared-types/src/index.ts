@@ -120,6 +120,8 @@ export type GenerationSessionStatus =
   | 'ACCEPTED'
   | 'ERROR';
 
+export type GenerationSessionScope = 'APPLICATION' | 'LINKEDIN' | 'COMPANY';
+
 export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
 
 export interface SessionMessage {
@@ -132,10 +134,33 @@ export interface SessionMessage {
 
 export interface GenerationSession {
   id: string;
-  applicationId: string;
+  scope: GenerationSessionScope;
+  applicationId: string | null;
+  company: string | null;
   status: GenerationSessionStatus;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
   messages: SessionMessage[];
+}
+
+export interface LinkedinEntryBullets {
+  entry_type: string;
+  entry_id: string;
+  bullets: string[];
+}
+
+export interface LinkedinProfile {
+  id: string;
+  headline: string | null;
+  about: string | null;
+  entryBullets: LinkedinEntryBullets[];
+  updatedAt: string;
+}
+
+export interface CompanyResume {
+  id: string;
+  company: string;
+  resumeContent: string;
+  updatedAt: string;
 }

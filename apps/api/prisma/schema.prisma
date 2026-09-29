@@ -92,6 +92,7 @@ model WorkExperienceEntry {
   required         Boolean  @default(true)
   sortOrder        Int      @default(0)
   createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model EducationEntry {
@@ -108,6 +109,7 @@ model EducationEntry {
   required   Boolean  @default(true)
   sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model InternshipEntry {
@@ -125,6 +127,7 @@ model InternshipEntry {
   required         Boolean  @default(false)
   sortOrder        Int      @default(0)
   createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model ProjectEntry {
@@ -141,6 +144,7 @@ model ProjectEntry {
   required   Boolean  @default(false)
   sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model AppSettings {
@@ -175,20 +179,31 @@ enum GenerationSessionStatus {
   ERROR
 }
 
+enum GenerationSessionScope {
+  APPLICATION
+  LINKEDIN
+  COMPANY
+}
+
 enum MessageRole {
   USER
   ASSISTANT
   TOOL
 }
 
-// One chat-style generation run for a given application. Tracks live status for
-// the right-pane UI (orange = running/waiting, green = done, none = accepted)
-// and holds the full conversation so a multi-turn run (agent asks a clarifying
-// question, user answers, agent continues) can be resumed via PydanticAI's
-// message_history.
+// One chat-style generation run. Tracks live status for the right-pane UI
+// (orange = running/waiting, green = done, none = accepted) and holds the full
+// conversation so a multi-turn run (agent asks a clarifying question, user
+// answers, agent continues) can be resumed via PydanticAI's message_history.
+// scope determines which of applicationId/company (if either) is set:
+// APPLICATION -> applicationId required, company null
+// LINKEDIN    -> both null (whole-candidate scope)
+// COMPANY     -> company required, applicationId null
 model GenerationSession {
   id            String                  @id @default(cuid())
-  applicationId String
+  scope         GenerationSessionScope  @default(APPLICATION)
+  applicationId String?
+  company       String?
   status        GenerationSessionStatus @default(RUNNING)
   errorMessage  String?
   // Opaque PydanticAI message-history JSON blob (from AgentRunResult.all_messages(),
@@ -201,6 +216,8 @@ model GenerationSession {
   messages SessionMessage[]
 
   @@index([applicationId])
+  @@index([company])
+  @@index([scope])
   @@index([createdAt])
 }
 
@@ -213,4 +230,27 @@ model SessionMessage {
   createdAt DateTime          @default(now())
 
   @@index([sessionId])
+}
+
+// Current accepted LinkedIn draft — a singleton (one candidate, one profile).
+// Updated whenever a LINKEDIN-scope GenerationSession is accepted; read
+// directly by the /linkedin tab rather than re-parsing session history.
+model LinkedinProfile {
+  id           String   @id @default(cuid())
+  headline     String?
+  about        String?
+  // Array of { entryType, entryId, bullets: string[] } — see LinkedinEntryBullets
+  // in agent/linkedin/agent.py for the exact shape.
+  entryBullets Json     @default("[]")
+  updatedAt    DateTime @updatedAt
+}
+
+// Current accepted common resume per company, generated only from that
+// company's own applications. Upserted whenever a COMPANY-scope
+// GenerationSession is accepted.
+model CompanyResume {
+  id            String   @id @default(cuid())
+  company       String   @unique
+  resumeContent String
+  updatedAt     DateTime @updatedAt
 }

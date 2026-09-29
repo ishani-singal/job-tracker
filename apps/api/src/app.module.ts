@@ -9,6 +9,8 @@ import { GithubModule } from './github/github.module';
 import { EntriesModule } from './entries/entries.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { LocationsModule } from './locations/locations.module';
+import { LinkedinModule } from './linkedin/linkedin.module';
+import { CompanyResumesModule } from './company-resumes/company-resumes.module';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { LocationsModule } from './locations/locations.module';
     EntriesModule,
     SessionsModule,
     LocationsModule,
+    LinkedinModule,
+    CompanyResumesModule,
   ],
 })
 export class AppModule {}
