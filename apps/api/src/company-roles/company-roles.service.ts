@@ -17,6 +17,11 @@ import { ApplicationsService } from '../applications/applications.service';
  * since we can't tell either way. */
 const MAX_ROLE_AGE_DAYS = 30;
 
+/** Max roles scored in parallel per company. Each unit of work is a
+ * headless-browser page load plus an LLM call, so this caps concurrent
+ * browser pages and LLM requests rather than being an arbitrary batch size. */
+const SCORING_CONCURRENCY = 4;
+
 /** Strips common legal-entity suffixes and normalizes case/punctuation so
  * "Amazon" and "Amazon.com Services LLC" collapse to the same key. Not
  * exhaustive — good enough to catch the common patterns without an external
@@ -569,7 +574,7 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     const [profile, entries] = await Promise.all([this.fetchCandidateProfile(), this.fetchCandidateEntries()]);
 
-    for (const role of roles) {
+    await this.runWithConcurrency(roles, SCORING_CONCURRENCY, async (role) => {
       try {
         const jdText = role.jdText || (await this.fetchRoleJd(role.roleUrl));
         if (!jdText) {
@@ -577,7 +582,7 @@ export class CompanyRolesService implements OnModuleDestroy {
           // redirected to a generic careers/search page) — leave atsScore
           // null (shown as "unavailable") rather than scoring against the
           // wrong content.
-          continue;
+          return;
         }
         const score = await this.estimateAtsScore(jdText, profile, entries);
         await this.prisma.discoveredRole.update({
@@ -591,7 +596,23 @@ export class CompanyRolesService implements OnModuleDestroy {
       } catch (err) {
         this.logger.warn(`ATS scoring failed for role ${role.id}: ${err}`);
       }
-    }
+    });
+  }
+
+  /** Runs `fn` over `items` with at most `limit` in flight at once — scoring
+   * a company's roles one-at-a-time (each a headless-browser page load plus
+   * an LLM round trip) made discovery scoring take minutes for companies with
+   * many open roles; a small worker pool keeps it bounded without opening
+   * unlimited concurrent browser pages/LLM calls. */
+  private async runWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+    let index = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (index < items.length) {
+        const item = items[index++];
+        await fn(item);
+      }
+    });
+    await Promise.all(workers);
   }
 
   async rescoreRole(roleId: string) {
