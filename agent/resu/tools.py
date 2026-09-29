@@ -54,26 +54,29 @@ async def fetch_structured_entries(ctx: RunContext[ResuDeps]) -> dict:
         return resp.json()
 
 
-async def fetch_candidate_stories(ctx: RunContext[ResuDeps]) -> list[dict]:
-    """List uploaded Stories files (detailed work-experience narratives) — the
-    primary source of truth for resume content. Returns filename/id metadata;
-    fetch actual file bytes via fetch_file_content if the model needs raw text
-    and the API doesn't already inline it.
+async def fetch_candidate_stories(ctx: RunContext[ResuDeps]) -> str:
+    """Fetch the full extracted text of every uploaded Stories file (detailed
+    work-experience narratives) — the primary source of truth for resume
+    content. Returns the actual document text (docx/pdf/plain text all
+    supported), concatenated with a "--- filename ---" header per file, not
+    just filenames — read it directly, do not ask the user to paste it again.
+    Empty string means no Stories files have been uploaded yet.
     """
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{ctx.deps.api_base_url}/resumes/stories")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(f"{ctx.deps.api_base_url}/resumes/stories/text")
         resp.raise_for_status()
-        return resp.json()
+        return resp.json().get("text", "")
 
 
-async def fetch_candidate_resume(ctx: RunContext[ResuDeps]) -> list[dict]:
-    """List uploaded Resume files — used strictly as a formatting/structure
-    reference, never as the primary content source (Stories is primary).
+async def fetch_candidate_resume(ctx: RunContext[ResuDeps]) -> str:
+    """Fetch the full extracted text of every uploaded Resume file — used
+    strictly as a formatting/structure reference, never as the primary
+    content source (Stories is primary). Empty string means none uploaded.
     """
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{ctx.deps.api_base_url}/resumes/files")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(f"{ctx.deps.api_base_url}/resumes/files/text")
         resp.raise_for_status()
-        return resp.json()
+        return resp.json().get("text", "")
 
 
 async def fetch_connected_repo_readmes(ctx: RunContext[ResuDeps]) -> list[dict]:

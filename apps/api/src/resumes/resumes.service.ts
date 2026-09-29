@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
+import { extractTextFromFile } from './extract-text';
 
 const UPLOAD_DIR = join(process.cwd(), '..', '..', 'data', 'uploads');
 
@@ -43,6 +44,42 @@ export class ResumesService {
 
   listResumeFiles() {
     return this.prisma.resumeFile.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  async getStoryFileText(id: string): Promise<string> {
+    const file = await this.prisma.storyFile.findUnique({ where: { id } });
+    if (!file) throw new NotFoundException(`Story file ${id} not found`);
+    return extractTextFromFile(file.storedPath, file.mimeType);
+  }
+
+  async getResumeFileText(id: string): Promise<string> {
+    const file = await this.prisma.resumeFile.findUnique({ where: { id } });
+    if (!file) throw new NotFoundException(`Resume file ${id} not found`);
+    return extractTextFromFile(file.storedPath, file.mimeType);
+  }
+
+  /** Concatenated text of every uploaded Stories file — what the agent actually reads. */
+  async getAllStoriesText(): Promise<string> {
+    const files = await this.listStoryFiles();
+    const texts = await Promise.all(
+      files.map(async (f) => {
+        const text = await extractTextFromFile(f.storedPath, f.mimeType);
+        return `--- ${f.filename} ---\n${text}`;
+      }),
+    );
+    return texts.join('\n\n');
+  }
+
+  /** Concatenated text of every uploaded Resume file — formatting reference only. */
+  async getAllResumeFilesText(): Promise<string> {
+    const files = await this.listResumeFiles();
+    const texts = await Promise.all(
+      files.map(async (f) => {
+        const text = await extractTextFromFile(f.storedPath, f.mimeType);
+        return `--- ${f.filename} ---\n${text}`;
+      }),
+    );
+    return texts.join('\n\n');
   }
 
   async getProfile() {

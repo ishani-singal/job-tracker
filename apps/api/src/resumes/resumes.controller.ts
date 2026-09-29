@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { ProfileFieldsInput, ResumesService } from './resumes.service';
 
@@ -32,6 +32,16 @@ export class ResumesController {
   @Get('files')
   listResumeFiles() {
     return this.resumes.listResumeFiles();
+  }
+
+  @Get('stories/text')
+  getAllStoriesText() {
+    return this.resumes.getAllStoriesText().then((text) => ({ text }));
+  }
+
+  @Get('files/text')
+  getAllResumeFilesText() {
+    return this.resumes.getAllResumeFilesText().then((text) => ({ text }));
   }
 
   @Get('profile')
