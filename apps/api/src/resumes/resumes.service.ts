@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
@@ -44,6 +44,20 @@ export class ResumesService {
 
   listResumeFiles() {
     return this.prisma.resumeFile.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  async deleteStoryFile(id: string) {
+    const file = await this.prisma.storyFile.findUnique({ where: { id } });
+    if (!file) throw new NotFoundException(`Story file ${id} not found`);
+    await this.prisma.storyFile.delete({ where: { id } });
+    await unlink(join(UPLOAD_DIR, file.storedPath)).catch(() => {});
+  }
+
+  async deleteResumeFile(id: string) {
+    const file = await this.prisma.resumeFile.findUnique({ where: { id } });
+    if (!file) throw new NotFoundException(`Resume file ${id} not found`);
+    await this.prisma.resumeFile.delete({ where: { id } });
+    await unlink(join(UPLOAD_DIR, file.storedPath)).catch(() => {});
   }
 
   async getStoryFileText(id: string): Promise<string> {

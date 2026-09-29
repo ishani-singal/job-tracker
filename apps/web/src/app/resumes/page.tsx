@@ -40,6 +40,18 @@ export default function ResumesPage() {
     queryClient.invalidateQueries({ queryKey: ['resume-files'] });
   }
 
+  async function removeStory(id: string) {
+    if (!confirm('Remove this Stories file?')) return;
+    await api.deleteStory(id);
+    queryClient.invalidateQueries({ queryKey: ['stories'] });
+  }
+
+  async function removeResumeFile(id: string) {
+    if (!confirm('Remove this Resume file?')) return;
+    await api.deleteResumeFile(id);
+    queryClient.invalidateQueries({ queryKey: ['resume-files'] });
+  }
+
   return (
     <div className="max-w-3xl mx-auto flex flex-col gap-8">
       <h1 className="text-xl font-semibold">Resumes</h1>
@@ -50,8 +62,18 @@ export default function ResumesPage() {
           type="file"
           onChange={(e) => e.target.files?.[0] && uploadStory(e.target.files[0])}
         />
-        <ul className="text-sm opacity-80 list-disc pl-5">
-          {stories?.map((f) => <li key={f.id}>{f.filename}</li>)}
+        <ul className="text-sm opacity-80 flex flex-col gap-1">
+          {stories?.map((f) => (
+            <li key={f.id} className="flex items-center justify-between">
+              <span>{f.filename}</span>
+              <button
+                className="text-xs text-red-600 dark:text-red-400"
+                onClick={() => removeStory(f.id)}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
         </ul>
       </section>
 
@@ -61,8 +83,18 @@ export default function ResumesPage() {
           type="file"
           onChange={(e) => e.target.files?.[0] && uploadResume(e.target.files[0])}
         />
-        <ul className="text-sm opacity-80 list-disc pl-5">
-          {resumeFiles?.map((f) => <li key={f.id}>{f.filename}</li>)}
+        <ul className="text-sm opacity-80 flex flex-col gap-1">
+          {resumeFiles?.map((f) => (
+            <li key={f.id} className="flex items-center justify-between">
+              <span>{f.filename}</span>
+              <button
+                className="text-xs text-red-600 dark:text-red-400"
+                onClick={() => removeResumeFile(f.id)}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
         </ul>
       </section>
 

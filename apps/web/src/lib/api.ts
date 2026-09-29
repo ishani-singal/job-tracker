@@ -55,6 +55,8 @@ export const api = {
     ),
   listStories: () => request<{ id: string; filename: string }[]>('/resumes/stories'),
   listResumeFiles: () => request<{ id: string; filename: string }[]>('/resumes/files'),
+  deleteStory: (id: string) => request<void>(`/resumes/stories/${id}`, { method: 'DELETE' }),
+  deleteResumeFile: (id: string) => request<void>(`/resumes/files/${id}`, { method: 'DELETE' }),
 
   getGithubConnection: () =>
     request<{ githubLogin: string } | null>('/github/connection'),
