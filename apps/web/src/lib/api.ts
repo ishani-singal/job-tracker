@@ -145,4 +145,9 @@ export const api = {
     }),
   acceptSession: (id: string) =>
     request<GenerationSession>(`/sessions/${id}/accept`, { method: 'POST' }),
+
+  searchLocations: (q: string) =>
+    request<{ label: string; city: string; region: string | null; country: string }[]>(
+      `/locations/search?q=${encodeURIComponent(q)}`,
+    ),
 };

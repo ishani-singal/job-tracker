@@ -8,6 +8,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { GithubModule } from './github/github.module';
 import { EntriesModule } from './entries/entries.module';
 import { SessionsModule } from './sessions/sessions.module';
+import { LocationsModule } from './locations/locations.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { SessionsModule } from './sessions/sessions.module';
     GithubModule,
     EntriesModule,
     SessionsModule,
+    LocationsModule,
   ],
 })
 export class AppModule {}

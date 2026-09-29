@@ -1,5 +1,7 @@
 'use client';
 
+import { LocationInput } from './location-input';
+
 const MONTHS = [
   { value: '', label: 'Month' },
   { value: '1', label: 'Jan' },
@@ -54,11 +56,9 @@ export function DateRangeFields<T extends DateRangeFormState>({
 }) {
   return (
     <>
-      <input
-        className="border rounded px-2 py-1 text-sm bg-transparent col-span-2"
-        placeholder="Location"
+      <LocationInput
         value={form.location}
-        onChange={(e) => onChange({ ...form, location: e.target.value })}
+        onChange={(location) => onChange({ ...form, location })}
       />
       <div className="col-span-4 grid grid-cols-4 gap-2 items-center">
         <select
