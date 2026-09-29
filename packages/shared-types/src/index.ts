@@ -52,7 +52,10 @@ export interface ResumeProfile {
   templateBody: string;
   targetRoleArchetype: string | null;
   disqualifierKeywords: string[];
-  locationZip: string | null;
+  locationCountry: string | null;
+  locationState: string | null;
+  locationCity: string | null;
+  openToRemote: boolean;
   maxYearsExperience: number | null;
   matchScoreTarget: number;
 }
@@ -140,6 +143,11 @@ export interface DiscoveredRole {
   jdText: string | null;
   atsScore: number | null;
   atsScoreComputedAt: string | null;
+  roleIsRemote: boolean | null;
+  roleCountry: string | null;
+  roleState: string | null;
+  roleCity: string | null;
+  locationMismatch: boolean | null;
   applicationId: string | null;
   createdAt: string;
   updatedAt: string;

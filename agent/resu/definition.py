@@ -65,12 +65,23 @@ def build_profile_context(profile: dict, entries: dict | None = None) -> str:
     agent.py's system_prompt hook) so edits in Settings apply immediately with
     no restart.
     """
+    location = ", ".join(
+        part
+        for part in [
+            profile.get("locationCity"),
+            profile.get("locationState"),
+            profile.get("locationCountry"),
+        ]
+        if part
+    )
+
     facts = "\n".join(
         f"- {label}: {value}"
         for label, value in [
             ("Target role archetype", profile.get("targetRoleArchetype")),
             ("Disqualifier keywords", ", ".join(profile.get("disqualifierKeywords") or [])),
-            ("Location / zip", profile.get("locationZip")),
+            ("Location", location),
+            ("Open to remote roles", "Yes" if profile.get("openToRemote") else None),
             ("Max years experience cutoff", profile.get("maxYearsExperience")),
             ("ATS match score target", f"{profile.get('matchScoreTarget', 93)}%"),
         ]

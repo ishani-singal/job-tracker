@@ -183,10 +183,17 @@ export const api = {
   acceptSession: (id: string) =>
     request<GenerationSession>(`/sessions/${id}/accept`, { method: 'POST' }),
 
-  searchLocations: (q: string) =>
-    request<{ label: string; city: string; region: string | null; country: string }[]>(
-      `/locations/search?q=${encodeURIComponent(q)}`,
-    ),
+  searchLocations: (q: string, country?: string, state?: string) => {
+    const params = new URLSearchParams({ q });
+    if (country) params.set('country', country);
+    if (state) params.set('state', state);
+    return request<{ label: string; city: string; region: string | null; country: string }[]>(
+      `/locations/search?${params.toString()}`,
+    );
+  },
+  listCountries: () => request<{ code: string; name: string }[]>('/locations/countries'),
+  listStates: (country: string) =>
+    request<{ code: string; name: string }[]>(`/locations/states?country=${encodeURIComponent(country)}`),
 
   getLinkedinProfile: () => request<LinkedinProfile | null>('/linkedin/profile'),
   getLinkedinStaleness: () =>

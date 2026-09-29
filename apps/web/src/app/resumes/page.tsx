@@ -203,11 +203,21 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
   const [form, setForm] = useState({
     targetRoleArchetype: profile.targetRoleArchetype ?? '',
     disqualifierKeywords: (profile.disqualifierKeywords ?? []).join(', '),
-    locationZip: profile.locationZip ?? '',
+    locationCountry: profile.locationCountry ?? '',
+    locationState: profile.locationState ?? '',
+    locationCity: profile.locationCity ?? '',
+    openToRemote: profile.openToRemote ?? false,
     maxYearsExperience: profile.maxYearsExperience?.toString() ?? '',
     matchScoreTarget: profile.matchScoreTarget?.toString() ?? '93',
   });
   const [saving, setSaving] = useState(false);
+
+  const { data: countries } = useQuery({ queryKey: ['countries'], queryFn: api.listCountries });
+  const { data: states } = useQuery({
+    queryKey: ['states', form.locationCountry],
+    queryFn: () => api.listStates(form.locationCountry),
+    enabled: !!form.locationCountry,
+  });
 
   async function handleSave() {
     setSaving(true);
@@ -218,7 +228,10 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean),
-        locationZip: form.locationZip,
+        locationCountry: form.locationCountry || null,
+        locationState: form.locationState || null,
+        locationCity: form.locationCity || null,
+        openToRemote: form.openToRemote,
         maxYearsExperience: form.maxYearsExperience ? Number(form.maxYearsExperience) : undefined,
         matchScoreTarget: form.matchScoreTarget ? Number(form.matchScoreTarget) : undefined,
       });
@@ -250,14 +263,56 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
           onChange={(e) => setForm({ ...form, disqualifierKeywords: e.target.value })}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Location / Zip">
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Country">
+          <select
+            className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+            value={form.locationCountry}
+            onChange={(e) =>
+              setForm({ ...form, locationCountry: e.target.value, locationState: '', locationCity: '' })
+            }
+          >
+            <option value="">Select country</option>
+            {countries?.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="State / Region">
+          <select
+            className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+            value={form.locationState}
+            onChange={(e) => setForm({ ...form, locationState: e.target.value, locationCity: '' })}
+            disabled={!form.locationCountry}
+          >
+            <option value="">Select state</option>
+            {states?.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="City (optional)">
           <input
             className="border rounded px-2 py-1 text-sm w-full bg-transparent"
-            value={form.locationZip}
-            onChange={(e) => setForm({ ...form, locationZip: e.target.value })}
+            value={form.locationCity}
+            onChange={(e) => setForm({ ...form, locationCity: e.target.value })}
+            disabled={!form.locationState}
           />
         </Field>
+      </div>
+      <label className="flex items-center gap-2 text-xs opacity-80">
+        <input
+          type="checkbox"
+          checked={form.openToRemote}
+          onChange={(e) => setForm({ ...form, openToRemote: e.target.checked })}
+        />
+        Open to remote roles (also match roles whose remote eligibility covers my location)
+      </label>
+      <div className="grid grid-cols-2 gap-3">
         <Field label="Max Years Experience Cutoff">
           <input
             type="number"

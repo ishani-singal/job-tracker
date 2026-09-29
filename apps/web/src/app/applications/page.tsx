@@ -13,6 +13,18 @@ function AtsScoreBadge({ score }: { score: number | null }) {
   return <span className={`text-xs font-medium ${color}`}>{score}% match</span>;
 }
 
+function RoleLocation({ role }: { role: DiscoveredRole }) {
+  const parts = [role.roleCity, role.roleState, role.roleCountry].filter(Boolean);
+  const label = role.roleIsRemote ? (parts.length ? `Remote (${parts.join(', ')})` : 'Remote') : parts.join(', ');
+  if (!label && role.locationMismatch === null) return null;
+  return (
+    <span className={`text-xs ${role.locationMismatch ? 'text-red-600' : 'opacity-60'}`}>
+      {label || 'Location unknown'}
+      {role.locationMismatch ? ' · outside your location preferences' : ''}
+    </span>
+  );
+}
+
 export default function ApplicationsPage() {
   const queryClient = useQueryClient();
   const { data: applications, isLoading } = useQuery({
@@ -155,6 +167,7 @@ function DiscoveredRoleRow({
             ? `Posted ${new Date(role.postedDate).toLocaleDateString()}`
             : 'Posted date unknown'}
         </span>
+        <RoleLocation role={role} />
         <AtsScoreBadge score={role.atsScore} />
       </div>
       <button

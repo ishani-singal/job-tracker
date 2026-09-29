@@ -85,6 +85,17 @@ model DiscoveredRole {
   atsScore           Int?
   atsScoreComputedAt DateTime?
 
+  // Location signal extracted from the JD at scoring time — used to filter/flag
+  // roles against the candidate's location + remote preferences (see
+  // ResumePromptTemplate.locationCountry/State/City/openToRemote). isRemote
+  // null means the JD's location couldn't be determined yet (not scored, or
+  // scoring couldn't find a location signal in the text).
+  roleIsRemote    Boolean?
+  roleCountry     String?
+  roleState       String?
+  roleCity        String?
+  locationMismatch Boolean?
+
   applicationId String? @unique
 
   createdAt DateTime @default(now())
@@ -121,7 +132,16 @@ model ResumePromptTemplate {
   // Profile fields — personal facts substituted into the template at generation time
   targetRoleArchetype   String?
   disqualifierKeywords  String[] @default([])
-  locationZip           String?
+  // Candidate's location, used to limit/flag scanning to matching roles.
+  // City is optional and never used alone — only country+state are checked
+  // against a role's location (see DiscoveredRole.locationMismatch).
+  locationCountry       String?
+  locationState         String?
+  locationCity          String?
+  // When true, a role whose JD says it allows remote work is treated as a
+  // location match if the JD's stated remote-eligible geography covers the
+  // candidate's country/state, even if the role's base office doesn't.
+  openToRemote          Boolean  @default(false)
   maxYearsExperience    Int?
   matchScoreTarget      Int      @default(93)
 

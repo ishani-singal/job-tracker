@@ -11,7 +11,10 @@ const UPLOAD_DIR = join(process.cwd(), '..', '..', 'data', 'uploads');
 export interface ProfileFieldsInput {
   targetRoleArchetype?: string;
   disqualifierKeywords?: string[];
-  locationZip?: string;
+  locationCountry?: string | null;
+  locationState?: string | null;
+  locationCity?: string | null;
+  openToRemote?: boolean;
   maxYearsExperience?: number;
   matchScoreTarget?: number;
   templateBody?: string;
@@ -113,7 +116,10 @@ export class ResumesService {
       ...(input.disqualifierKeywords !== undefined && {
         disqualifierKeywords: input.disqualifierKeywords,
       }),
-      ...(input.locationZip !== undefined && { locationZip: input.locationZip }),
+      ...(input.locationCountry !== undefined && { locationCountry: input.locationCountry }),
+      ...(input.locationState !== undefined && { locationState: input.locationState }),
+      ...(input.locationCity !== undefined && { locationCity: input.locationCity }),
+      ...(input.openToRemote !== undefined && { openToRemote: input.openToRemote }),
       ...(input.maxYearsExperience !== undefined && {
         maxYearsExperience: input.maxYearsExperience,
       }),

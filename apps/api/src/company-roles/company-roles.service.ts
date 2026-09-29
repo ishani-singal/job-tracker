@@ -10,6 +10,7 @@ import * as cheerio from 'cheerio';
 import { Browser, chromium, Page } from 'playwright';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApplicationsService } from '../applications/applications.service';
+import { LocationsService } from '../locations/locations.service';
 
 /** Roles posted before this many days ago are dropped during discovery —
  * stale postings clutter the candidate pool and are usually already filled
@@ -146,6 +147,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => ApplicationsService))
     private readonly applications: ApplicationsService,
+    private readonly locations: LocationsService,
   ) {}
 
   async onModuleDestroy() {
@@ -650,6 +652,8 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     const [profile, entries] = await Promise.all([this.fetchCandidateProfile(), this.fetchCandidateEntries()]);
 
+    const candidateLocation = this.extractCandidateLocation(profile);
+
     await this.runWithConcurrency(roles, SCORING_CONCURRENCY, async (role) => {
       try {
         const jdText = role.jdText || (await this.fetchRoleJd(role.roleUrl));
@@ -660,19 +664,45 @@ export class CompanyRolesService implements OnModuleDestroy {
           // wrong content.
           return;
         }
-        const score = await this.estimateAtsScore(jdText, profile, entries);
+        const result = await this.estimateAtsScore(jdText, profile, entries);
         await this.prisma.discoveredRole.update({
           where: { id: role.id },
           data: {
             jdText: role.jdText || jdText || undefined,
-            atsScore: score,
+            atsScore: result.score,
             atsScoreComputedAt: new Date(),
+            roleIsRemote: result.isRemote,
+            roleCountry: result.country,
+            roleState: result.state,
+            roleCity: result.city,
+            locationMismatch: this.computeLocationMismatch(result, candidateLocation),
           },
         });
       } catch (err) {
         this.logger.warn(`ATS scoring failed for role ${role.id}: ${err}`);
       }
     });
+  }
+
+  /** Resolves the candidate profile's stored country/state codes (from the
+   * dropdowns) to display names, so they compare cleanly against a JD's
+   * free-form extracted location in computeLocationMismatch(). */
+  private extractCandidateLocation(profile: unknown): {
+    country: string | null;
+    state: string | null;
+    openToRemote: boolean;
+  } {
+    const p = (profile ?? {}) as {
+      locationCountry?: string | null;
+      locationState?: string | null;
+      openToRemote?: boolean;
+    };
+    const countryCode = p.locationCountry ?? null;
+    return {
+      country: countryCode ? this.locations.countryName(countryCode) : null,
+      state: countryCode && p.locationState ? this.locations.stateName(countryCode, p.locationState) : null,
+      openToRemote: !!p.openToRemote,
+    };
   }
 
   /** Runs `fn` over `items` with at most `limit` in flight at once — scoring
@@ -703,14 +733,20 @@ export class CompanyRolesService implements OnModuleDestroy {
         data: { atsScoreComputedAt: new Date() },
       });
     }
-    const score = await this.estimateAtsScore(jdText, profile, entries);
+    const result = await this.estimateAtsScore(jdText, profile, entries);
+    const candidateLocation = this.extractCandidateLocation(profile);
 
     return this.prisma.discoveredRole.update({
       where: { id: roleId },
       data: {
         jdText: role.jdText || jdText || undefined,
-        atsScore: score,
+        atsScore: result.score,
         atsScoreComputedAt: new Date(),
+        roleIsRemote: result.isRemote,
+        roleCountry: result.country,
+        roleState: result.state,
+        roleCity: result.city,
+        locationMismatch: this.computeLocationMismatch(result, candidateLocation),
       },
     });
   }
@@ -738,18 +774,33 @@ export class CompanyRolesService implements OnModuleDestroy {
     return res.ok ? res.json() : {};
   }
 
-  /** Lightweight ATS match estimate (0-100) — a fast, standalone LLM call
-   * comparing the JD against the candidate's profile/background, distinct
-   * from the full resume-generation flow's matchScoreTarget (which scores an
-   * actual generated resume, not a candidate-vs-JD fit estimate up front). */
-  private async estimateAtsScore(jdText: string, profile: unknown, entries: unknown): Promise<number | null> {
-    if (!jdText) return null;
+  /** Lightweight ATS match estimate (0-100) plus the JD's location signal —
+   * one LLM call rather than two separate round trips, since both need the
+   * same JD text in context. isRemote/country/state/city describe where the
+   * role itself is based (or, for a geography-restricted remote role, the
+   * country/state its remote eligibility is restricted to, e.g. "Remote (US
+   * only)" -> isRemote true, country "United States"). state/country are left
+   * null when a remote role isn't restricted to a specific state/country.
+   * Any field the JD doesn't state is null. */
+  private async estimateAtsScore(
+    jdText: string,
+    profile: unknown,
+    entries: unknown,
+  ): Promise<{
+    score: number | null;
+    isRemote: boolean | null;
+    country: string | null;
+    state: string | null;
+    city: string | null;
+  }> {
+    const empty = { score: null, isRemote: null, country: null, state: null, city: null };
+    if (!jdText) return empty;
 
     const endpoint = process.env.AZURE_LLM_ENDPOINT;
     const apiKey = process.env.AZURE_LLM_API_KEY;
     const deployment = process.env.AZURE_LLM_DEPLOYMENT_NAME ?? 'gpt-4.1';
     const apiVersion = process.env.AZURE_LLM_API_VERSION ?? '2024-12-01-preview';
-    if (!endpoint || !apiKey) return null;
+    if (!endpoint || !apiKey) return empty;
 
     const baseEndpoint = endpoint.replace(/\/openai\/?$/, '');
     const url = `${baseEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
@@ -762,9 +813,22 @@ export class CompanyRolesService implements OnModuleDestroy {
             role: 'system',
             content:
               'You estimate how well a candidate matches a job description for ATS/recruiter ' +
-              'screening purposes. Return ONLY a JSON object: {"score": <integer 0-100>}. Base ' +
+              'screening purposes, and extract the JD\'s work-location signal. Return ONLY a ' +
+              'JSON object: {"score": <integer 0-100>, "isRemote": boolean|null, ' +
+              '"country": string|null, "state": string|null, "city": string|null}. score: base ' +
               'it on keyword/skill overlap, seniority match, and domain relevance between the ' +
-              "candidate's background and the JD's requirements. Be realistic, not generous.",
+              "candidate's background and the JD's requirements. Be realistic, not generous. " +
+              'isRemote: true if the JD says the role is remote/work-from-home/distributed (even ' +
+              'if restricted to certain locations), false if it explicitly requires onsite/hybrid ' +
+              'office presence, null if the JD says nothing about work location at all. country: ' +
+              'full country name (e.g. "United States") the role is based in, or — if remote — the ' +
+              'country its remote eligibility is restricted to if the JD states one (e.g. "Remote ' +
+              '(US only)" -> "United States"); null if unstated or remote with no country ' +
+              'restriction. state: the state/province/region the role is based in, or the specific ' +
+              'state remote eligibility is restricted to if the JD states one; null otherwise ' +
+              '(including remote roles open anywhere in the country). city: the city the role is ' +
+              'based in if stated; null for remote roles or if unstated. Use full names, not ' +
+              'abbreviations or codes.',
           },
           {
             role: 'user',
@@ -775,11 +839,59 @@ export class CompanyRolesService implements OnModuleDestroy {
         response_format: { type: 'json_object' },
       }),
     });
-    if (!response.ok) return null;
+    if (!response.ok) return empty;
 
     const data = (await response.json()) as { choices: { message: { content: string } }[] };
     const raw = data.choices[0]?.message?.content ?? '{}';
-    const parsed = JSON.parse(raw) as { score?: number };
-    return typeof parsed.score === 'number' ? Math.max(0, Math.min(100, Math.round(parsed.score))) : null;
+    const parsed = JSON.parse(raw) as {
+      score?: number;
+      isRemote?: boolean | null;
+      country?: string | null;
+      state?: string | null;
+      city?: string | null;
+    };
+    return {
+      score: typeof parsed.score === 'number' ? Math.max(0, Math.min(100, Math.round(parsed.score))) : null,
+      isRemote: typeof parsed.isRemote === 'boolean' ? parsed.isRemote : null,
+      country: parsed.country || null,
+      state: parsed.state || null,
+      city: parsed.city || null,
+    };
+  }
+
+  /** Whether a scored role's extracted location conflicts with the
+   * candidate's own country/state (city is never checked — see
+   * ResumePromptTemplate.locationCity's doc comment). Null means "can't
+   * tell" (candidate hasn't set a location, or the JD gave no location
+   * signal at all) rather than a mismatch, since flagging every role as a
+   * mismatch when there's nothing to compare would make the flag useless.
+   *
+   * - Onsite/hybrid role (isRemote false/null with a stated country): matches
+   *   only if country (+ state, when the JD stated one) equals the
+   *   candidate's.
+   * - Remote role: matches if the candidate is open to remote AND the JD's
+   *   remote-eligible geography (if it restricts one) covers the candidate's
+   *   country/state. An unrestricted remote role always matches once the
+   *   candidate is open to remote. */
+  private computeLocationMismatch(
+    role: { isRemote: boolean | null; country: string | null; state: string | null },
+    candidate: { country: string | null; state: string | null; openToRemote: boolean },
+  ): boolean | null {
+    if (!candidate.country) return null;
+
+    const namesMatch = (a: string | null, b: string | null) =>
+      !a || !b || a.trim().toLowerCase() === b.trim().toLowerCase();
+
+    if (role.isRemote) {
+      if (!candidate.openToRemote) return true;
+      if (!namesMatch(role.country, candidate.country)) return true;
+      if (role.country && role.state && !namesMatch(role.state, candidate.state)) return true;
+      return false;
+    }
+
+    if (!role.country) return null; // onsite/unstated with no location signal at all — can't judge
+    if (!namesMatch(role.country, candidate.country)) return true;
+    if (role.state && !namesMatch(role.state, candidate.state)) return true;
+    return false;
   }
 }
