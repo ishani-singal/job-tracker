@@ -42,15 +42,20 @@ resu_agent = Agent(
 
 @resu_agent.system_prompt
 async def _inject_profile(ctx: RunContext[ResuDeps]) -> str:
-    """Appends the candidate's profile facts + process template to the base
-    prompt on every run, so the model has them from its very first turn instead
-    of needing to call fetch_candidate_profile itself first.
+    """Appends the candidate's profile facts + structured entries + process
+    template to the base prompt on every run, so the model has them from its
+    very first turn instead of needing to call the fetch tools itself first.
     """
     async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{ctx.deps.api_base_url}/resumes/profile")
-        resp.raise_for_status()
-        profile = resp.json()
-    return build_profile_context(profile)
+        profile_resp = await client.get(f"{ctx.deps.api_base_url}/resumes/profile")
+        profile_resp.raise_for_status()
+        profile = profile_resp.json()
+
+        entries_resp = await client.get(f"{ctx.deps.api_base_url}/entries")
+        entries_resp.raise_for_status()
+        entries = entries_resp.json()
+
+    return build_profile_context(profile, entries)
 
 
 async def generate_resume(application_id: str, api_base_url: str) -> str:

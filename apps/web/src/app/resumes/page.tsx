@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { ResumeProfile } from '@job-tracker/shared-types';
 import { GithubConnectSection } from '@/components/github-connect-section';
+import { EntriesSection } from '@/components/entries-section';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 
@@ -69,6 +70,8 @@ export default function ResumesPage() {
 
       {profile && <ProfileForm profile={profile} />}
 
+      <EntriesSection />
+
       <PromptPreviewSection />
     </div>
   );
@@ -112,6 +115,7 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
     disqualifierKeywords: (profile.disqualifierKeywords ?? []).join(', '),
     locationZip: profile.locationZip ?? '',
     maxYearsExperience: profile.maxYearsExperience?.toString() ?? '',
+    matchScoreTarget: profile.matchScoreTarget?.toString() ?? '93',
   });
   const [saving, setSaving] = useState(false);
 
@@ -126,6 +130,7 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
           .filter(Boolean),
         locationZip: form.locationZip,
         maxYearsExperience: form.maxYearsExperience ? Number(form.maxYearsExperience) : undefined,
+        matchScoreTarget: form.matchScoreTarget ? Number(form.matchScoreTarget) : undefined,
       });
       queryClient.invalidateQueries({ queryKey: ['profile'] });
     } finally {
@@ -171,7 +176,21 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
             onChange={(e) => setForm({ ...form, maxYearsExperience: e.target.value })}
           />
         </Field>
+        <Field label="ATS Match Score Target (%)">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+            value={form.matchScoreTarget}
+            onChange={(e) => setForm({ ...form, matchScoreTarget: e.target.value })}
+          />
+        </Field>
       </div>
+      <p className="text-xs opacity-60">
+        93% is a reasonable default for most ATS systems — higher targets push the agent to
+        incorporate more exact JD phrasing, which can read as less natural.
+      </p>
 
       <button
         className="self-start px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black"

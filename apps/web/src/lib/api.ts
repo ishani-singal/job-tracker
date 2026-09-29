@@ -3,8 +3,12 @@ import type {
   AnalyticsTimeseriesPoint,
   Application,
   AppSettings,
+  EducationEntry,
+  InternshipEntry,
   ParsedJob,
+  ProjectEntry,
   ResumeProfile,
+  WorkExperienceEntry,
 } from '@job-tracker/shared-types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
@@ -65,4 +69,60 @@ export const api = {
     request<void>(`/github/repos/connected/${encodeURIComponent(fullName)}`, {
       method: 'DELETE',
     }),
+
+  listWorkExperience: () => request<WorkExperienceEntry[]>('/entries/work-experience'),
+  createWorkExperience: (data: Partial<WorkExperienceEntry>) =>
+    request<WorkExperienceEntry>('/entries/work-experience', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateWorkExperience: (id: string, data: Partial<WorkExperienceEntry>) =>
+    request<WorkExperienceEntry>(`/entries/work-experience/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteWorkExperience: (id: string) =>
+    request<void>(`/entries/work-experience/${id}`, { method: 'DELETE' }),
+
+  listEducation: () => request<EducationEntry[]>('/entries/education'),
+  createEducation: (data: Partial<EducationEntry>) =>
+    request<EducationEntry>('/entries/education', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateEducation: (id: string, data: Partial<EducationEntry>) =>
+    request<EducationEntry>(`/entries/education/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteEducation: (id: string) =>
+    request<void>(`/entries/education/${id}`, { method: 'DELETE' }),
+
+  listInternships: () => request<InternshipEntry[]>('/entries/internships'),
+  createInternship: (data: Partial<InternshipEntry>) =>
+    request<InternshipEntry>('/entries/internships', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateInternship: (id: string, data: Partial<InternshipEntry>) =>
+    request<InternshipEntry>(`/entries/internships/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteInternship: (id: string) =>
+    request<void>(`/entries/internships/${id}`, { method: 'DELETE' }),
+
+  listProjects: () => request<ProjectEntry[]>('/entries/projects'),
+  createProject: (data: Partial<ProjectEntry>) =>
+    request<ProjectEntry>('/entries/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateProject: (id: string, data: Partial<ProjectEntry>) =>
+    request<ProjectEntry>(`/entries/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteProject: (id: string) =>
+    request<void>(`/entries/projects/${id}`, { method: 'DELETE' }),
 };

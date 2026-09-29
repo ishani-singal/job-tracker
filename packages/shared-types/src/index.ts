@@ -53,8 +53,44 @@ export interface ResumeProfile {
   disqualifierKeywords: string[];
   locationZip: string | null;
   maxYearsExperience: number | null;
-  requiredExperienceEntries: unknown[];
-  requiredProjectEntries: unknown[];
+  matchScoreTarget: number;
+}
+
+export interface WorkExperienceEntry {
+  id: string;
+  company: string;
+  title: string | null;
+  yearIn: number | null;
+  yearOut: number | null;
+  required: boolean;
+  sortOrder: number;
+}
+
+export interface EducationEntry {
+  id: string;
+  school: string;
+  degree: string | null;
+  year: number | null;
+  required: boolean;
+  sortOrder: number;
+}
+
+export interface InternshipEntry {
+  id: string;
+  company: string;
+  year: number | null;
+  required: boolean;
+  sortOrder: number;
+}
+
+export interface ProjectEntry {
+  id: string;
+  name: string;
+  repoUrl: string | null;
+  liveUrl: string | null;
+  year: number | null;
+  required: boolean;
+  sortOrder: number;
 }
 
 export interface ParsedJob {

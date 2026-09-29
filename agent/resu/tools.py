@@ -28,12 +28,28 @@ async def fetch_job_description(ctx: RunContext[ResuDeps], application_id: str) 
 async def fetch_candidate_profile(ctx: RunContext[ResuDeps]) -> dict:
     """Fetch the candidate's resume prompt profile: template body plus personal
     facts (target role archetype, disqualifier keywords, location, experience
-    cutoff, required work-experience/project entries). Call this before writing
-    any resume content — it supplies both the process instructions and the facts
-    that make bullets specific to this candidate rather than generic.
+    cutoff, ATS match-score target). Call this before writing any resume
+    content — it supplies both the process instructions and the facts that
+    make bullets specific to this candidate rather than generic.
     """
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{ctx.deps.api_base_url}/resumes/profile")
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def fetch_structured_entries(ctx: RunContext[ResuDeps]) -> dict:
+    """Fetch the candidate's curated background: work experience, education,
+    internships, and projects, each entry flagged `required` (True) or not.
+
+    Required entries MUST appear in the generated resume regardless of the
+    JD. Non-required entries are optional — include one only if it's actually
+    relevant to the specific JD being tailored for right now (e.g. a project
+    whose tech stack or domain matches what the JD asks for); otherwise leave
+    it out rather than padding the resume with irrelevant history.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{ctx.deps.api_base_url}/entries")
         resp.raise_for_status()
         return resp.json()
 

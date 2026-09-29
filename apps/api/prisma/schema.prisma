@@ -66,11 +66,54 @@ model ResumePromptTemplate {
   disqualifierKeywords  String[] @default([])
   locationZip           String?
   maxYearsExperience    Int?
-  requiredExperienceEntries Json @default("[]")
-  requiredProjectEntries    Json @default("[]")
+  matchScoreTarget      Int      @default(93)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Structured background entries the candidate curates once on /resumes. Each is
+// flagged required (always included) or optional (agent includes only when
+// relevant to the specific JD being tailored for — see prompt instructions).
+model WorkExperienceEntry {
+  id        String   @id @default(cuid())
+  company   String
+  title     String?
+  yearIn    Int?
+  yearOut   Int? // null = present/ongoing
+  required  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model EducationEntry {
+  id        String   @id @default(cuid())
+  school    String
+  degree    String?
+  year      Int?
+  required  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model InternshipEntry {
+  id        String   @id @default(cuid())
+  company   String
+  year      Int?
+  required  Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model ProjectEntry {
+  id        String   @id @default(cuid())
+  name      String
+  repoUrl   String?
+  liveUrl   String?
+  year      Int?
+  required  Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
 }
 
 model AppSettings {

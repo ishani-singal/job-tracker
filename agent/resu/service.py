@@ -46,11 +46,16 @@ async def prompt_preview() -> PromptPreviewResponse:
     web UI show, verbatim, what's actually driving generation.
     """
     async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{API_BASE_URL}/resumes/profile")
-        resp.raise_for_status()
-        profile = resp.json()
+        profile_resp = await client.get(f"{API_BASE_URL}/resumes/profile")
+        profile_resp.raise_for_status()
+        profile = profile_resp.json()
+
+        entries_resp = await client.get(f"{API_BASE_URL}/entries")
+        entries_resp.raise_for_status()
+        entries = entries_resp.json()
 
     prompt = (
-        f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}\n\n{build_profile_context(profile)}"
+        f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}\n\n"
+        f"{build_profile_context(profile, entries)}"
     )
     return PromptPreviewResponse(prompt=prompt)
