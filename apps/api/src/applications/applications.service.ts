@@ -4,6 +4,7 @@ import { ApplicationStatus, Prisma } from '@prisma/client';
 
 export interface CreateApplicationInput {
   company: string;
+  role?: string;
   jobUrl?: string;
   jdText?: string;
   postedDate?: string;
@@ -36,6 +37,7 @@ export class ApplicationsService {
   create(input: CreateApplicationInput) {
     const data: Prisma.ApplicationCreateInput = {
       company: input.company,
+      role: input.role,
       jobUrl: input.jobUrl,
       jdText: input.jdText,
       postedDate: input.postedDate ? new Date(input.postedDate) : undefined,
@@ -50,6 +52,7 @@ export class ApplicationsService {
     await this.get(id);
     const data: Prisma.ApplicationUpdateInput = {
       ...(input.company !== undefined && { company: input.company }),
+      ...(input.role !== undefined && { role: input.role }),
       ...(input.jobUrl !== undefined && { jobUrl: input.jobUrl }),
       ...(input.jdText !== undefined && { jdText: input.jdText }),
       ...(input.salaryRange !== undefined && { salaryRange: input.salaryRange }),

@@ -39,7 +39,10 @@ export default function ApplicationDetailPage({
   return (
     <div className="max-w-3xl mx-auto flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold">{application.company}</h1>
+        <h1 className="text-xl font-semibold">
+          {application.company}
+          {application.role ? ` — ${application.role}` : ''}
+        </h1>
         {application.jobUrl && (
           <a
             href={application.jobUrl}

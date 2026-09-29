@@ -15,6 +15,7 @@ enum ApplicationStatus {
 model Application {
   id          String   @id @default(cuid())
   company     String
+  role        String?
   jobUrl      String?
   jdText      String?
   postedDate  DateTime?

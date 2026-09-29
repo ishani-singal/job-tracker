@@ -17,7 +17,7 @@ export default function ApplicationsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Applications</h1>
         <AddApplicationDialog
-          onCreated={() => queryClient.invalidateQueries({ queryKey: ['applications'] })}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: ['applications'] })}
         />
       </div>
 

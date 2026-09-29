@@ -4,6 +4,7 @@ export type DerivedStatus = 'active' | 'inactive' | 'stale' | 'rejected';
 export interface Application {
   id: string;
   company: string;
+  role: string | null;
   jobUrl: string | null;
   jdText: string | null;
   postedDate: string | null;
@@ -18,6 +19,8 @@ export interface Application {
   resumeGeneratedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Present on list responses (GET /applications) — omitted on single-record reads. */
+  derivedStatus?: DerivedStatus;
 }
 
 export interface AnalyticsSummary {
@@ -56,6 +59,7 @@ export interface ResumeProfile {
 
 export interface ParsedJob {
   company?: string;
+  role?: string;
   jdText?: string;
   postedDate?: string;
   applyByDate?: string;

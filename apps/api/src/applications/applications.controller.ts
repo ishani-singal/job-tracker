@@ -12,16 +12,21 @@ import {
   CreateApplicationInput,
   UpdateApplicationInput,
 } from './applications.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
 @Controller('applications')
 export class ApplicationsController {
-  constructor(private readonly applications: ApplicationsService) {}
+  constructor(
+    private readonly applications: ApplicationsService,
+    private readonly analytics: AnalyticsService,
+  ) {}
 
   @Get()
-  list() {
-    return this.applications.list();
+  async list() {
+    const derived = await this.analytics.deriveAll();
+    return derived.map((d) => ({ ...d.application, derivedStatus: d.status }));
   }
 
   @Get(':id')

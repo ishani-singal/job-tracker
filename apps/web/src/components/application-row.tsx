@@ -5,10 +5,22 @@ import Link from 'next/link';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Application } from '@job-tracker/shared-types';
 import { api } from '@/lib/api';
+import { AddApplicationDialog } from './add-application-dialog';
+
+function rowBackgroundClass(application: Application): string {
+  if (application.derivedStatus === 'rejected' || application.derivedStatus === 'inactive') {
+    return 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900';
+  }
+  if (application.status === 'APPLIED') {
+    return 'bg-green-50 dark:bg-green-950/40 border-green-200 dark:border-green-900';
+  }
+  return '';
+}
 
 export function ApplicationRow({ application }: { application: Application }) {
   const queryClient = useQueryClient();
   const [generating, setGenerating] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   const markApplied = useMutation({
     mutationFn: () =>
@@ -16,6 +28,11 @@ export function ApplicationRow({ application }: { application: Application }) {
         status: 'APPLIED',
         appliedDate: new Date().toISOString().slice(0, 10),
       } as Partial<Application>),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['applications'] }),
+  });
+
+  const deleteApplication = useMutation({
+    mutationFn: () => api.deleteApplication(application.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['applications'] }),
   });
 
@@ -29,15 +46,30 @@ export function ApplicationRow({ application }: { application: Application }) {
     }
   }
 
+  function handleDelete() {
+    if (confirm(`Delete application at ${application.company}? This can't be undone.`)) {
+      deleteApplication.mutate();
+    }
+  }
+
   return (
-    <div className="flex items-center justify-between border rounded px-4 py-3 text-sm">
+    <div
+      className={`flex items-center justify-between border rounded px-4 py-3 text-sm ${rowBackgroundClass(application)}`}
+    >
       <div className="flex flex-col gap-0.5">
         <Link href={`/applications/${application.id}`} className="font-medium hover:underline">
           {application.company}
+          {application.role ? ` — ${application.role}` : ''}
         </Link>
         <span className="text-xs opacity-60">
           {application.status === 'APPLIED' ? 'Applied' : 'Not applied'}
-          {application.rejectedDate ? ' · Rejected' : ''}
+          {application.rejectedDate
+            ? ' · Rejected'
+            : application.derivedStatus === 'inactive'
+              ? ' · Inactive'
+              : application.derivedStatus === 'stale'
+                ? ' · Stale'
+                : ''}
         </span>
       </div>
       <div className="flex gap-2">
@@ -56,7 +88,24 @@ export function ApplicationRow({ application }: { application: Application }) {
         >
           {generating ? 'Generating...' : 'Generate Resume'}
         </button>
+        <button className="px-2 py-1 text-xs rounded border" onClick={() => setEditOpen(true)}>
+          Edit
+        </button>
+        <button
+          className="px-2 py-1 text-xs rounded border text-red-600 dark:text-red-400"
+          onClick={handleDelete}
+          disabled={deleteApplication.isPending}
+        >
+          Delete
+        </button>
       </div>
+
+      <AddApplicationDialog
+        editApplication={application}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['applications'] })}
+      />
     </div>
   );
 }

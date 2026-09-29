@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { api } from '@/lib/api';
-import type { ParsedJob } from '@job-tracker/shared-types';
+import type { Application, ParsedJob } from '@job-tracker/shared-types';
 
 interface FormState {
   company: string;
+  role: string;
   jobUrl: string;
   jdText: string;
   postedDate: string;
@@ -17,6 +18,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   company: '',
+  role: '',
   jobUrl: '',
   jdText: '',
   postedDate: '',
@@ -25,13 +27,45 @@ const EMPTY_FORM: FormState = {
   experienceLevel: '',
 };
 
-export function AddApplicationDialog({ onCreated }: { onCreated: () => void }) {
-  const [open, setOpen] = useState(false);
+function toFormState(app: Application): FormState {
+  return {
+    company: app.company,
+    role: app.role ?? '',
+    jobUrl: app.jobUrl ?? '',
+    jdText: app.jdText ?? '',
+    postedDate: app.postedDate ? app.postedDate.slice(0, 10) : '',
+    applyByDate: app.applyByDate ? app.applyByDate.slice(0, 10) : '',
+    salaryRange: app.salaryRange ?? '',
+    experienceLevel: app.experienceLevel ?? '',
+  };
+}
+
+interface Props {
+  onSaved: () => void;
+  /** Edit mode when provided — renders as a controlled dialog around existing data. */
+  editApplication?: Application;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function AddApplicationDialog({ onSaved, editApplication, open, onOpenChange }: Props) {
+  const isEditMode = !!editApplication;
+  const [internalOpen, setInternalOpen] = useState(false);
+  const dialogOpen = open ?? internalOpen;
+  const setDialogOpen = onOpenChange ?? setInternalOpen;
+
   const [url, setUrl] = useState('');
   const [parsing, setParsing] = useState(false);
   const [parseFailed, setParseFailed] = useState(false);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [form, setForm] = useState<FormState>(editApplication ? toFormState(editApplication) : EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (editApplication) {
+      setForm(toFormState(editApplication));
+      setUrl(editApplication.jobUrl ?? '');
+    }
+  }, [editApplication]);
 
   async function handleParse() {
     if (!url) return;
@@ -44,6 +78,7 @@ export function AddApplicationDialog({ onCreated }: { onCreated: () => void }) {
         ...prev,
         jobUrl: url,
         company: parsed.company ?? prev.company,
+        role: parsed.role ?? prev.role,
         jdText: parsed.jdText ?? prev.jdText,
         postedDate: parsed.postedDate ?? prev.postedDate,
         applyByDate: parsed.applyByDate ?? prev.applyByDate,
@@ -62,27 +97,37 @@ export function AddApplicationDialog({ onCreated }: { onCreated: () => void }) {
     if (!form.company) return;
     setSubmitting(true);
     try {
-      await api.createApplication(form);
-      setForm(EMPTY_FORM);
-      setUrl('');
-      setOpen(false);
-      onCreated();
+      if (isEditMode) {
+        await api.updateApplication(editApplication.id, form);
+      } else {
+        await api.createApplication(form);
+        setForm(EMPTY_FORM);
+        setUrl('');
+      }
+      setDialogOpen(false);
+      onSaved();
     } finally {
       setSubmitting(false);
     }
   }
 
+  const trigger = isEditMode ? null : (
+    <Dialog.Trigger asChild>
+      <button className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black">
+        Add Application
+      </button>
+    </Dialog.Trigger>
+  );
+
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger asChild>
-        <button className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black">
-          Add Application
-        </button>
-      </Dialog.Trigger>
+    <Dialog.Root open={dialogOpen} onOpenChange={setDialogOpen}>
+      {trigger}
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/40" />
         <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-neutral-900 rounded-lg p-6 w-[520px] max-h-[85vh] overflow-y-auto flex flex-col gap-3">
-          <Dialog.Title className="text-lg font-semibold">Add Application</Dialog.Title>
+          <Dialog.Title className="text-lg font-semibold">
+            {isEditMode ? 'Edit Application' : 'Add Application'}
+          </Dialog.Title>
 
           <div className="flex gap-2">
             <input
@@ -105,13 +150,22 @@ export function AddApplicationDialog({ onCreated }: { onCreated: () => void }) {
             </p>
           )}
 
-          <Field label="Company">
-            <input
-              className="border rounded px-2 py-1 text-sm w-full bg-transparent"
-              value={form.company}
-              onChange={(e) => setForm({ ...form, company: e.target.value })}
-            />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Company">
+              <input
+                className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+                value={form.company}
+                onChange={(e) => setForm({ ...form, company: e.target.value })}
+              />
+            </Field>
+            <Field label="Role / Title">
+              <input
+                className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+              />
+            </Field>
+          </div>
           <Field label="Job Description">
             <textarea
               className="border rounded px-2 py-1 text-sm w-full h-24 bg-transparent"
@@ -161,7 +215,7 @@ export function AddApplicationDialog({ onCreated }: { onCreated: () => void }) {
               onClick={handleSubmit}
               disabled={submitting || !form.company}
             >
-              {submitting ? 'Saving...' : 'Save Application'}
+              {submitting ? 'Saving...' : isEditMode ? 'Save Changes' : 'Save Application'}
             </button>
           </div>
         </Dialog.Content>

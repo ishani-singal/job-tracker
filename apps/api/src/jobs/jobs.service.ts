@@ -4,6 +4,7 @@ import { Browser, chromium } from 'playwright';
 
 export interface ParsedJob {
   company?: string;
+  role?: string;
   jdText?: string;
   postedDate?: string;
   applyByDate?: string;
@@ -14,10 +15,11 @@ export interface ParsedJob {
 
 const EXTRACTION_SYSTEM_PROMPT = `You extract structured job-posting fields from raw page
 text. Return ONLY a JSON object with these keys (use null for anything not present):
-company (string), jdText (string, the role description/requirements/qualifications only —
-exclude compensation/benefits boilerplate), postedDate (ISO date string), applyByDate (ISO
-date string), salaryRange (string), experienceLevel (string, e.g. "5+ years" or "Senior").
-Do not include any text outside the JSON object.`;
+company (string), role (string, the job title as posted, e.g. "Senior Product Manager" —
+not the department or team name), jdText (string, the role description/requirements/
+qualifications only — exclude compensation/benefits boilerplate), postedDate (ISO date
+string), applyByDate (ISO date string), salaryRange (string), experienceLevel (string, e.g.
+"5+ years" or "Senior"). Do not include any text outside the JSON object.`;
 
 @Injectable()
 export class JobsService implements OnModuleDestroy {
@@ -114,6 +116,7 @@ export class JobsService implements OnModuleDestroy {
 
     return {
       company: parsed.company ?? undefined,
+      role: parsed.role ?? undefined,
       jdText: parsed.jdText ?? undefined,
       postedDate: parsed.postedDate ?? undefined,
       applyByDate: parsed.applyByDate ?? undefined,
