@@ -9,6 +9,7 @@ is whole-candidate scoped, not tied to a single job application.
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -33,8 +34,15 @@ _model = OpenAIChatModel(
 )
 
 
+EntryType = Literal["workExperience", "education", "internship", "project"]
+
+
 class LinkedinEntryBullets(BaseModel):
-    entry_type: str  # "work_experience" | "education" | "internship" | "project"
+    # Matches fetch_structured_entries' own key names exactly (workExperience,
+    # education, internships->internship singular, projects->project
+    # singular) — constrained to a real enum so the model can't drift between
+    # casings/vocabularies across runs the way a free-form str did.
+    entry_type: EntryType
     entry_id: str
     bullets: list[str]
 

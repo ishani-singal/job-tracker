@@ -4,9 +4,47 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 
+/** Maps an entry_id back to a human label ("Dell Technologies — Advisor",
+ * "University of Washington, Seattle — MBA") by looking it up across all
+ * four background lists — the LinkedIn draft only stores the id + type, not
+ * a display name, so this join happens client-side at render time. */
+function useEntryLabels() {
+  const { data: workExperience } = useQuery({
+    queryKey: ['work-experience'],
+    queryFn: api.listWorkExperience,
+  });
+  const { data: education } = useQuery({ queryKey: ['education'], queryFn: api.listEducation });
+  const { data: internships } = useQuery({
+    queryKey: ['internships'],
+    queryFn: api.listInternships,
+  });
+  const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
+
+  return (entryType: string, entryId: string): string => {
+    if (entryType === 'workExperience') {
+      const e = workExperience?.find((x) => x.id === entryId);
+      return e ? `${e.company}${e.title ? ` — ${e.title}` : ''}` : 'Work Experience';
+    }
+    if (entryType === 'education') {
+      const e = education?.find((x) => x.id === entryId);
+      return e ? `${e.school}${e.degree ? ` — ${e.degree}` : ''}` : 'Education';
+    }
+    if (entryType === 'internship') {
+      const e = internships?.find((x) => x.id === entryId);
+      return e ? `${e.company}${e.title ? ` — ${e.title}` : ''}` : 'Internship';
+    }
+    if (entryType === 'project') {
+      const e = projects?.find((x) => x.id === entryId);
+      return e ? e.name : 'Project';
+    }
+    return entryType;
+  };
+}
+
 export default function LinkedinPage() {
   const queryClient = useQueryClient();
   const { openPanel } = useSessionsPanel();
+  const entryLabel = useEntryLabels();
 
   const { data: profile } = useQuery({
     queryKey: ['linkedin-profile'],
@@ -70,10 +108,10 @@ export default function LinkedinPage() {
 
           <section className="flex flex-col gap-2">
             <h2 className="text-sm font-medium">Per-Position Bullets</h2>
-            {profile.entryBullets.map((eb) => (
-              <div key={eb.entry_id} className="border rounded p-3">
-                <h3 className="text-xs font-medium uppercase opacity-60 mb-1">
-                  {eb.entry_type.replace(/([A-Z])/g, ' $1')}
+            {profile.entryBullets.map((eb, idx) => (
+              <div key={`${eb.entry_id}-${idx}`} className="border rounded p-3">
+                <h3 className="text-sm font-medium mb-1">
+                  {entryLabel(eb.entry_type, eb.entry_id)}
                 </h3>
                 <ul className="text-sm list-disc pl-5 flex flex-col gap-1">
                   {eb.bullets.map((bullet, i) => (
