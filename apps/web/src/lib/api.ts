@@ -4,6 +4,7 @@ import type {
   Application,
   AppSettings,
   CompanyResume,
+  DiscoveredRole,
   EducationEntry,
   GenerationSession,
   InternshipEntry,
@@ -15,6 +16,7 @@ import type {
   ParsedJob,
   ProjectEntry,
   ResumeProfile,
+  TrackedCompany,
   WorkExperienceEntry,
 } from '@job-tracker/shared-types';
 
@@ -210,4 +212,24 @@ export const api = {
     request<LinkedinMessage[]>(
       `/linkedin-data/message-threads/${encodeURIComponent(conversationId)}`,
     ),
+
+  listTrackedCompanies: () => request<TrackedCompany[]>('/tracked-companies'),
+  addTrackedCompanies: (companies: string) =>
+    request<{ created: string[]; skipped: string[] }>('/tracked-companies', {
+      method: 'POST',
+      body: JSON.stringify({ companies }),
+    }),
+  rediscoverCompany: (id: string) =>
+    request<{ started: boolean }>(`/tracked-companies/${id}/rediscover`, { method: 'POST' }),
+  deleteTrackedCompany: (id: string) =>
+    request<{ deleted: boolean }>(`/tracked-companies/${id}`, { method: 'DELETE' }),
+
+  listDiscoveredRoles: (filter?: 'unselected' | 'selected') =>
+    request<DiscoveredRole[]>(`/discovered-roles${filter ? `?filter=${filter}` : ''}`),
+  selectRole: (id: string) =>
+    request<Application>(`/discovered-roles/${id}/select`, { method: 'POST' }),
+  unselectRole: (id: string) =>
+    request<{ unselected: boolean }>(`/discovered-roles/${id}/unselect`, { method: 'POST' }),
+  rescoreRole: (id: string) =>
+    request<DiscoveredRole>(`/discovered-roles/${id}/rescore`, { method: 'POST' }),
 };

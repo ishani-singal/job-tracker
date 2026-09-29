@@ -40,8 +40,11 @@ function extractJobIdFromUrl(url: string): string | undefined {
   return undefined;
 }
 
-const EXTRACTION_SYSTEM_PROMPT = `You extract structured job-posting fields from raw page
-text. Return ONLY a JSON object with these keys (use null for anything not present):
+function buildExtractionSystemPrompt(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `You extract structured job-posting fields from raw page
+text. Today's date is ${today} — use it to resolve any relative date phrasing. Return ONLY a
+JSON object with these keys (use null for anything not present):
 company (string), role (string, the job title as posted, e.g. "Senior Product Manager" —
 not the department or team name), jdText (string, the FULL role description, verbatim —
 include every section describing the role, team, and requirements (e.g. "Description", "Key
@@ -51,8 +54,15 @@ each section's heading and bullet structure rather than summarizing or condensin
 text is used verbatim downstream, so dropping or shortening a section loses real information.
 Only exclude clearly unrelated boilerplate: equal-opportunity/legal disclaimers, benefits/
 perks marketing copy, "how to apply" instructions, and site navigation/footer text), postedDate
-(ISO date string), applyByDate (ISO date string), salaryRange (string), experienceLevel
-(string, e.g. "5+ years" or "Senior"). Do not include any text outside the JSON object.`;
+(ISO date string YYYY-MM-DD — the page often shows this as RELATIVE text like "Posted 3 days
+ago", "Posted today", "30+ days ago", or "Reposted 2 weeks ago" rather than an absolute date;
+resolve it against today's date above and return the computed absolute date, don't return null
+just because the page didn't show an absolute date — only return null if there's truly no
+posting-recency signal on the page at all), applyByDate (ISO date string YYYY-MM-DD, same
+relative-phrasing resolution rule if the page shows something like "Apply within 5 days" or a
+deadline countdown), salaryRange (string), experienceLevel (string, e.g. "5+ years" or
+"Senior"). Do not include any text outside the JSON object.`;
+}
 
 @Injectable()
 export class JobsService implements OnModuleDestroy {
@@ -138,7 +148,7 @@ export class JobsService implements OnModuleDestroy {
       headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
       body: JSON.stringify({
         messages: [
-          { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+          { role: 'system', content: buildExtractionSystemPrompt() },
           { role: 'user', content: pageText },
         ],
         temperature: 0,

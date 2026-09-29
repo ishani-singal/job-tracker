@@ -17,11 +17,20 @@ const fields = {
   jdText: document.getElementById('jdText'),
   salaryRange: document.getElementById('salaryRange'),
   experienceLevel: document.getElementById('experienceLevel'),
+  postedDate: document.getElementById('postedDate'),
+  applyByDate: document.getElementById('applyByDate'),
 };
 
 let currentUrl = '';
 let parsedExtra = {};
 let allowDuplicate = false;
+
+/** Converts any parseable date string to YYYY-MM-DD for an <input type="date">. */
+function toDateInputValue(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
 
 function showState(name) {
   for (const el of [loadingEl, errorEl, formEl, successEl]) {
@@ -65,11 +74,9 @@ async function parseCurrentTab() {
     fields.jdText.value = parsed.jdText || '';
     fields.salaryRange.value = parsed.salaryRange || '';
     fields.experienceLevel.value = parsed.experienceLevel || '';
-    parsedExtra = {
-      jobId: parsed.jobId,
-      postedDate: parsed.postedDate,
-      applyByDate: parsed.applyByDate,
-    };
+    fields.postedDate.value = toDateInputValue(parsed.postedDate);
+    fields.applyByDate.value = toDateInputValue(parsed.applyByDate);
+    parsedExtra = { jobId: parsed.jobId };
     allowDuplicate = false;
 
     parseWarningEl.classList.toggle('hidden', !parsed.fetchFailed);
@@ -94,8 +101,8 @@ async function saveApplication(event) {
     jdText: fields.jdText.value.trim() || undefined,
     salaryRange: fields.salaryRange.value.trim() || undefined,
     experienceLevel: fields.experienceLevel.value.trim() || undefined,
-    postedDate: parsedExtra.postedDate || undefined,
-    applyByDate: parsedExtra.applyByDate || undefined,
+    postedDate: fields.postedDate.value || undefined,
+    applyByDate: fields.applyByDate.value || undefined,
     allowDuplicate,
   };
 

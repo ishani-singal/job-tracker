@@ -115,6 +115,36 @@ export interface ParsedJob {
   fetchFailed: boolean;
 }
 
+export type CompanyDiscoveryStatus = 'PENDING' | 'DISCOVERING' | 'DONE' | 'FAILED';
+
+export interface TrackedCompany {
+  id: string;
+  name: string;
+  careerPageUrl: string | null;
+  discoveryStatus: CompanyDiscoveryStatus;
+  discoveryError: string | null;
+  lastDiscoveredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { roles: number };
+}
+
+export interface DiscoveredRole {
+  id: string;
+  companyId: string;
+  company: TrackedCompany;
+  title: string;
+  roleUrl: string;
+  jobId: string | null;
+  postedDate: string | null;
+  jdText: string | null;
+  atsScore: number | null;
+  atsScoreComputedAt: string | null;
+  applicationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type GenerationSessionStatus =
   | 'RUNNING'
   | 'WAITING_FOR_INPUT'

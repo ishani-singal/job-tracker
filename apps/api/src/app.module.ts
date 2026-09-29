@@ -12,6 +12,7 @@ import { LocationsModule } from './locations/locations.module';
 import { LinkedinModule } from './linkedin/linkedin.module';
 import { CompanyResumesModule } from './company-resumes/company-resumes.module';
 import { LinkedinDataModule } from './linkedin-data/linkedin-data.module';
+import { CompanyRolesModule } from './company-roles/company-roles.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { LinkedinDataModule } from './linkedin-data/linkedin-data.module';
     LinkedinModule,
     CompanyResumesModule,
     LinkedinDataModule,
+    CompanyRolesModule,
   ],
 })
 export class AppModule {}

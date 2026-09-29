@@ -44,6 +44,57 @@ model Application {
   @@index([jobId])
 }
 
+enum CompanyDiscoveryStatus {
+  PENDING
+  DISCOVERING
+  DONE
+  FAILED
+}
+
+// A company the user wants to watch for open roles — entered in bulk on the
+// Company Resumes page, then its career page is scraped for DiscoveredRoles.
+model TrackedCompany {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  careerPageUrl  String?
+  discoveryStatus   CompanyDiscoveryStatus @default(PENDING)
+  discoveryError    String?
+  lastDiscoveredAt  DateTime?
+
+  roles DiscoveredRole[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One open role found on a tracked company's career page. Stays unselected
+// (candidate pool) until the user pushes it to Applications, at which point
+// applicationId is set and it shows on the right/selected side of the split
+// Applications tab instead of the left/unselected side.
+model DiscoveredRole {
+  id        String @id @default(cuid())
+  companyId String
+  company   TrackedCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  title      String
+  roleUrl    String
+  jobId      String?
+  postedDate DateTime?
+  jdText     String?
+
+  atsScore           Int?
+  atsScoreComputedAt DateTime?
+
+  applicationId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, roleUrl])
+  @@index([companyId])
+  @@index([applicationId])
+}
+
 model StoryFile {
   id         String   @id @default(cuid())
   filename   String
