@@ -87,8 +87,9 @@ export class JobsService implements OnModuleDestroy {
       throw new Error('AZURE_LLM_ENDPOINT / AZURE_LLM_API_KEY not configured');
     }
 
-    // AZURE_LLM_ENDPOINT may already include a trailing /openai (as Soma's own env
-    // does) — strip it so we don't end up with .../openai/openai/deployments/...
+    // Defensive: AZURE_LLM_ENDPOINT should be the bare resource URL (no trailing
+    // /openai — this code appends its own /openai/deployments/... path below).
+    // Strip it anyway in case it's ever misconfigured with the suffix again.
     const baseEndpoint = endpoint.replace(/\/openai\/?$/, '');
     const url = `${baseEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
     const response = await fetch(url, {
