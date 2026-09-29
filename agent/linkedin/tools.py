@@ -32,9 +32,11 @@ async def fetch_structured_entries(ctx: RunContext[LinkedinDeps]) -> dict:
     section. Write bullets for EVERY entry returned here, regardless of its
     `required` flag — that flag only matters for the separate per-job resume
     agent, not this whole-profile LinkedIn draft, which covers the full
-    background. Treat internships as part of work experience: merge them
-    into the same chronological history as regular jobs rather than a
-    separate section.
+    background. Before finishing, verify your output's entry_bullets list has
+    one item per id returned by this call, across all four categories — a
+    missing id means an incomplete profile, not an intentional omission.
+    Treat internships as part of work experience: merge them into the same
+    chronological history as regular jobs rather than a separate section.
     """
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{ctx.deps.api_base_url}/entries")
