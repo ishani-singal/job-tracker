@@ -13,7 +13,7 @@ import {
   UpdateApplicationInput,
 } from './applications.service';
 
-const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8741';
+const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
 @Controller('applications')
 export class ApplicationsController {

@@ -12,18 +12,46 @@ plan doc this was scaffolded from for the full design rationale.
 - `agent/resu` — PydanticAI resume-generation agent, exposed over FastAPI for the standalone app;
   Soma-portable folder shape (see `new-agent` onboarding skill)
 
-## Local setup
+## Deployment
+
+Runs on `pavan-mazumdar-server` (`100.96.199.11`) alongside Finra, managed by PM2:
+
+| Service | PM2 name | Port |
+|---|---|---|
+| Postgres | `job-tracker-postgres` (plain `docker run`, not compose) | 5433 |
+| API | `job-tracker-api` | 4100 |
+| Web | `job-tracker-web` | 3100 |
+| Resume agent | `job-tracker-agent` | 8743 |
+
+Port 8741 is already Soma's backend (`soma-backend` systemd service) on that server —
+don't reuse it here.
+
+Source lives at `~/job-tracker` on the server, pushed via `scp`/tarball (no git remote
+yet — this repo hasn't been pushed anywhere). `.env` files are **not** committed; they're
+copied directly to the server and must be kept in sync manually until a real deploy script
+exists (see Finra's `deploy.sh` for the pattern to follow once this graduates past manual
+scp'ing).
+
+To redeploy after a code change:
+```bash
+scp <changed file> pavan-mazumdar@pavan-mazumdar-server:~/job-tracker/<same path>
+ssh pavan-mazumdar@pavan-mazumdar-server
+cd ~/job-tracker/apps/api && pnpm build   # if API changed
+pm2 restart job-tracker-api job-tracker-web job-tracker-agent
+```
+
+## Local setup (alternative — if not using the server)
 
 ```bash
 docker compose up -d          # Postgres on :5433
 pnpm install
 
-cp apps/api/.env.example apps/api/.env      # fill in Azure OpenAI creds
+cp apps/api/.env.example apps/api/.env      # fill in Azure OpenAI creds (AZURE_LLM_*)
 cp agent/.env.example agent/.env
 
 cd apps/api && pnpm db:migrate && cd ../..
 
 pnpm dev                       # web :3100, api :4100
 
-cd agent && uv sync && uv run uvicorn resu.service:app --port 8741
+cd agent && uv sync && uv run uvicorn resu.service:app --port 8743
 ```
