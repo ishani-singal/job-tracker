@@ -27,11 +27,14 @@ async def fetch_candidate_profile(ctx: RunContext[LinkedinDeps]) -> dict:
 
 async def fetch_structured_entries(ctx: RunContext[LinkedinDeps]) -> dict:
     """Fetch the candidate's curated background: work experience, education,
-    internships, and projects, each entry flagged `required` (True) or not,
-    each with an `id` you MUST reuse as `entry_id` in your output so the saved
-    bullets map back to the correct LinkedIn section. Only write bullets for
-    entries flagged required=true — non-required entries are for tailored
-    per-job resumes (a different agent), not this whole-profile LinkedIn draft.
+    internships, and projects, each with an `id` you MUST reuse as `entry_id`
+    in your output so the saved bullets map back to the correct LinkedIn
+    section. Write bullets for EVERY entry returned here, regardless of its
+    `required` flag — that flag only matters for the separate per-job resume
+    agent, not this whole-profile LinkedIn draft, which covers the full
+    background. Treat internships as part of work experience: merge them
+    into the same chronological history as regular jobs rather than a
+    separate section.
     """
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{ctx.deps.api_base_url}/entries")

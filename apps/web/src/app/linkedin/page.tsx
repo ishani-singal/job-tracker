@@ -4,48 +4,34 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 import { LinkedinDataSection } from '@/components/linkedin-data-section';
+import { formatEntryDateRange } from '@/components/date-range-fields';
+import type {
+  EducationEntry,
+  InternshipEntry,
+  LinkedinEntryBullets,
+  ProjectEntry,
+  WorkExperienceEntry,
+} from '@job-tracker/shared-types';
 
-/** Maps an entry_id back to a human label ("Dell Technologies — Advisor",
- * "University of Washington, Seattle — MBA") by looking it up across all
- * four background lists — the LinkedIn draft only stores the id + type, not
- * a display name, so this join happens client-side at render time. */
-function useEntryLabels() {
-  const { data: workExperience } = useQuery({
-    queryKey: ['work-experience'],
-    queryFn: api.listWorkExperience,
-  });
-  const { data: education } = useQuery({ queryKey: ['education'], queryFn: api.listEducation });
-  const { data: internships } = useQuery({
-    queryKey: ['internships'],
-    queryFn: api.listInternships,
-  });
-  const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
+function bulletsFor(
+  entryBullets: LinkedinEntryBullets[],
+  entryType: string,
+  entryId: string,
+): string[] {
+  return entryBullets.find((eb) => eb.entry_type === entryType && eb.entry_id === entryId)
+    ?.bullets ?? [];
+}
 
-  return (entryType: string, entryId: string): string => {
-    if (entryType === 'workExperience') {
-      const e = workExperience?.find((x) => x.id === entryId);
-      return e ? `${e.company}${e.title ? ` — ${e.title}` : ''}` : 'Work Experience';
-    }
-    if (entryType === 'education') {
-      const e = education?.find((x) => x.id === entryId);
-      return e ? `${e.school}${e.degree ? ` — ${e.degree}` : ''}` : 'Education';
-    }
-    if (entryType === 'internship') {
-      const e = internships?.find((x) => x.id === entryId);
-      return e ? `${e.company}${e.title ? ` — ${e.title}` : ''}` : 'Internship';
-    }
-    if (entryType === 'project') {
-      const e = projects?.find((x) => x.id === entryId);
-      return e ? e.name : 'Project';
-    }
-    return entryType;
-  };
+/** Sort key for merging Work Experience + Internships chronologically —
+ * ongoing (isPresent) entries first, then by start date descending. */
+function sortKey(e: { isPresent: boolean; startYear: number | null; startMonth: number | null }) {
+  if (e.isPresent) return Infinity;
+  return (e.startYear ?? 0) * 12 + (e.startMonth ?? 0);
 }
 
 export default function LinkedinPage() {
   const queryClient = useQueryClient();
   const { openPanel } = useSessionsPanel();
-  const entryLabel = useEntryLabels();
 
   const { data: profile } = useQuery({
     queryKey: ['linkedin-profile'],
@@ -55,6 +41,16 @@ export default function LinkedinPage() {
     queryKey: ['linkedin-staleness'],
     queryFn: api.getLinkedinStaleness,
   });
+  const { data: workExperience } = useQuery({
+    queryKey: ['work-experience'],
+    queryFn: api.listWorkExperience,
+  });
+  const { data: internships } = useQuery({
+    queryKey: ['internships'],
+    queryFn: api.listInternships,
+  });
+  const { data: education } = useQuery({ queryKey: ['education'], queryFn: api.listEducation });
+  const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
 
   const startSession = useMutation({
     mutationFn: api.startLinkedinSession,
@@ -63,6 +59,11 @@ export default function LinkedinPage() {
       openPanel(session.id);
     },
   });
+
+  const workAndInternships = [
+    ...(workExperience ?? []).map((e) => ({ ...e, kind: 'workExperience' as const })),
+    ...(internships ?? []).map((e) => ({ ...e, kind: 'internship' as const })),
+  ].sort((a, b) => sortKey(b) - sortKey(a));
 
   return (
     <div className="max-w-3xl mx-auto flex flex-col gap-6">
@@ -73,11 +74,7 @@ export default function LinkedinPage() {
           onClick={() => startSession.mutate()}
           disabled={startSession.isPending}
         >
-          {startSession.isPending
-            ? 'Starting...'
-            : profile
-              ? 'Regenerate'
-              : 'Generate'}
+          {startSession.isPending ? 'Starting...' : profile ? 'Regenerate' : 'Generate'}
         </button>
       </div>
 
@@ -91,9 +88,9 @@ export default function LinkedinPage() {
       {!profile ? (
         <p className="text-sm opacity-60">
           No draft generated yet. This agent writes your LinkedIn headline, About section,
-          and per-position bullets from your Stories and background — using your target
-          role archetype until you have saved applications, then narrowing to applied
-          roles, and reinforcing with any resume that got a callback.
+          and bullets for every Work Experience, Internship, Education, and Project entry —
+          using your target role archetype until you have saved applications, then narrowing
+          to applied roles, and reinforcing with any resume that got a callback.
         </p>
       ) : (
         <div className="flex flex-col gap-6">
@@ -107,21 +104,26 @@ export default function LinkedinPage() {
             <p className="text-sm whitespace-pre-wrap border rounded p-3">{profile.about}</p>
           </section>
 
-          <section className="flex flex-col gap-2">
-            <h2 className="text-sm font-medium">Per-Position Bullets</h2>
-            {profile.entryBullets.map((eb, idx) => (
-              <div key={`${eb.entry_id}-${idx}`} className="border rounded p-3">
-                <h3 className="text-sm font-medium mb-1">
-                  {entryLabel(eb.entry_type, eb.entry_id)}
-                </h3>
-                <ul className="text-sm list-disc pl-5 flex flex-col gap-1">
-                  {eb.bullets.map((bullet, i) => (
-                    <li key={i}>{bullet}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </section>
+          <EntrySection
+            title="Work Experience"
+            entries={workAndInternships}
+            getLabel={(e) => `${e.company}${e.title ? ` — ${e.title}` : ''}`}
+            getBullets={(e) => bulletsFor(profile.entryBullets, e.kind, e.id)}
+          />
+
+          <EntrySection
+            title="Education"
+            entries={education ?? []}
+            getLabel={(e) => `${e.school}${e.degree ? ` — ${e.degree}` : ''}`}
+            getBullets={(e) => bulletsFor(profile.entryBullets, 'education', e.id)}
+          />
+
+          <EntrySection
+            title="Projects"
+            entries={projects ?? []}
+            getLabel={(e) => e.name}
+            getBullets={(e) => bulletsFor(profile.entryBullets, 'project', e.id)}
+          />
 
           <p className="text-xs opacity-50">
             Last generated {new Date(profile.updatedAt).toLocaleString()}
@@ -131,5 +133,58 @@ export default function LinkedinPage() {
 
       <LinkedinDataSection />
     </div>
+  );
+}
+
+interface DatedEntry {
+  id: string;
+  startMonth: number | null;
+  startYear: number | null;
+  endMonth: number | null;
+  endYear: number | null;
+  isPresent: boolean;
+}
+
+function EntrySection<
+  T extends DatedEntry &
+    Partial<WorkExperienceEntry & InternshipEntry & EducationEntry & ProjectEntry>,
+>({
+  title,
+  entries,
+  getLabel,
+  getBullets,
+}: {
+  title: string;
+  entries: T[];
+  getLabel: (entry: T) => string;
+  getBullets: (entry: T) => string[];
+}) {
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-medium">{title}</h2>
+      {entries.map((entry) => {
+        const bullets = getBullets(entry);
+        const dateRange = formatEntryDateRange(entry);
+        return (
+          <div key={entry.id} className="border rounded p-3">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-medium">{getLabel(entry)}</h3>
+              {dateRange && <span className="text-xs opacity-50">{dateRange}</span>}
+            </div>
+            {bullets.length > 0 ? (
+              <ul className="text-sm list-disc pl-5 flex flex-col gap-1">
+                {bullets.map((bullet, i) => (
+                  <li key={i}>{bullet}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs opacity-50">No bullets generated for this entry yet.</p>
+            )}
+          </div>
+        );
+      })}
+    </section>
   );
 }
