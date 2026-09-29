@@ -164,25 +164,14 @@ function TrackCompaniesSection() {
     },
   });
 
-  const importFromApplications = useMutation({
-    mutationFn: () => api.importCompaniesFromApplications(),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['tracked-companies'] });
-      const parts: string[] = [];
-      if (result.created.length) parts.push(`Imported ${result.created.length}, discovering roles...`);
-      if (result.skipped.length) parts.push(`${result.skipped.length} already tracked`);
-      setResultMsg(parts.join(' — ') || 'No new companies to import.');
-    },
-  });
-
   return (
     <div className="border rounded p-4 flex flex-col gap-3">
       <div>
         <h2 className="text-sm font-medium">Track Companies for Open Roles</h2>
         <p className="text-xs opacity-60">
-          Enter one or more companies (comma or newline separated) — job-tracker will find each
-          company&apos;s career page and pull open roles into the Applications tab for you to
-          review and select.
+          Every company on your Applications tab is tracked automatically. Add more below (comma
+          or newline separated) — job-tracker will find each company&apos;s career page and pull
+          open roles into the Applications tab for you to review and select.
         </p>
       </div>
       <textarea
@@ -198,15 +187,6 @@ function TrackCompaniesSection() {
           disabled={addCompanies.isPending || !input.trim()}
         >
           {addCompanies.isPending ? 'Adding...' : 'Track Companies'}
-        </button>
-        <button
-          className="px-3 py-1.5 text-sm rounded border w-fit"
-          onClick={() => importFromApplications.mutate()}
-          disabled={importFromApplications.isPending}
-        >
-          {importFromApplications.isPending
-            ? 'Importing...'
-            : 'Import from Applications'}
         </button>
         {resultMsg && <span className="text-xs opacity-60">{resultMsg}</span>}
       </div>

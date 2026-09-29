@@ -1,4 +1,11 @@
-import { Injectable, Logger, NotFoundException, OnModuleDestroy } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import { Browser, chromium } from 'playwright';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,24 +28,6 @@ function normalizeCompanyKey(name: string): string {
     .replace(/\b(inc|llc|ltd|corp|corporation|co|company|services|group|holdings|plc)\b\.?/g, '')
     .replace(/[^a-z0-9]+/g, '')
     .trim();
-}
-
-/** Collapses near-identical company name variants (see normalizeCompanyKey)
- * to one canonical name per group — picks the shortest surviving name as
- * canonical, since legal-suffix variants are usually longer than the plain
- * brand name. */
-function dedupeCompanyNames(names: string[]): string[] {
-  const groups = new Map<string, string[]>();
-  for (const name of names) {
-    const key = normalizeCompanyKey(name);
-    if (!key) continue;
-    const group = groups.get(key) ?? [];
-    group.push(name);
-    groups.set(key, group);
-  }
-  return Array.from(groups.values()).map(
-    (variants) => variants.sort((a, b) => a.length - b.length)[0],
-  );
 }
 
 const CAREER_URL_GUESSES = (company: string): string[] => {
@@ -78,6 +67,7 @@ export class CompanyRolesService implements OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => ApplicationsService))
     private readonly applications: ApplicationsService,
   ) {}
 
@@ -111,35 +101,47 @@ export class CompanyRolesService implements OnModuleDestroy {
     return this.trackCompanies(names);
   }
 
-  /** Creates a TrackedCompany for every distinct Application.company not
-   * already tracked, and kicks off discovery for each — a one-click way to
-   * bring the existing application pipeline's companies into the "Track
-   * Companies for Open Roles" feature instead of retyping them by hand.
-   * Dedupes near-identical legal-name variants first (e.g. "Amazon" vs
-   * "Amazon.com Services LLC") so they don't become two separate tracked
-   * companies with two redundant career-page discovery runs. */
-  async importCompaniesFromApplications(): Promise<{ created: string[]; skipped: string[] }> {
-    const applications = await this.prisma.application.findMany({
-      select: { company: true },
-      distinct: ['company'],
-    });
-    const names = dedupeCompanyNames(applications.map((a) => a.company).filter(Boolean));
-    return this.trackCompanies(names);
+  /** Ensures a TrackedCompany exists for this company name, matching against
+   * existing tracked companies by normalized name (so "Amazon.com Services
+   * LLC" matches an existing "Amazon" row rather than creating a duplicate)
+   * — called automatically whenever an Application is created, so the
+   * Applications and Tracked Companies lists stay a single unified set with
+   * no manual "import" step. Fire-and-forget safe: swallows/logs its own
+   * errors so it never blocks the Application create it's attached to. */
+  async ensureCompanyTracked(name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    try {
+      const key = normalizeCompanyKey(trimmed);
+      const existingTracked = await this.prisma.trackedCompany.findMany({ select: { name: true } });
+      if (existingTracked.some((c) => normalizeCompanyKey(c.name) === key)) return;
+
+      await this.prisma.trackedCompany.create({ data: { name: trimmed } });
+      this.discoverForCompany(trimmed).catch((err) =>
+        this.logger.warn(`Background discovery failed for ${trimmed}: ${err}`),
+      );
+    } catch (err) {
+      this.logger.warn(`ensureCompanyTracked failed for ${trimmed}: ${err}`);
+    }
   }
 
   private async trackCompanies(rawNames: string[]): Promise<{ created: string[]; skipped: string[] }> {
     const names = Array.from(new Set(rawNames.map((n) => n.trim()).filter(Boolean)));
+    const existingTracked = await this.prisma.trackedCompany.findMany({ select: { name: true } });
+    const existingKeys = new Set(existingTracked.map((c) => normalizeCompanyKey(c.name)));
 
     const created: string[] = [];
     const skipped: string[] = [];
 
     for (const name of names) {
-      const existing = await this.prisma.trackedCompany.findUnique({ where: { name } });
-      if (existing) {
+      const key = normalizeCompanyKey(name);
+      if (existingKeys.has(key)) {
         skipped.push(name);
         continue;
       }
       await this.prisma.trackedCompany.create({ data: { name } });
+      existingKeys.add(key);
       created.push(name);
     }
 

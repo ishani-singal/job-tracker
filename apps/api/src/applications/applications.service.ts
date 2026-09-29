@@ -1,6 +1,13 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApplicationStatus, Prisma } from '@prisma/client';
+import { CompanyRolesService } from '../company-roles/company-roles.service';
 
 export interface CreateApplicationInput {
   company: string;
@@ -27,7 +34,11 @@ export interface UpdateApplicationInput extends Partial<CreateApplicationInput> 
 
 @Injectable()
 export class ApplicationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => CompanyRolesService))
+    private readonly companyRoles: CompanyRolesService,
+  ) {}
 
   list() {
     return this.prisma.application.findMany({ orderBy: { createdAt: 'desc' } });
@@ -68,7 +79,16 @@ export class ApplicationsService {
       salaryRange: input.salaryRange,
       experienceLevel: input.experienceLevel,
     };
-    return this.prisma.application.create({ data });
+    const application = await this.prisma.application.create({ data });
+
+    // Fire-and-forget: every Application's company becomes trackable for
+    // open-role discovery automatically, no separate "import" step — this
+    // covers manual adds, the browser extension, the Shortcut, and selecting
+    // a discovered role (which itself already has a TrackedCompany, so this
+    // is a no-op there).
+    this.companyRoles.ensureCompanyTracked(input.company);
+
+    return application;
   }
 
   async update(id: string, input: UpdateApplicationInput) {

@@ -219,11 +219,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ companies }),
     }),
-  importCompaniesFromApplications: () =>
-    request<{ created: string[]; skipped: string[] }>(
-      '/tracked-companies/import-from-applications',
-      { method: 'POST' },
-    ),
   rediscoverCompany: (id: string) =>
     request<{ started: boolean }>(`/tracked-companies/${id}/rediscover`, { method: 'POST' }),
   deleteTrackedCompany: (id: string) =>

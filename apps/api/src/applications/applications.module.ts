@@ -1,10 +1,11 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { ApplicationsController } from './applications.controller';
 import { ApplicationsService } from './applications.service';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { CompanyRolesModule } from '../company-roles/company-roles.module';
 
 @Module({
-  imports: [AnalyticsModule],
+  imports: [AnalyticsModule, forwardRef(() => CompanyRolesModule)],
   controllers: [ApplicationsController],
   providers: [ApplicationsService],
   exports: [ApplicationsService],

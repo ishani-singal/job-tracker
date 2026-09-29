@@ -15,11 +15,6 @@ export class CompanyRolesController {
     return this.companyRoles.addCompanies(body.companies);
   }
 
-  @Post('tracked-companies/import-from-applications')
-  importFromApplications() {
-    return this.companyRoles.importCompaniesFromApplications();
-  }
-
   @Post('tracked-companies/:id/rediscover')
   rediscover(@Param('id') id: string) {
     return this.companyRoles.rediscover(id);
