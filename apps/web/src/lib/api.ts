@@ -43,6 +43,26 @@ export const api = {
   getProfile: () => request<ResumeProfile>('/resumes/profile'),
   updateProfile: (data: Partial<ResumeProfile>) =>
     request<ResumeProfile>('/resumes/profile', { method: 'PATCH', body: JSON.stringify(data) }),
+  getPromptPreview: () => request<{ prompt: string }>('/resumes/prompt-preview'),
   listStories: () => request<{ id: string; filename: string }[]>('/resumes/stories'),
   listResumeFiles: () => request<{ id: string; filename: string }[]>('/resumes/files'),
+
+  getGithubConnection: () =>
+    request<{ githubLogin: string } | null>('/github/connection'),
+  disconnectGithub: () => request<void>('/github/connection', { method: 'DELETE' }),
+  listAvailableRepos: () =>
+    request<{ fullName: string; description: string | null; private: boolean; updatedAt: string }[]>(
+      '/github/repos/available',
+    ),
+  listConnectedRepos: () =>
+    request<{ fullName: string }[]>('/github/repos/connected'),
+  connectRepo: (fullName: string) =>
+    request<{ fullName: string }>('/github/repos/connected', {
+      method: 'POST',
+      body: JSON.stringify({ fullName }),
+    }),
+  disconnectRepo: (fullName: string) =>
+    request<void>(`/github/repos/connected/${encodeURIComponent(fullName)}`, {
+      method: 'DELETE',
+    }),
 };

@@ -12,7 +12,13 @@ triggered behavior.
 """
 from __future__ import annotations
 
-from .tools import fetch_candidate_profile, fetch_candidate_resume, fetch_candidate_stories, fetch_job_description
+from .tools import (
+    fetch_candidate_profile,
+    fetch_candidate_resume,
+    fetch_candidate_stories,
+    fetch_connected_repo_readmes,
+    fetch_job_description,
+)
 
 SOUL = (
     "You are Resu — precise, direct, and allergic to fluff. You write like someone "
@@ -30,7 +36,11 @@ IDENTITY = (
 INSTRUCTIONS = (
     "Always call fetch_job_description for the application you were asked about, "
     "and fetch_candidate_stories / fetch_candidate_resume for source material — "
-    "your profile facts and process template are already provided below.\n\n"
+    "your profile facts and process template are already provided below. Also "
+    "call fetch_connected_repo_readmes — if the candidate has connected GitHub "
+    "repos, their READMEs are real, verifiable project material worth pulling "
+    "into project/internship bullets alongside Stories; an empty result just "
+    "means none are connected, not an error.\n\n"
     "Before writing anything: check the JD against the candidate's disqualifier "
     "keywords and max-years-experience cutoff from the profile facts below. If the "
     "JD clearly fails either, say so plainly and stop rather than generating a "
@@ -71,4 +81,5 @@ TOOLS = [
     fetch_job_description,
     fetch_candidate_stories,
     fetch_candidate_resume,
+    fetch_connected_repo_readmes,
 ]

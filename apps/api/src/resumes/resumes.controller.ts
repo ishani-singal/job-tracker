@@ -2,6 +2,8 @@ import { Body, Controller, Get, Patch, Post, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { ProfileFieldsInput, ResumesService } from './resumes.service';
 
+const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
+
 @Controller('resumes')
 export class ResumesController {
   constructor(private readonly resumes: ResumesService) {}
@@ -40,5 +42,14 @@ export class ResumesController {
   @Patch('profile')
   updateProfile(@Body() body: ProfileFieldsInput) {
     return this.resumes.updateProfile(body);
+  }
+
+  @Get('prompt-preview')
+  async promptPreview() {
+    const response = await fetch(`${AGENT_SERVICE_URL}/prompt-preview`);
+    if (!response.ok) {
+      throw new Error(`Prompt preview request failed: ${response.status}`);
+    }
+    return response.json();
   }
 }

@@ -5,6 +5,7 @@ import { ResumesModule } from './resumes/resumes.module';
 import { SettingsModule } from './settings/settings.module';
 import { JobsModule } from './jobs/jobs.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { GithubModule } from './github/github.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     SettingsModule,
     JobsModule,
     AnalyticsModule,
+    GithubModule,
   ],
 })
 export class AppModule {}

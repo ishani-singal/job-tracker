@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { ResumeProfile } from '@job-tracker/shared-types';
+import { GithubConnectSection } from '@/components/github-connect-section';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 
@@ -64,8 +65,43 @@ export default function ResumesPage() {
         </ul>
       </section>
 
+      <GithubConnectSection />
+
       {profile && <ProfileForm profile={profile} />}
+
+      <PromptPreviewSection />
     </div>
+  );
+}
+
+function PromptPreviewSection() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['prompt-preview'],
+    queryFn: api.getPromptPreview,
+  });
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-medium">Resume-Generation Prompt (live preview)</h2>
+      <p className="text-xs opacity-60">
+        This is the exact system prompt sent to the AI when you click &quot;Generate
+        Resume&quot; on an application — your candidate profile above plus the fixed
+        7-step ATS process. It updates automatically whenever you edit your profile.
+        The job description and your uploaded Stories/Resume/connected-repo content are
+        added on top of this per generation, not shown here.
+      </p>
+      {isLoading && <p className="text-xs opacity-60">Loading...</p>}
+      {error && (
+        <p className="text-xs text-amber-600">
+          Couldn&apos;t reach the resume agent to preview the prompt — it may not be running.
+        </p>
+      )}
+      {data && (
+        <pre className="text-xs whitespace-pre-wrap border rounded p-3 max-h-96 overflow-y-auto opacity-80">
+          {data.prompt}
+        </pre>
+      )}
+    </section>
   );
 }
 

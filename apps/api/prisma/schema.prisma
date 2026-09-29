@@ -80,3 +80,19 @@ model AppSettings {
 
   updatedAt DateTime @updatedAt
 }
+
+// Single-user GitHub OAuth connection — the resu agent reads connected repos'
+// READMEs as additional "Stories" material for resume generation.
+model GithubConnection {
+  id           String   @id @default(cuid())
+  githubLogin  String
+  accessToken  String
+  scope        String?
+  connectedAt  DateTime @default(now())
+}
+
+model ConnectedRepo {
+  id        String   @id @default(cuid())
+  fullName  String   @unique // "owner/repo"
+  addedAt   DateTime @default(now())
+}

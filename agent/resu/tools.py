@@ -58,3 +58,25 @@ async def fetch_candidate_resume(ctx: RunContext[ResuDeps]) -> list[dict]:
         resp = await client.get(f"{ctx.deps.api_base_url}/resumes/files")
         resp.raise_for_status()
         return resp.json()
+
+
+async def fetch_connected_repo_readmes(ctx: RunContext[ResuDeps]) -> list[dict]:
+    """Fetch READMEs from the candidate's connected GitHub repos (configured in
+    Settings). Each entry is {repo, readme}. Treat this as supplementary Stories
+    material — real project descriptions, tech stack, and scope straight from
+    the source — useful for filling in project/internship bullets when the
+    uploaded Stories file doesn't cover a specific project in enough depth.
+    Returns an empty list if no GitHub account is connected or no repos are
+    selected — that's not an error, just means there's nothing extra here.
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(f"{ctx.deps.api_base_url}/github/repos/connected")
+        resp.raise_for_status()
+        connected = resp.json()
+        if not connected:
+            return []
+
+        readme_resp = await client.get(f"{ctx.deps.api_base_url}/github/readmes")
+        if readme_resp.status_code != 200:
+            return []
+        return readme_resp.json()
