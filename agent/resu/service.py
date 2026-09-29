@@ -47,6 +47,11 @@ class RunTurnResponse(BaseModel):
 
 class PromptPreviewResponse(BaseModel):
     prompt: str
+    # The prefix (persona/instructions/facts/background) before the editable
+    # process template — lets the UI show it read-only and edit just the
+    # template portion without string-splitting the assembled prompt.
+    prefix: str
+    template_body: str
 
 
 @app.post("/sessions/run-turn", response_model=RunTurnResponse)
@@ -83,8 +88,15 @@ async def prompt_preview() -> PromptPreviewResponse:
         entries_resp.raise_for_status()
         entries = entries_resp.json()
 
-    prompt = (
-        f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}\n\n"
-        f"{build_profile_context(profile, entries)}"
+    template_body = profile.get("templateBody", "")
+    profile_context = build_profile_context(profile, entries)
+    prefix = f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}\n\n{profile_context}"
+    # build_profile_context ends with "## Process template\n{templateBody}" —
+    # strip the template body back off so `prefix` is everything before it.
+    prefix = prefix[: len(prefix) - len(template_body)] if template_body else prefix
+
+    return PromptPreviewResponse(
+        prompt=f"{prefix}{template_body}",
+        prefix=prefix,
+        template_body=template_body,
     )
-    return PromptPreviewResponse(prompt=prompt)

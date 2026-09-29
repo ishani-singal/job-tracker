@@ -78,20 +78,50 @@ export default function ResumesPage() {
 }
 
 function PromptPreviewSection() {
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ['prompt-preview'],
     queryFn: api.getPromptPreview,
   });
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  function startEditing() {
+    setDraft(data?.template_body ?? '');
+    setEditing(true);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await api.updateProfile({ templateBody: draft });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['prompt-preview'] });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">Resume-Generation Prompt (live preview)</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium">Resume-Generation Prompt (live preview)</h2>
+        {data && !editing && (
+          <button className="text-xs opacity-70 hover:opacity-100" onClick={startEditing}>
+            Edit
+          </button>
+        )}
+      </div>
       <p className="text-xs opacity-60">
         This is the exact system prompt sent to the AI when you click &quot;Generate
-        Resume&quot; on an application — your candidate profile above plus the fixed
-        7-step ATS process. It updates automatically whenever you edit your profile.
-        The job description and your uploaded Stories/Resume/connected-repo content are
-        added on top of this per generation, not shown here.
+        Resume&quot; on an application — your candidate profile above plus the process
+        template below. It updates automatically whenever you edit your profile. The
+        persona/facts/background section is read-only here (it&apos;s generated from your
+        profile and background entries above); only the process template is directly
+        editable. The job description and your uploaded Stories/Resume/connected-repo
+        content are added on top of this per generation, not shown here.
       </p>
       {isLoading && <p className="text-xs opacity-60">Loading...</p>}
       {error && (
@@ -99,10 +129,38 @@ function PromptPreviewSection() {
           Couldn&apos;t reach the resume agent to preview the prompt — it may not be running.
         </p>
       )}
-      {data && (
+      {data && !editing && (
         <pre className="text-xs whitespace-pre-wrap border rounded p-3 max-h-96 overflow-y-auto opacity-80">
           {data.prompt}
         </pre>
+      )}
+      {data && editing && (
+        <div className="flex flex-col gap-2">
+          <pre className="text-xs whitespace-pre-wrap border rounded p-3 max-h-48 overflow-y-auto opacity-60">
+            {data.prefix}
+          </pre>
+          <textarea
+            className="border rounded px-2 py-1 text-xs w-full h-64 bg-transparent font-mono"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <button
+              className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black"
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button
+              className="px-3 py-1.5 text-sm rounded border"
+              onClick={() => setEditing(false)}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </section>
   );
@@ -116,7 +174,6 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
     locationZip: profile.locationZip ?? '',
     maxYearsExperience: profile.maxYearsExperience?.toString() ?? '',
     matchScoreTarget: profile.matchScoreTarget?.toString() ?? '93',
-    templateBody: profile.templateBody ?? '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -132,10 +189,8 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
         locationZip: form.locationZip,
         maxYearsExperience: form.maxYearsExperience ? Number(form.maxYearsExperience) : undefined,
         matchScoreTarget: form.matchScoreTarget ? Number(form.matchScoreTarget) : undefined,
-        templateBody: form.templateBody,
       });
       queryClient.invalidateQueries({ queryKey: ['profile'] });
-      queryClient.invalidateQueries({ queryKey: ['prompt-preview'] });
     } finally {
       setSaving(false);
     }
@@ -193,19 +248,6 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
       <p className="text-xs opacity-60">
         93% is a reasonable default for most ATS systems — higher targets push the agent to
         incorporate more exact JD phrasing, which can read as less natural.
-      </p>
-
-      <Field label="Resume Generation Process (editable)">
-        <textarea
-          className="border rounded px-2 py-1 text-sm w-full h-64 bg-transparent font-mono"
-          value={form.templateBody}
-          onChange={(e) => setForm({ ...form, templateBody: e.target.value })}
-        />
-      </Field>
-      <p className="text-xs opacity-60">
-        This is the fixed process the agent follows every generation (the 7-step ATS
-        workflow). Edit it directly if you want to change the process itself, not just the
-        facts above.
       </p>
 
       <button

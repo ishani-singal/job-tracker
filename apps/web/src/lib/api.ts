@@ -49,7 +49,10 @@ export const api = {
   getProfile: () => request<ResumeProfile>('/resumes/profile'),
   updateProfile: (data: Partial<ResumeProfile>) =>
     request<ResumeProfile>('/resumes/profile', { method: 'PATCH', body: JSON.stringify(data) }),
-  getPromptPreview: () => request<{ prompt: string }>('/resumes/prompt-preview'),
+  getPromptPreview: () =>
+    request<{ prompt: string; prefix: string; template_body: string }>(
+      '/resumes/prompt-preview',
+    ),
   listStories: () => request<{ id: string; filename: string }[]>('/resumes/stories'),
   listResumeFiles: () => request<{ id: string; filename: string }[]>('/resumes/files'),
 
