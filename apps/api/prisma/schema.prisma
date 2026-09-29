@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ApplicationStatus {
+  NOT_APPLIED
+  APPLIED
+}
+
+model Application {
+  id          String   @id @default(cuid())
+  company     String
+  jobUrl      String?
+  jdText      String?
+  postedDate  DateTime?
+  applyByDate DateTime?
+  salaryRange String?
+  experienceLevel String?
+
+  status              ApplicationStatus @default(NOT_APPLIED)
+  appliedDate         DateTime?
+  lastMessageReceivedDate DateTime?
+  rejectedDate        DateTime?
+
+  resumeContent    String?
+  resumeGeneratedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([company])
+  @@index([status])
+}
+
+model StoryFile {
+  id         String   @id @default(cuid())
+  filename   String
+  storedPath String
+  mimeType   String
+  createdAt  DateTime @default(now())
+}
+
+model ResumeFile {
+  id         String   @id @default(cuid())
+  filename   String
+  storedPath String
+  mimeType   String
+  createdAt  DateTime @default(now())
+}
+
+model ResumePromptTemplate {
+  id   String @id @default(cuid())
+  name String @default("default")
+
+  // Fixed template body (the generic 7-step process, editable but ships with a default)
+  templateBody String
+
+  // Profile fields — personal facts substituted into the template at generation time
+  targetRoleArchetype   String?
+  disqualifierKeywords  String[] @default([])
+  locationZip           String?
+  maxYearsExperience    Int?
+  requiredExperienceEntries Json @default("[]")
+  requiredProjectEntries    Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AppSettings {
+  id                  String @id @default(cuid())
+  inactivityThresholdDays Int @default(14)
+  deadlineThresholdDays   Int @default(30)
+
+  updatedAt DateTime @updatedAt
+}
