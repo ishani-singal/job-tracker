@@ -27,6 +27,7 @@ export interface EducationInput extends DateRangeFields {
 
 export interface InternshipInput extends DateRangeFields {
   company: string;
+  title?: string;
   required?: boolean;
   sortOrder?: number;
 }

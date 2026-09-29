@@ -300,18 +300,21 @@ function EducationList() {
 
 interface InternshipForm extends DateRangeFormState {
   company: string;
+  title: string;
   required: boolean;
 }
 
 const EMPTY_INTERNSHIP_FORM: InternshipForm = {
   ...EMPTY_DATE_RANGE,
   company: '',
+  title: '',
   required: false,
 };
 
 function internshipToForm(e: InternshipEntry): InternshipForm {
   return {
     company: e.company,
+    title: e.title ?? '',
     location: e.location ?? '',
     startMonth: e.startMonth ? String(e.startMonth) : '',
     startYear: e.startYear ? String(e.startYear) : '',
@@ -334,6 +337,7 @@ function InternshipList() {
     mutationFn: () =>
       api.createInternship({
         company: form.company,
+        title: form.title || undefined,
         required: form.required,
         ...dateRangeToPayload(form),
       }),
@@ -347,6 +351,7 @@ function InternshipList() {
     mutationFn: () =>
       api.updateInternship(editingId!, {
         company: form.company,
+        title: form.title || undefined,
         required: form.required,
         ...dateRangeToPayload(form),
       }),
@@ -368,7 +373,7 @@ function InternshipList() {
       {data?.map((entry) => (
         <EntryRow
           key={entry.id}
-          label={entry.company}
+          label={`${entry.company}${entry.title ? ` — ${entry.title}` : ''}`}
           sublabel={[entry.location, formatEntryDateRange(entry)].filter(Boolean).join(' · ')}
           required={entry.required}
           onToggleRequired={() => toggleRequired(entry)}
@@ -381,10 +386,16 @@ function InternshipList() {
       ))}
       <div className="grid grid-cols-4 gap-2">
         <input
-          className="border rounded px-2 py-1 text-sm bg-transparent col-span-4"
+          className="border rounded px-2 py-1 text-sm bg-transparent col-span-2"
           placeholder="Company"
           value={form.company}
           onChange={(e) => setForm({ ...form, company: e.target.value })}
+        />
+        <input
+          className="border rounded px-2 py-1 text-sm bg-transparent col-span-2"
+          placeholder="Title"
+          value={form.title}
+          onChange={(e) => setForm({ ...form, title: e.target.value })}
         />
         <DateRangeFields form={form} onChange={setForm} />
         <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">

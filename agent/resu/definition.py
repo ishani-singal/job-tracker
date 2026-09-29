@@ -139,6 +139,7 @@ def _render_entries(entries: dict) -> str:
         "Internships",
         entries.get("internships", []),
         lambda e: f"{e['company']}"
+        + (f" — {e['title']}" if e.get("title") else "")
         + (f" ({e['location']})" if e.get("location") else "")
         + f" [{_format_date_range(e)}]",
     )

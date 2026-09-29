@@ -112,6 +112,7 @@ model EducationEntry {
 model InternshipEntry {
   id         String   @id @default(cuid())
   company    String
+  title      String?
   location   String?
   startMonth Int?
   startYear  Int?

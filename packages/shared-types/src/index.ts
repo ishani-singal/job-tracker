@@ -85,6 +85,7 @@ export interface EducationEntry extends DateRangeFields {
 export interface InternshipEntry extends DateRangeFields {
   id: string;
   company: string;
+  title: string | null;
   required: boolean;
   sortOrder: number;
 }
