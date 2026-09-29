@@ -15,6 +15,11 @@ export class CompanyRolesController {
     return this.companyRoles.addCompanies(body.companies);
   }
 
+  @Post('tracked-companies/with-career-url')
+  addCompanyWithCareerUrl(@Body() body: { name: string; careerPageUrl: string }) {
+    return this.companyRoles.addCompanyWithCareerUrl(body.name, body.careerPageUrl);
+  }
+
   @Post('tracked-companies/:id/rediscover')
   rediscover(@Param('id') id: string) {
     return this.companyRoles.rediscover(id);

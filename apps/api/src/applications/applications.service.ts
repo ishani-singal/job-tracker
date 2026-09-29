@@ -85,8 +85,9 @@ export class ApplicationsService {
     // open-role discovery automatically, no separate "import" step — this
     // covers manual adds, the browser extension, the Shortcut, and selecting
     // a discovered role (which itself already has a TrackedCompany, so this
-    // is a no-op there).
-    this.companyRoles.ensureCompanyTracked(input.company);
+    // is a no-op there). Pass the jobUrl so discovery can derive the real
+    // career-board root from it instead of guessing blind.
+    this.companyRoles.ensureCompanyTracked(input.company, input.jobUrl);
 
     return application;
   }

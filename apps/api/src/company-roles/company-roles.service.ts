@@ -30,6 +30,49 @@ function normalizeCompanyKey(name: string): string {
     .trim();
 }
 
+/** Derives a career-board listing root from one known job posting URL —
+ * tried before the generic guess-list since it's a real URL known to work
+ * for this exact company, not a guess. Returns undefined if the URL doesn't
+ * match a recognized ATS pattern (falls through to the guess-list). */
+function deriveCareerRootFromJobUrl(jobUrl: string): string | undefined {
+  try {
+    const url = new URL(jobUrl);
+    const host = url.hostname;
+
+    // Greenhouse: boards.greenhouse.io/<company>/jobs/<id> -> board root
+    if (host === 'boards.greenhouse.io') {
+      const match = url.pathname.match(/^\/([^/]+)/);
+      if (match) return `https://boards.greenhouse.io/${match[1]}`;
+    }
+    // Lever: jobs.lever.co/<company>/<id> -> board root
+    if (host === 'jobs.lever.co') {
+      const match = url.pathname.match(/^\/([^/]+)/);
+      if (match) return `https://jobs.lever.co/${match[1]}`;
+    }
+    // Workday: <tenant>.wdN.myworkdayjobs.com/<site>/job/... -> listing root
+    // (drop the /job/... suffix, keep tenant + site path).
+    if (/\.myworkdayjobs\.com$/.test(host)) {
+      const match = url.pathname.match(/^(\/[^/]+)\/job\//);
+      if (match) return `https://${host}${match[1]}`;
+      return `https://${host}${url.pathname.split('/job/')[0]}`;
+    }
+    // SmartRecruiters: careers.smartrecruiters.com/<company>/... -> board root
+    if (host === 'careers.smartrecruiters.com') {
+      const match = url.pathname.match(/^\/([^/]+)/);
+      if (match) return `https://careers.smartrecruiters.com/${match[1]}`;
+    }
+    // Generic fallback: same-origin "/careers" or "/jobs" root, stripped of
+    // the specific posting path — a reasonable guess for custom career sites.
+    if (/\/(careers|jobs)\//i.test(url.pathname)) {
+      const match = url.pathname.match(/^(.*\/(careers|jobs))\//i);
+      if (match) return `${url.origin}${match[1]}`;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const CAREER_URL_GUESSES = (company: string): string[] => {
   const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '');
   const slugDashed = company.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -45,14 +88,27 @@ const CAREER_URL_GUESSES = (company: string): string[] => {
   ];
 };
 
-const ROLE_LIST_EXTRACTION_PROMPT = `You extract a list of open job postings from raw
-career-page text. Return ONLY a JSON object: {"roles": [...]}. Each entry: title (string,
-the job title as posted), url (string, the FULL absolute URL to that specific posting —
-resolve relative links against the page's own URL given to you; omit the role if you
-cannot determine a real per-posting URL), postedDate (ISO date string, or null if not
-shown on the page). Only include actual open roles — skip navigation links, footer text,
-"view all jobs" links, benefits/culture content, and anything that isn't a specific job
-posting. If the page clearly isn't a career/jobs listing page at all, return {"roles": []}.`;
+/** Follows a listing's pagination up to this many pages — a safety cap so a
+ * broken "Next" link (e.g. one that points back to itself) can't loop
+ * forever. Most boards' open-role counts fit well within this. */
+const MAX_LISTING_PAGES = 10;
+
+function buildRoleListExtractionPrompt(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `You extract a list of open job postings from raw career-page text. Today's date is
+${today} — use it to resolve any relative date phrasing. Return ONLY a JSON object:
+{"roles": [...], "nextPageUrl": string|null}. Each role entry: title (string, the job title as
+posted), url (string, the FULL absolute URL to that specific posting — resolve relative links
+against the page's own URL given to you; omit the role if you cannot determine a real
+per-posting URL), postedDate (ISO date string YYYY-MM-DD, or null — resolve relative phrasing
+like "Posted 3 days ago" or "2 weeks ago" against today's date; only null if there's truly no
+recency signal for that role). Only include actual open roles — skip navigation links, footer
+text, "view all jobs" links, benefits/culture content, and anything that isn't a specific job
+posting. nextPageUrl: the FULL absolute URL of a "Next page"/"Next"/pagination-forward link if
+this listing spans multiple pages and one is present on this page, resolved against the page's
+own URL — null if there's no next page or the page isn't paginated. If the page clearly isn't a
+career/jobs listing page at all, return {"roles": [], "nextPageUrl": null}.`;
+}
 
 export interface DiscoveredRoleDto {
   title: string;
@@ -107,8 +163,10 @@ export class CompanyRolesService implements OnModuleDestroy {
    * — called automatically whenever an Application is created, so the
    * Applications and Tracked Companies lists stay a single unified set with
    * no manual "import" step. Fire-and-forget safe: swallows/logs its own
-   * errors so it never blocks the Application create it's attached to. */
-  async ensureCompanyTracked(name: string): Promise<void> {
+   * errors so it never blocks the Application create it's attached to.
+   * If the Application had a jobUrl, its derived career-board root is tried
+   * before the generic guess-list — a real known-good URL beats a guess. */
+  async ensureCompanyTracked(name: string, seedJobUrl?: string): Promise<void> {
     const trimmed = name.trim();
     if (!trimmed) return;
 
@@ -118,7 +176,8 @@ export class CompanyRolesService implements OnModuleDestroy {
       if (existingTracked.some((c) => normalizeCompanyKey(c.name) === key)) return;
 
       await this.prisma.trackedCompany.create({ data: { name: trimmed } });
-      this.discoverForCompany(trimmed).catch((err) =>
+      const seedUrl = seedJobUrl ? deriveCareerRootFromJobUrl(seedJobUrl) : undefined;
+      this.discoverForCompany(trimmed, seedUrl).catch((err) =>
         this.logger.warn(`Background discovery failed for ${trimmed}: ${err}`),
       );
     } catch (err) {
@@ -154,10 +213,41 @@ export class CompanyRolesService implements OnModuleDestroy {
     return { created, skipped };
   }
 
+  /** Adds a single company with a manually-provided career page URL — used
+   * when auto-discovery's guessed URLs can't find the right board (custom
+   * ATS, non-standard domain, etc.). The manual URL is used directly, no
+   * guessing. If the company is already tracked, updates its careerPageUrl
+   * and re-runs discovery against it instead of creating a duplicate. */
+  async addCompanyWithCareerUrl(name: string, careerPageUrl: string): Promise<{ name: string }> {
+    const trimmed = name.trim();
+    const url = careerPageUrl.trim();
+    if (!trimmed) throw new Error('Company name is required');
+    if (!url) throw new Error('Career page URL is required');
+
+    const key = normalizeCompanyKey(trimmed);
+    const existingTracked = await this.prisma.trackedCompany.findMany();
+    const existing = existingTracked.find((c) => normalizeCompanyKey(c.name) === key);
+
+    const company = existing
+      ? await this.prisma.trackedCompany.update({
+          where: { id: existing.id },
+          data: { careerPageUrl: url },
+        })
+      : await this.prisma.trackedCompany.create({ data: { name: trimmed, careerPageUrl: url } });
+
+    this.discoverForCompany(company.name, url).catch((err) =>
+      this.logger.warn(`Background discovery failed for ${company.name}: ${err}`),
+    );
+
+    return { name: company.name };
+  }
+
   async rediscover(companyId: string) {
     const company = await this.prisma.trackedCompany.findUnique({ where: { id: companyId } });
     if (!company) throw new NotFoundException(`Company ${companyId} not found`);
-    this.discoverForCompany(company.name).catch((err) =>
+    // Reuse the already-known career page (from a prior discovery or manual
+    // entry) instead of re-guessing from scratch, when one exists.
+    this.discoverForCompany(company.name, company.careerPageUrl ?? undefined).catch((err) =>
       this.logger.warn(`Background discovery failed for ${company.name}: ${err}`),
     );
     return { started: true };
@@ -173,14 +263,14 @@ export class CompanyRolesService implements OnModuleDestroy {
     return { deleted: true };
   }
 
-  private async discoverForCompany(name: string): Promise<void> {
+  private async discoverForCompany(name: string, seedUrl?: string): Promise<void> {
     await this.prisma.trackedCompany.update({
       where: { name },
       data: { discoveryStatus: 'DISCOVERING', discoveryError: null },
     });
 
     try {
-      const { careerPageUrl, roles } = await this.findRolesForCompany(name);
+      const { careerPageUrl, roles } = await this.findRolesForCompany(name, seedUrl);
       const company = await this.prisma.trackedCompany.findUniqueOrThrow({ where: { name } });
 
       const cutoff = new Date();
@@ -232,18 +322,23 @@ export class CompanyRolesService implements OnModuleDestroy {
 
   private async findRolesForCompany(
     name: string,
+    seedUrl?: string,
   ): Promise<{ careerPageUrl?: string; roles: DiscoveredRoleDto[] }> {
-    const candidates = CAREER_URL_GUESSES(name);
+    // A known-good URL (derived from a real job posting, or manually
+    // entered) is tried before any guess — it's known to work for this
+    // company, not a guess, so it goes first in the candidate list.
+    const candidates = [...(seedUrl ? [seedUrl] : []), ...CAREER_URL_GUESSES(name)];
 
     for (const url of candidates) {
       try {
         const pageText = await this.renderPageText(url);
         if (!pageText || pageText.length < 200) continue;
 
-        const roles = await this.extractRolesWithLlm(pageText, url);
-        if (roles.length > 0) {
-          return { careerPageUrl: url, roles };
-        }
+        const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url);
+        if (firstPageRoles.length === 0) continue;
+
+        const roles = await this.paginateRoles(firstPageRoles, nextPageUrl, url);
+        return { careerPageUrl: url, roles };
       } catch {
         // Try the next candidate URL — a 404/timeout on one guess is expected.
         continue;
@@ -251,6 +346,59 @@ export class CompanyRolesService implements OnModuleDestroy {
     }
 
     return { roles: [] };
+  }
+
+  /** Follows a listing's "Next page" links, accumulating roles, until: no
+   * more roles come back, there's no next page, the page cap is hit, or a
+   * page's roles are ALL older than the staleness cutoff (later pages of a
+   * date-sorted listing only get older, so this is a safe stop condition,
+   * not just an optimization). */
+  private async paginateRoles(
+    firstPageRoles: DiscoveredRoleDto[],
+    nextPageUrl: string | undefined,
+    firstPageUrl: string,
+  ): Promise<DiscoveredRoleDto[]> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
+    const isStale = (r: DiscoveredRoleDto) => {
+      if (!r.postedDate) return false; // undated — can't judge, don't use it to stop early
+      const posted = new Date(r.postedDate);
+      return !isNaN(posted.getTime()) && posted < cutoff;
+    };
+
+    const allRoles = [...firstPageRoles];
+    let currentNextUrl = nextPageUrl;
+    let previousUrl = firstPageUrl;
+    let pageCount = 1;
+
+    while (currentNextUrl && pageCount < MAX_LISTING_PAGES) {
+      // Guard against a broken pagination link that points back to a page
+      // we've already fetched (would otherwise loop until the page cap).
+      if (currentNextUrl === previousUrl) break;
+
+      try {
+        const pageText = await this.renderPageText(currentNextUrl);
+        if (!pageText || pageText.length < 200) break;
+
+        const { roles: pageRoles, nextPageUrl: followingUrl } = await this.extractRolesWithLlm(
+          pageText,
+          currentNextUrl,
+        );
+        if (pageRoles.length === 0) break;
+
+        allRoles.push(...pageRoles);
+        pageCount += 1;
+
+        if (pageRoles.every(isStale)) break;
+
+        previousUrl = currentNextUrl;
+        currentNextUrl = followingUrl;
+      } catch {
+        break;
+      }
+    }
+
+    return allRoles;
   }
 
   private async renderPageText(url: string, opts?: { requireSameOrigin?: boolean }): Promise<string> {
@@ -294,7 +442,10 @@ export class CompanyRolesService implements OnModuleDestroy {
     }
   }
 
-  private async extractRolesWithLlm(pageText: string, pageUrl: string): Promise<DiscoveredRoleDto[]> {
+  private async extractRolesWithLlm(
+    pageText: string,
+    pageUrl: string,
+  ): Promise<{ roles: DiscoveredRoleDto[]; nextPageUrl?: string }> {
     const endpoint = process.env.AZURE_LLM_ENDPOINT;
     const apiKey = process.env.AZURE_LLM_API_KEY;
     const deployment = process.env.AZURE_LLM_DEPLOYMENT_NAME ?? 'gpt-4.1';
@@ -308,7 +459,7 @@ export class CompanyRolesService implements OnModuleDestroy {
       headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
       body: JSON.stringify({
         messages: [
-          { role: 'system', content: ROLE_LIST_EXTRACTION_PROMPT },
+          { role: 'system', content: buildRoleListExtractionPrompt() },
           { role: 'user', content: `Page URL: ${pageUrl}\n\nPage text:\n${pageText}` },
         ],
         temperature: 0,
@@ -319,8 +470,11 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     const data = (await response.json()) as { choices: { message: { content: string } }[] };
     const raw = data.choices[0]?.message?.content ?? '{"roles":[]}';
-    const parsed = JSON.parse(raw) as { roles?: DiscoveredRoleDto[] };
-    return (parsed.roles ?? []).filter((r) => r.title && r.url);
+    const parsed = JSON.parse(raw) as { roles?: DiscoveredRoleDto[]; nextPageUrl?: string | null };
+    return {
+      roles: (parsed.roles ?? []).filter((r) => r.title && r.url),
+      nextPageUrl: parsed.nextPageUrl ?? undefined,
+    };
   }
 
   listRoles(params: { unselectedOnly?: boolean; selectedOnly?: boolean }) {

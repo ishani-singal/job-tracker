@@ -219,6 +219,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ companies }),
     }),
+  addCompanyWithCareerUrl: (name: string, careerPageUrl: string) =>
+    request<{ name: string }>('/tracked-companies/with-career-url', {
+      method: 'POST',
+      body: JSON.stringify({ name, careerPageUrl }),
+    }),
   rediscoverCompany: (id: string) =>
     request<{ started: boolean }>(`/tracked-companies/${id}/rediscover`, { method: 'POST' }),
   deleteTrackedCompany: (id: string) =>

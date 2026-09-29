@@ -129,6 +129,9 @@ function TrackCompaniesSection() {
   const queryClient = useQueryClient();
   const [input, setInput] = useState('');
   const [resultMsg, setResultMsg] = useState<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualUrl, setManualUrl] = useState('');
 
   const { data: tracked } = useQuery({
     queryKey: ['tracked-companies'],
@@ -164,6 +167,17 @@ function TrackCompaniesSection() {
     },
   });
 
+  const addWithCareerUrl = useMutation({
+    mutationFn: () => api.addCompanyWithCareerUrl(manualName, manualUrl),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['tracked-companies'] });
+      setResultMsg(`Added ${result.name} with your career page — discovering roles...`);
+      setManualName('');
+      setManualUrl('');
+      setManualOpen(false);
+    },
+  });
+
   return (
     <div className="border rounded p-4 flex flex-col gap-3">
       <div>
@@ -188,8 +202,44 @@ function TrackCompaniesSection() {
         >
           {addCompanies.isPending ? 'Adding...' : 'Track Companies'}
         </button>
+        <button
+          className="px-3 py-1.5 text-sm rounded border w-fit"
+          onClick={() => setManualOpen((v) => !v)}
+        >
+          {manualOpen ? 'Cancel' : 'Enter Career Page Manually'}
+        </button>
         {resultMsg && <span className="text-xs opacity-60">{resultMsg}</span>}
       </div>
+
+      {manualOpen && (
+        <div className="border rounded p-3 flex flex-col gap-2 bg-neutral-50 dark:bg-neutral-900">
+          <p className="text-xs opacity-60">
+            Use this when auto-discovery can&apos;t find a company&apos;s career page on its own —
+            paste the exact URL of its open-roles listing.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              className="border rounded px-2 py-1 text-sm bg-transparent"
+              placeholder="Company name"
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+            />
+            <input
+              className="border rounded px-2 py-1 text-sm bg-transparent"
+              placeholder="https://company.com/careers"
+              value={manualUrl}
+              onChange={(e) => setManualUrl(e.target.value)}
+            />
+          </div>
+          <button
+            className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black w-fit"
+            onClick={() => addWithCareerUrl.mutate()}
+            disabled={addWithCareerUrl.isPending || !manualName.trim() || !manualUrl.trim()}
+          >
+            {addWithCareerUrl.isPending ? 'Adding...' : 'Add with This Career Page'}
+          </button>
+        </div>
+      )}
 
       {tracked && tracked.length > 0 && (
         <div className="flex flex-col gap-1 mt-1">
