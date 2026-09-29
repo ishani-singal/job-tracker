@@ -27,10 +27,16 @@ Port 8741 is already Soma's backend (`soma-backend` systemd service) on that ser
 don't reuse it here.
 
 Source lives at `~/job-tracker` on the server, pushed via `scp`/tarball (no git remote
-yet — this repo hasn't been pushed anywhere). `.env` files are **not** committed; they're
-copied directly to the server and must be kept in sync manually until a real deploy script
-exists (see Finra's `deploy.sh` for the pattern to follow once this graduates past manual
-scp'ing).
+yet — this repo hasn't been pushed anywhere). `.env`/`.env.local` files are **not**
+committed; they're copied directly to the server and must be kept in sync manually until a
+real deploy script exists (see Finra's `deploy.sh` for the pattern to follow once this
+graduates past manual scp'ing).
+
+**Important**: `apps/web/.env.local` must point `NEXT_PUBLIC_API_URL` at the server's
+address (`http://100.96.199.11:4100`), not `localhost` — it's baked into the client bundle
+at build time and read from the *browser*, so `localhost` there means the visitor's own
+machine, not the server. Getting this wrong makes API calls (uploads, etc.) fail silently
+with no visible error unless the caller checks `res.ok`.
 
 To redeploy after a code change:
 ```bash

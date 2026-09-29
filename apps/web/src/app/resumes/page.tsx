@@ -19,14 +19,22 @@ export default function ResumesPage() {
   async function uploadStory(file: File) {
     const form = new FormData();
     form.append('file', file);
-    await fetch(`${API_BASE}/resumes/stories/upload`, { method: 'POST', body: form });
+    const res = await fetch(`${API_BASE}/resumes/stories/upload`, { method: 'POST', body: form });
+    if (!res.ok) {
+      alert(`Upload failed: ${res.status} ${await res.text()}`);
+      return;
+    }
     queryClient.invalidateQueries({ queryKey: ['stories'] });
   }
 
   async function uploadResume(file: File) {
     const form = new FormData();
     form.append('file', file);
-    await fetch(`${API_BASE}/resumes/resume/upload`, { method: 'POST', body: form });
+    const res = await fetch(`${API_BASE}/resumes/resume/upload`, { method: 'POST', body: form });
+    if (!res.ok) {
+      alert(`Upload failed: ${res.status} ${await res.text()}`);
+      return;
+    }
     queryClient.invalidateQueries({ queryKey: ['resume-files'] });
   }
 
