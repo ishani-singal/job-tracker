@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Job Tracker Quick Add</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="header">
+        <span class="title">Job Tracker</span>
+        <button id="optionsBtn" class="link-btn" title="Settings">⚙</button>
+      </div>
+
+      <div id="loading" class="state">
+        <p>Parsing this page…</p>
+      </div>
+
+      <div id="error" class="state hidden">
+        <p class="error-text" id="errorText"></p>
+        <button id="retryBtn" class="btn secondary">Retry</button>
+      </div>
+
+      <form id="form" class="state hidden">
+        <p id="parseWarning" class="warning hidden">
+          Couldn't auto-parse this posting — check the fields below.
+        </p>
+
+        <label>
+          Company
+          <input id="company" type="text" required />
+        </label>
+        <label>
+          Role / Title
+          <input id="role" type="text" />
+        </label>
+        <label>
+          Job Description
+          <textarea id="jdText" rows="6"></textarea>
+        </label>
+        <div class="row">
+          <label>
+            Salary Range
+            <input id="salaryRange" type="text" />
+          </label>
+          <label>
+            Experience Level
+            <input id="experienceLevel" type="text" />
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="cancelBtn" class="btn secondary">Cancel</button>
+          <button type="submit" id="saveBtn" class="btn primary">Save Application</button>
+        </div>
+      </form>
+
+      <div id="success" class="state hidden">
+        <p class="success-text">Saved ✓</p>
+      </div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>
