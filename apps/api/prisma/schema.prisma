@@ -79,18 +79,19 @@ model ResumePromptTemplate {
 // began, isPresent means it's ongoing (endMonth/endYear are then ignored),
 // otherwise endMonth/endYear mark when it ended.
 model WorkExperienceEntry {
-  id         String   @id @default(cuid())
-  company    String
-  title      String?
-  location   String?
-  startMonth Int?
-  startYear  Int?
-  endMonth   Int?
-  endYear    Int?
-  isPresent  Boolean  @default(false)
-  required   Boolean  @default(true)
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
+  id               String   @id @default(cuid())
+  company          String
+  title            String?
+  location         String?
+  startMonth       Int?
+  startYear        Int?
+  endMonth         Int?
+  endYear          Int?
+  isPresent        Boolean  @default(false)
+  isFamilyBusiness Boolean  @default(false)
+  required         Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
 }
 
 model EducationEntry {
@@ -110,18 +111,20 @@ model EducationEntry {
 }
 
 model InternshipEntry {
-  id         String   @id @default(cuid())
-  company    String
-  title      String?
-  location   String?
-  startMonth Int?
-  startYear  Int?
-  endMonth   Int?
-  endYear    Int?
-  isPresent  Boolean  @default(false)
-  required   Boolean  @default(false)
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
+  id               String   @id @default(cuid())
+  company          String
+  title            String?
+  location         String?
+  startMonth       Int?
+  startYear        Int?
+  endMonth         Int?
+  endYear          Int?
+  isPresent        Boolean  @default(false)
+  isClassProject   Boolean  @default(false)
+  isFamilyBusiness Boolean  @default(false)
+  required         Boolean  @default(false)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
 }
 
 model ProjectEntry {

@@ -42,6 +42,7 @@ export function EntriesSection() {
 interface WorkExperienceForm extends DateRangeFormState {
   company: string;
   title: string;
+  isFamilyBusiness: boolean;
   required: boolean;
 }
 
@@ -49,6 +50,7 @@ const EMPTY_WORK_FORM: WorkExperienceForm = {
   ...EMPTY_DATE_RANGE,
   company: '',
   title: '',
+  isFamilyBusiness: false,
   required: true,
 };
 
@@ -62,6 +64,7 @@ function workExperienceToForm(e: WorkExperienceEntry): WorkExperienceForm {
     endMonth: e.endMonth ? String(e.endMonth) : '',
     endYear: e.endYear ? String(e.endYear) : '',
     isPresent: e.isPresent,
+    isFamilyBusiness: e.isFamilyBusiness,
     required: e.required,
   };
 }
@@ -79,6 +82,7 @@ function WorkExperienceList() {
       api.createWorkExperience({
         company: form.company,
         title: form.title || undefined,
+        isFamilyBusiness: form.isFamilyBusiness,
         required: form.required,
         ...dateRangeToPayload(form),
       }),
@@ -93,6 +97,7 @@ function WorkExperienceList() {
       api.updateWorkExperience(editingId!, {
         company: form.company,
         title: form.title || undefined,
+        isFamilyBusiness: form.isFamilyBusiness,
         required: form.required,
         ...dateRangeToPayload(form),
       }),
@@ -115,7 +120,13 @@ function WorkExperienceList() {
         <EntryRow
           key={entry.id}
           label={`${entry.company}${entry.title ? ` — ${entry.title}` : ''}`}
-          sublabel={[entry.location, formatEntryDateRange(entry)].filter(Boolean).join(' · ')}
+          sublabel={[
+            entry.location,
+            formatEntryDateRange(entry),
+            entry.isFamilyBusiness ? 'Family Business' : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
           required={entry.required}
           onToggleRequired={() => toggleRequired(entry)}
           onEdit={() => {
@@ -146,6 +157,14 @@ function WorkExperienceList() {
             onChange={(e) => setForm({ ...form, required: e.target.checked })}
           />
           Required
+        </label>
+        <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.isFamilyBusiness}
+            onChange={(e) => setForm({ ...form, isFamilyBusiness: e.target.checked })}
+          />
+          Family Business
         </label>
         <FormButtons
           editing={!!editingId}
@@ -301,6 +320,8 @@ function EducationList() {
 interface InternshipForm extends DateRangeFormState {
   company: string;
   title: string;
+  isClassProject: boolean;
+  isFamilyBusiness: boolean;
   required: boolean;
 }
 
@@ -308,6 +329,8 @@ const EMPTY_INTERNSHIP_FORM: InternshipForm = {
   ...EMPTY_DATE_RANGE,
   company: '',
   title: '',
+  isClassProject: false,
+  isFamilyBusiness: false,
   required: false,
 };
 
@@ -321,6 +344,8 @@ function internshipToForm(e: InternshipEntry): InternshipForm {
     endMonth: e.endMonth ? String(e.endMonth) : '',
     endYear: e.endYear ? String(e.endYear) : '',
     isPresent: e.isPresent,
+    isClassProject: e.isClassProject,
+    isFamilyBusiness: e.isFamilyBusiness,
     required: e.required,
   };
 }
@@ -338,6 +363,8 @@ function InternshipList() {
       api.createInternship({
         company: form.company,
         title: form.title || undefined,
+        isClassProject: form.isClassProject,
+        isFamilyBusiness: form.isFamilyBusiness,
         required: form.required,
         ...dateRangeToPayload(form),
       }),
@@ -352,6 +379,8 @@ function InternshipList() {
       api.updateInternship(editingId!, {
         company: form.company,
         title: form.title || undefined,
+        isClassProject: form.isClassProject,
+        isFamilyBusiness: form.isFamilyBusiness,
         required: form.required,
         ...dateRangeToPayload(form),
       }),
@@ -374,7 +403,14 @@ function InternshipList() {
         <EntryRow
           key={entry.id}
           label={`${entry.company}${entry.title ? ` — ${entry.title}` : ''}`}
-          sublabel={[entry.location, formatEntryDateRange(entry)].filter(Boolean).join(' · ')}
+          sublabel={[
+            entry.location,
+            formatEntryDateRange(entry),
+            entry.isClassProject ? 'Class Project' : '',
+            entry.isFamilyBusiness ? 'Family Business' : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
           required={entry.required}
           onToggleRequired={() => toggleRequired(entry)}
           onEdit={() => {
@@ -398,6 +434,22 @@ function InternshipList() {
           onChange={(e) => setForm({ ...form, title: e.target.value })}
         />
         <DateRangeFields form={form} onChange={setForm} />
+        <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.isClassProject}
+            onChange={(e) => setForm({ ...form, isClassProject: e.target.checked })}
+          />
+          Class Project
+        </label>
+        <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.isFamilyBusiness}
+            onChange={(e) => setForm({ ...form, isFamilyBusiness: e.target.checked })}
+          />
+          Family Business
+        </label>
         <label className="flex items-center gap-1 text-xs col-span-2 cursor-pointer">
           <input
             type="checkbox"

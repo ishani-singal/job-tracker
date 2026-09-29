@@ -124,7 +124,9 @@ def _render_entries(entries: dict) -> str:
         lambda e: f"{e['company']}"
         + (f" — {e['title']}" if e.get("title") else "")
         + (f" ({e['location']})" if e.get("location") else "")
-        + f" [{_format_date_range(e)}]",
+        + f" [{_format_date_range(e)}]"
+        + (" [FAMILY BUSINESS — real scope/impact, but do not imply a formal "
+           "competitive hiring process]" if e.get("isFamilyBusiness") else ""),
     )
     education = render_group(
         "Education",
@@ -141,7 +143,12 @@ def _render_entries(entries: dict) -> str:
         lambda e: f"{e['company']}"
         + (f" — {e['title']}" if e.get("title") else "")
         + (f" ({e['location']})" if e.get("location") else "")
-        + f" [{_format_date_range(e)}]",
+        + f" [{_format_date_range(e)}]"
+        + (" [CLASS PROJECT — a course project sponsored by this company, not a "
+           "real internship hire; use project/coursework framing, not employment "
+           "language]" if e.get("isClassProject") else "")
+        + (" [FAMILY BUSINESS — real scope/impact, but do not imply a formal "
+           "competitive hiring process]" if e.get("isFamilyBusiness") else ""),
     )
     projects = render_group(
         "Projects",

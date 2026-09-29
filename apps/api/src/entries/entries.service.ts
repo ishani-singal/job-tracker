@@ -13,6 +13,7 @@ interface DateRangeFields {
 export interface WorkExperienceInput extends DateRangeFields {
   company: string;
   title?: string;
+  isFamilyBusiness?: boolean;
   required?: boolean;
   sortOrder?: number;
 }
@@ -28,6 +29,8 @@ export interface EducationInput extends DateRangeFields {
 export interface InternshipInput extends DateRangeFields {
   company: string;
   title?: string;
+  isClassProject?: boolean;
+  isFamilyBusiness?: boolean;
   required?: boolean;
   sortOrder?: number;
 }

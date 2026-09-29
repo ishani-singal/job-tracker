@@ -69,6 +69,7 @@ export interface WorkExperienceEntry extends DateRangeFields {
   id: string;
   company: string;
   title: string | null;
+  isFamilyBusiness: boolean;
   required: boolean;
   sortOrder: number;
 }
@@ -86,6 +87,8 @@ export interface InternshipEntry extends DateRangeFields {
   id: string;
   company: string;
   title: string | null;
+  isClassProject: boolean;
+  isFamilyBusiness: boolean;
   required: boolean;
   sortOrder: number;
 }
