@@ -7,6 +7,10 @@ import type {
   EducationEntry,
   GenerationSession,
   InternshipEntry,
+  LinkedinConnection,
+  LinkedinImportSummary,
+  LinkedinMessage,
+  LinkedinMessageThreadSummary,
   LinkedinProfile,
   ParsedJob,
   ProjectEntry,
@@ -176,4 +180,17 @@ export const api = {
     ),
   getCompanyResume: (company: string) =>
     request<CompanyResume>(`/company-resumes/${encodeURIComponent(company)}`),
+
+  getLinkedinDataSummary: () =>
+    request<LinkedinImportSummary | null>('/linkedin-data/summary'),
+  listLinkedinConnections: (search?: string) =>
+    request<LinkedinConnection[]>(
+      `/linkedin-data/connections${search ? `?search=${encodeURIComponent(search)}` : ''}`,
+    ),
+  listLinkedinMessageThreads: () =>
+    request<LinkedinMessageThreadSummary[]>('/linkedin-data/message-threads'),
+  getLinkedinThreadMessages: (conversationId: string) =>
+    request<LinkedinMessage[]>(
+      `/linkedin-data/message-threads/${encodeURIComponent(conversationId)}`,
+    ),
 };

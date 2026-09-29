@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
+import { LinkedinDataSection } from '@/components/linkedin-data-section';
 
 /** Maps an entry_id back to a human label ("Dell Technologies — Advisor",
  * "University of Washington, Seattle — MBA") by looking it up across all
@@ -127,6 +128,8 @@ export default function LinkedinPage() {
           </p>
         </div>
       )}
+
+      <LinkedinDataSection />
     </div>
   );
 }

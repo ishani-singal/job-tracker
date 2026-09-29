@@ -11,6 +11,7 @@ import { SessionsModule } from './sessions/sessions.module';
 import { LocationsModule } from './locations/locations.module';
 import { LinkedinModule } from './linkedin/linkedin.module';
 import { CompanyResumesModule } from './company-resumes/company-resumes.module';
+import { LinkedinDataModule } from './linkedin-data/linkedin-data.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { CompanyResumesModule } from './company-resumes/company-resumes.module';
     LocationsModule,
     LinkedinModule,
     CompanyResumesModule,
+    LinkedinDataModule,
   ],
 })
 export class AppModule {}

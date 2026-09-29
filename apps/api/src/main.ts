@@ -15,7 +15,9 @@ async function bootstrap() {
   );
 
   await app.register(multipart, {
-    limits: { fileSize: 20 * 1024 * 1024 },
+    // LinkedIn's full data-export ZIP (used by the connections/messages
+    // import) can run well past 20MB with message history included.
+    limits: { fileSize: 150 * 1024 * 1024 },
   });
   await app.register(fastifyStatic, {
     root: join(process.cwd(), '..', '..', 'data', 'uploads'),

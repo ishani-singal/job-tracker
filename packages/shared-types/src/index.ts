@@ -164,3 +164,37 @@ export interface CompanyResume {
   resumeContent: string;
   updatedAt: string;
 }
+
+export interface LinkedinImportSummary {
+  importId: string;
+  importedAt: string;
+  connectionCount: number;
+  messageCount: number;
+}
+
+export interface LinkedinConnection {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  url: string | null;
+  emailAddress: string | null;
+  company: string | null;
+  position: string | null;
+  connectedOn: string | null;
+}
+
+export interface LinkedinMessageThreadSummary {
+  conversationId: string;
+  messageCount: number;
+  lastMessageAt: string | null;
+  participants: string[];
+}
+
+export interface LinkedinMessage {
+  id: string;
+  conversationId: string;
+  fromName: string | null;
+  toName: string | null;
+  content: string | null;
+  sentAt: string | null;
+}

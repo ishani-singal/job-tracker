@@ -38,6 +38,9 @@ importers:
       '@prisma/client':
         specifier: ^6.1.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      adm-zip:
+        specifier: ^0.5.16
+        version: 0.5.18
       all-the-cities:
         specifier: ^3.1.0
         version: 3.1.0
@@ -47,6 +50,9 @@ importers:
       country-list:
         specifier: ^2.4.1
         version: 2.4.1
+      csv-parse:
+        specifier: ^5.6.0
+        version: 5.6.0
       fastify:
         specifier: ^4.28.1
         version: 4.28.1
@@ -72,6 +78,9 @@ importers:
       '@nestjs/cli':
         specifier: ^10.4.0
         version: 10.4.9
+      '@types/adm-zip':
+        specifier: ^0.5.7
+        version: 0.5.8
       '@types/all-the-cities':
         specifier: ^3.1.3
         version: 3.1.3
@@ -1007,6 +1016,9 @@ packages:
     cpu: [arm64]
     os: [win32]
 
+  '@types/adm-zip@0.5.8':
+    resolution: {integrity: sha512-RVVH7QvZYbN+ihqZ4kX/dMiowf6o+Jk1fNwiSdx0NahBJLU787zkULhGhJM8mf/obmLGmgdMM0bXsQTmyfbR7Q==}
+
   '@types/all-the-cities@3.1.3':
     resolution: {integrity: sha512-nmOKDsZi6ANeGto8P4E2Zkk4q/oLN94Jd0++zS0NLaGOUcCvIqNEOKn9btF2xDknaKicCpQymg0U9Llfz+Ourw==}
 
@@ -1131,6 +1143,10 @@ packages:
     resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  adm-zip@0.5.18:
+    resolution: {integrity: sha512-ufJnssQGbxzLNS1Ho9bCtX4rQKCCvoVuDLHoJyc3F9dOGDB4BkWs2Ci0kv53lqocAEQ/Cbi+I2XCsNYGqVYqng==}
+    engines: {node: '>=12.0'}
 
   ajv-formats@2.1.1:
     resolution: {integrity: sha512-Wx0Kx52hxE7C18hkMEggYlEifqWZtYaRgouJor+WMdPnQyEK13vgEWyVNup7SoeeoLMsr4kf5h6dOW11I15MUA==}
@@ -1476,6 +1492,9 @@ packages:
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
+
+  csv-parse@5.6.0:
+    resolution: {integrity: sha512-l3nz3euub2QMg5ouu5U09Ew9Wf6/wQ8I++ch1loQ0ljmzhmfZYrH9fflS22i/PQEvsPvxCwxgz5q7UB8K1JO4Q==}
 
   d3-array@3.2.4:
     resolution: {integrity: sha512-tdQAmyA18i4J7wprpYq8ClcxZy3SC31QMeByyCFyRt7BVHdREQZ5lpzoe5mFEYZUWe+oq8HBvk9JjpibyEV4Jg==}
@@ -4021,6 +4040,10 @@ snapshots:
   '@turbo/windows-arm64@2.11.5':
     optional: true
 
+  '@types/adm-zip@0.5.8':
+    dependencies:
+      '@types/node': 22.20.4
+
   '@types/all-the-cities@3.1.3': {}
 
   '@types/country-list@2.1.4': {}
@@ -4168,6 +4191,8 @@ snapshots:
   abstract-logging@2.0.1: {}
 
   acorn@8.18.0: {}
+
+  adm-zip@0.5.18: {}
 
   ajv-formats@2.1.1(ajv@8.12.0):
     optionalDependencies:
@@ -4519,6 +4544,8 @@ snapshots:
   cssesc@3.0.0: {}
 
   csstype@3.2.3: {}
+
+  csv-parse@5.6.0: {}
 
   d3-array@3.2.4:
     dependencies:

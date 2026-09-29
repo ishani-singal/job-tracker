@@ -254,3 +254,47 @@ model CompanyResume {
   resumeContent String
   updatedAt     DateTime @updatedAt
 }
+
+// LinkedIn does not offer an API for a user's own connections/messages to
+// third-party apps (deliberately restricted since ~2018) — this is manually
+// imported from LinkedIn's own data-export ZIP (Settings > Get a copy of
+// your data), not a live OAuth connection. One row per import batch so
+// re-imports don't silently merge/dedupe against stale data.
+model LinkedinImport {
+  id          String   @id @default(cuid())
+  importedAt  DateTime @default(now())
+  connections LinkedinConnection[]
+  messages    LinkedinMessageThread[]
+}
+
+model LinkedinConnection {
+  id           String         @id @default(cuid())
+  importId     String
+  import       LinkedinImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  firstName    String?
+  lastName     String?
+  url          String?
+  emailAddress String?
+  company      String?
+  position     String?
+  connectedOn  DateTime?
+
+  @@index([importId])
+}
+
+model LinkedinMessageThread {
+  id          String         @id @default(cuid())
+  importId    String
+  import      LinkedinImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  // LinkedIn's messages.csv is one row per message, not per thread; grouped
+  // here by CONVERSATION ID from that export so a thread's messages stay
+  // together without re-deriving grouping logic on every read.
+  conversationId String
+  fromName       String?
+  toName         String?
+  content        String?
+  sentAt         DateTime?
+
+  @@index([importId])
+  @@index([conversationId])
+}
