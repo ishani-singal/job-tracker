@@ -16,10 +16,16 @@ export interface ParsedJob {
 const EXTRACTION_SYSTEM_PROMPT = `You extract structured job-posting fields from raw page
 text. Return ONLY a JSON object with these keys (use null for anything not present):
 company (string), role (string, the job title as posted, e.g. "Senior Product Manager" —
-not the department or team name), jdText (string, the role description/requirements/
-qualifications only — exclude compensation/benefits boilerplate), postedDate (ISO date
-string), applyByDate (ISO date string), salaryRange (string), experienceLevel (string, e.g.
-"5+ years" or "Senior"). Do not include any text outside the JSON object.`;
+not the department or team name), jdText (string, the FULL role description, verbatim —
+include every section describing the role, team, and requirements (e.g. "Description", "Key
+job responsibilities", "A day in the life", "About the team", "Basic Qualifications",
+"Preferred Qualifications", and any equivalent sections under different headings). Preserve
+each section's heading and bullet structure rather than summarizing or condensing it — this
+text is used verbatim downstream, so dropping or shortening a section loses real information.
+Only exclude clearly unrelated boilerplate: equal-opportunity/legal disclaimers, benefits/
+perks marketing copy, "how to apply" instructions, and site navigation/footer text), postedDate
+(ISO date string), applyByDate (ISO date string), salaryRange (string), experienceLevel
+(string, e.g. "5+ years" or "Senior"). Do not include any text outside the JSON object.`;
 
 @Injectable()
 export class JobsService implements OnModuleDestroy {
@@ -57,7 +63,7 @@ export class JobsService implements OnModuleDestroy {
         const html = await page.content();
         const $ = cheerio.load(html);
         $('script, style, nav, footer, header, noscript').remove();
-        pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 20000);
+        pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 60000);
       } finally {
         await page.close();
       }
