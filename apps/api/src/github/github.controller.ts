@@ -20,7 +20,7 @@ export class GithubController {
   @Get('auth/github/start')
   start(@Res() res: FastifyReply) {
     const url = this.github.buildAuthorizeUrl();
-    return res.redirect(url);
+    return res.status(302).redirect(url);
   }
 
   @Get('auth/github/callback')
@@ -31,9 +31,9 @@ export class GithubController {
   ) {
     try {
       await this.github.handleCallback(code, state);
-      return res.redirect(`${WEB_APP_URL}/resumes?github=connected`);
+      return res.status(302).redirect(`${WEB_APP_URL}/resumes?github=connected`);
     } catch {
-      return res.redirect(`${WEB_APP_URL}/resumes?github=error`);
+      return res.status(302).redirect(`${WEB_APP_URL}/resumes?github=error`);
     }
   }
 
