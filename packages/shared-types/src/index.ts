@@ -46,6 +46,7 @@ export interface AppSettings {
   minMatchScoreFilter: number | null;
   postedBeforeTodayFilterOn: boolean;
   postedWithinDaysFilter: number;
+  hideInvalidConditionRolesFilterOn: boolean;
   updatedAt: string;
 }
 

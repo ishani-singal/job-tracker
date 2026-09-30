@@ -35,7 +35,29 @@ function matchesExperienceFilter(role: DiscoveredRole, profile: ResumeProfile | 
   return role.roleMinYearsExperience <= profile.maxYearsExperience;
 }
 
-function AtsScoreBadge({ score }: { score: number | null }) {
+/** True when a role fails a hard disqualifying condition — a location or
+ * experience mismatch, or the JD containing one of the candidate's
+ * disqualifierKeywords — in which case its numeric score (even a nonzero
+ * one) isn't a meaningful match signal and shouldn't be shown as one. */
+function hasInvalidCondition(role: DiscoveredRole, profile: ResumeProfile | undefined): boolean {
+  if (role.locationMismatch) return true;
+  if (role.experienceMismatch) return true;
+  const keywords = profile?.disqualifierKeywords ?? [];
+  if (keywords.length > 0 && role.jdText) {
+    const jdLower = role.jdText.toLowerCase();
+    if (keywords.some((k) => k.trim() && jdLower.includes(k.trim().toLowerCase()))) return true;
+  }
+  return false;
+}
+
+function AtsScoreBadge({
+  score,
+  invalid,
+}: {
+  score: number | null;
+  invalid?: boolean;
+}) {
+  if (invalid) return <span className="text-xs font-medium text-red-600">Conditions not valid</span>;
   if (score === null) return <span className="text-xs opacity-40">Scoring...</span>;
   const color =
     score >= 75 ? 'text-green-600' : score >= 50 ? 'text-amber-600' : 'text-red-600';
@@ -97,10 +119,12 @@ export default function ApplicationsPage() {
   const [minScoreFilterInitialized, setMinScoreFilterInitialized] = useState(false);
   const [postedBeforeTodayFilterOn, setPostedBeforeTodayFilterOn] = useState(false);
   const [postedWithinDaysFilter, setPostedWithinDaysFilter] = useState('0');
+  const [hideInvalidConditionRolesFilterOn, setHideInvalidConditionRolesFilterOn] = useState(false);
   if (settings && !minScoreFilterInitialized) {
     setMinScoreFilter(settings.minMatchScoreFilter != null ? String(settings.minMatchScoreFilter) : '');
     setPostedBeforeTodayFilterOn(settings.postedBeforeTodayFilterOn);
     setPostedWithinDaysFilter(String(settings.postedWithinDaysFilter));
+    setHideInvalidConditionRolesFilterOn(settings.hideInvalidConditionRolesFilterOn);
     setMinScoreFilterInitialized(true);
   }
 
@@ -129,6 +153,11 @@ export default function ApplicationsPage() {
 
   const postedWithinDays = Math.max(0, Number(postedWithinDaysFilter) || 0);
 
+  function handleHideInvalidConditionRolesFilterChange(checked: boolean) {
+    setHideInvalidConditionRolesFilterOn(checked);
+    updateSettings.mutate({ hideInvalidConditionRolesFilterOn: checked });
+  }
+
   const { data: applications, isLoading } = useQuery({
     queryKey: ['applications'],
     queryFn: api.listApplications,
@@ -150,6 +179,7 @@ export default function ApplicationsPage() {
     (r) =>
       (minScore === null || r.atsScore === null || r.atsScore === 0 || r.atsScore >= minScore) &&
       (!postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), postedWithinDays)) &&
+      (!hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
       (!locationFilterOn || matchesLocationFilter(r, profile)) &&
       (!experienceFilterOn || matchesExperienceFilter(r, profile)),
   );
@@ -170,10 +200,10 @@ export default function ApplicationsPage() {
   // Selected too, treated as a staleness signal). A directly-added
   // application (no linked DiscoveredRole at all) has no date signal to
   // filter on, so it's never hidden by this filter.
-  const scoreByApplicationId = new Map(
+  const roleByApplicationId = new Map(
     (selectedRolesRaw ?? [])
       .filter((r) => r.applicationId)
-      .map((r) => [r.applicationId as string, r.atsScore]),
+      .map((r) => [r.applicationId as string, r]),
   );
   const roleIdByApplicationId = new Map(
     (selectedRolesRaw ?? [])
@@ -292,6 +322,14 @@ export default function ApplicationsPage() {
                 />
                 days ago
               </label>
+              <label className="flex items-center gap-1.5 text-xs opacity-70 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hideInvalidConditionRolesFilterOn}
+                  onChange={(e) => handleHideInvalidConditionRolesFilterChange(e.target.checked)}
+                />
+                Hide roles with invalid conditions
+              </label>
             </div>
           </div>
           <div className="flex flex-col gap-2">
@@ -299,6 +337,7 @@ export default function ApplicationsPage() {
               <DiscoveredRoleRow
                 key={role.id}
                 role={role}
+                profile={profile}
                 onSelect={() => selectRole.mutate(role.id)}
                 selecting={selectRole.isPending}
               />
@@ -333,9 +372,12 @@ export default function ApplicationsPage() {
                       roleId ? unselectRole.isPending : unselectDirectlyAddedApplication.isPending
                     }
                   />
-                  {scoreByApplicationId.has(app.id) && (
+                  {roleByApplicationId.has(app.id) && (
                     <div className="px-4">
-                      <AtsScoreBadge score={scoreByApplicationId.get(app.id) ?? null} />
+                      <AtsScoreBadge
+                        score={roleByApplicationId.get(app.id)?.atsScore ?? null}
+                        invalid={hasInvalidCondition(roleByApplicationId.get(app.id)!, profile)}
+                      />
                     </div>
                   )}
                 </div>
@@ -358,10 +400,12 @@ export default function ApplicationsPage() {
 
 function DiscoveredRoleRow({
   role,
+  profile,
   onSelect,
   selecting,
 }: {
   role: DiscoveredRole;
+  profile: ResumeProfile | undefined;
   onSelect: () => void;
   selecting: boolean;
 }) {
@@ -383,7 +427,7 @@ function DiscoveredRoleRow({
         </span>
         <RoleLocation role={role} />
         <RoleExperience role={role} />
-        <AtsScoreBadge score={role.atsScore} />
+        <AtsScoreBadge score={role.atsScore} invalid={hasInvalidCondition(role, profile)} />
       </div>
       <button
         className="px-2 py-1 text-xs rounded border shrink-0"

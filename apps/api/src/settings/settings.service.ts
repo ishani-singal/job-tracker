@@ -7,6 +7,7 @@ export interface UpdateSettingsInput {
   minMatchScoreFilter?: number | null;
   postedBeforeTodayFilterOn?: boolean;
   postedWithinDaysFilter?: number;
+  hideInvalidConditionRolesFilterOn?: boolean;
 }
 
 @Injectable()
@@ -38,6 +39,9 @@ export class SettingsService {
         }),
         ...(input.postedWithinDaysFilter !== undefined && {
           postedWithinDaysFilter: input.postedWithinDaysFilter,
+        }),
+        ...(input.hideInvalidConditionRolesFilterOn !== undefined && {
+          hideInvalidConditionRolesFilterOn: input.hideInvalidConditionRolesFilterOn,
         }),
       },
     });

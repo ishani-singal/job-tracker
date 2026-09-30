@@ -324,6 +324,10 @@ model AppSettings {
   // "before today" (the original behavior), N means "before N days ago",
   // keeping roles posted in the last N days.
   postedWithinDaysFilter    Int     @default(0)
+  // Hides Open Roles whose locationMismatch/experienceMismatch is true, or
+  // whose JD matches a disqualifierKeywords entry — a "Conditions not
+  // valid" role, not a real numeric match.
+  hideInvalidConditionRolesFilterOn Boolean @default(false)
 
   updatedAt DateTime @updatedAt
 }
