@@ -809,6 +809,45 @@ export class CompanyRolesService implements OnModuleDestroy {
         return;
       }
 
+      // Radio-button sort control (e.g. Meta: a "Sort by" section with plain
+      // "Relevance"/"Newest" radio inputs, each option's own label just the
+      // bare word "Newest" — no "sort" text anywhere near it, so neither the
+      // <select> nor the "sort"-containing click matchers below can find it).
+      // Matches the associated <label> text (via the input's own id, or by
+      // being its ancestor) rather than requiring "sort" in the same element.
+      const clickedRadio = await page.evaluate(() => {
+        const datePattern = /^\s*(newest|latest|most recent|date)\s*$/i;
+        const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+        for (const radio of radios) {
+          if (radio.offsetParent === null || radio.checked) continue;
+          const labelEl = radio.id
+            ? document.querySelector<HTMLElement>(`label[for="${radio.id}"]`)
+            : radio.closest('label');
+          const text = (labelEl?.textContent ?? radio.getAttribute('aria-label') ?? '').trim();
+          if (datePattern.test(text)) {
+            radio.click();
+            return true;
+          }
+        }
+        return false;
+      });
+      if (clickedRadio) {
+        // Some boards (e.g. Meta) don't auto-apply a radio change — a
+        // separate "Apply filters"-labeled button must be clicked too.
+        // Best-effort: only clicks if such a button is actually present.
+        await page.evaluate(() => {
+          const applyPattern = /^\s*apply\s+filters?\s*$/i;
+          const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'));
+          const applyButton = buttons.find(
+            (el) => el.offsetParent !== null && applyPattern.test((el.textContent ?? '').trim()),
+          );
+          applyButton?.click();
+        });
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(500);
+        return;
+      }
+
       // Clickable sort control (button/link/menu-item) — deliberately
       // excludes "old to new" phrasing so we don't pick the reverse sort.
       const clicked = await page.evaluate(() => {
