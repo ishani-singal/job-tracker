@@ -43,6 +43,8 @@ export interface AppSettings {
   id: string;
   inactivityThresholdDays: number;
   deadlineThresholdDays: number;
+  minMatchScoreFilter: number | null;
+  postedBeforeTodayFilterOn: boolean;
   updatedAt: string;
 }
 

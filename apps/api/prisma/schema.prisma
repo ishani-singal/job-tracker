@@ -314,6 +314,13 @@ model AppSettings {
   inactivityThresholdDays Int @default(14)
   deadlineThresholdDays   Int @default(30)
 
+  // Open Roles filters — persisted so they survive a page reload. Null
+  // means "off" for minMatchScoreFilter (no numeric default makes sense);
+  // postedBeforeTodayFilterOn defaults to false since a brand-new user's
+  // roles shouldn't vanish before they've had a chance to see them.
+  minMatchScoreFilter       Int?
+  postedBeforeTodayFilterOn Boolean @default(false)
+
   updatedAt DateTime @updatedAt
 }
 

@@ -5,7 +5,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { AddApplicationDialog } from '@/components/add-application-dialog';
 import { ApplicationRow } from '@/components/application-row';
-import type { Application, DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
+import type { Application, AppSettings, DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
 
 /** A role passes the location filter if: it's remote AND the candidate's
  * profile has openToRemote set (remote is always shown only when the user
@@ -64,14 +64,54 @@ function RoleExperience({ role }: { role: DiscoveredRole }) {
   );
 }
 
+/** A role's "posted date" for filtering purposes: its real postedDate when
+ * known, otherwise the date it was first discovered/pulled (createdAt) —
+ * a role with no extracted posting date still has to sit somewhere on a
+ * before/after-today cutoff, and the pull date is the best available proxy. */
+function effectivePostedDate(role: DiscoveredRole): string {
+  return role.postedDate ?? role.createdAt;
+}
+
+function isBeforeToday(dateStr: string): boolean {
+  const date = new Date(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date < today;
+}
+
 export default function ApplicationsPage() {
   const queryClient = useQueryClient();
   const [locationFilterOn, setLocationFilterOn] = useState(true);
   const [experienceFilterOn, setExperienceFilterOn] = useState(true);
-  // Filters out roles scored strictly between 0 and this limit — 0 and
-  // unscored (null) roles are always kept, since 0 usually means "not
-  // scored yet with a real value" or a deliberate override, not "worst fit".
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
+  // Both filters below are persisted server-side (AppSettings) so they
+  // survive a page reload — initialized from settings once loaded, then
+  // held as local state so typing/toggling feels instant, with the save
+  // to the server happening alongside.
   const [minScoreFilter, setMinScoreFilter] = useState('');
+  const [minScoreFilterInitialized, setMinScoreFilterInitialized] = useState(false);
+  const [postedBeforeTodayFilterOn, setPostedBeforeTodayFilterOn] = useState(false);
+  if (settings && !minScoreFilterInitialized) {
+    setMinScoreFilter(settings.minMatchScoreFilter != null ? String(settings.minMatchScoreFilter) : '');
+    setPostedBeforeTodayFilterOn(settings.postedBeforeTodayFilterOn);
+    setMinScoreFilterInitialized(true);
+  }
+
+  const updateSettings = useMutation({
+    mutationFn: (data: Partial<AppSettings>) => api.updateSettings(data),
+    onSuccess: (updated) => queryClient.setQueryData(['settings'], updated),
+  });
+
+  function handleMinScoreFilterChange(value: string) {
+    setMinScoreFilter(value);
+    updateSettings.mutate({ minMatchScoreFilter: value === '' ? null : Number(value) });
+  }
+
+  function handlePostedBeforeTodayFilterChange(checked: boolean) {
+    setPostedBeforeTodayFilterOn(checked);
+    updateSettings.mutate({ postedBeforeTodayFilterOn: checked });
+  }
+
   const { data: applications, isLoading } = useQuery({
     queryKey: ['applications'],
     queryFn: api.listApplications,
@@ -92,10 +132,11 @@ export default function ApplicationsPage() {
   const unselectedRoles = unselectedRolesRaw?.filter(
     (r) =>
       (minScore === null || r.atsScore === null || r.atsScore === 0 || r.atsScore >= minScore) &&
+      (!postedBeforeTodayFilterOn || !isBeforeToday(effectivePostedDate(r))) &&
       (!locationFilterOn || matchesLocationFilter(r, profile)) &&
       (!experienceFilterOn || matchesExperienceFilter(r, profile)),
   );
-  const { data: selectedRoles } = useQuery({
+  const { data: selectedRolesRaw } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
     queryFn: () => api.listDiscoveredRoles('selected'),
     refetchInterval: (query) => {
@@ -103,17 +144,33 @@ export default function ApplicationsPage() {
       return anyUnscored ? 4000 : false;
     },
   });
-
+  // scoreByApplicationId/roleIdByApplicationId are built from the
+  // UNFILTERED selected roles — unselect and the score badge must keep
+  // working for an application even while it's hidden by the date filter
+  // below. hiddenApplicationIds is the separate set actually used to filter
+  // the rendered list (per explicit request — unlike the min-score filter,
+  // which only applies to Open Roles, "posted before today" applies to
+  // Selected too, treated as a staleness signal). A directly-added
+  // application (no linked DiscoveredRole at all) has no date signal to
+  // filter on, so it's never hidden by this filter.
   const scoreByApplicationId = new Map(
-    (selectedRoles ?? [])
+    (selectedRolesRaw ?? [])
       .filter((r) => r.applicationId)
       .map((r) => [r.applicationId as string, r.atsScore]),
   );
   const roleIdByApplicationId = new Map(
-    (selectedRoles ?? [])
+    (selectedRolesRaw ?? [])
       .filter((r) => r.applicationId)
       .map((r) => [r.applicationId as string, r.id]),
   );
+  const hiddenApplicationIds = new Set(
+    postedBeforeTodayFilterOn
+      ? (selectedRolesRaw ?? [])
+          .filter((r) => r.applicationId && isBeforeToday(effectivePostedDate(r)))
+          .map((r) => r.applicationId as string)
+      : [],
+  );
+  const visibleApplications = (applications ?? []).filter((app) => !hiddenApplicationIds.has(app.id));
 
   const selectRole = useMutation({
     mutationFn: (id: string) => api.selectRole(id),
@@ -198,9 +255,17 @@ export default function ApplicationsPage() {
                   placeholder="off"
                   className="w-14 border rounded px-1 py-0.5 bg-transparent"
                   value={minScoreFilter}
-                  onChange={(e) => setMinScoreFilter(e.target.value)}
+                  onChange={(e) => handleMinScoreFilterChange(e.target.value)}
                 />
                 %
+              </label>
+              <label className="flex items-center gap-1.5 text-xs opacity-70 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={postedBeforeTodayFilterOn}
+                  onChange={(e) => handlePostedBeforeTodayFilterChange(e.target.checked)}
+                />
+                Hide roles posted before today
               </label>
             </div>
           </div>
@@ -223,10 +288,14 @@ export default function ApplicationsPage() {
 
         <div className="flex flex-col gap-2">
           <h2 className="text-sm font-medium opacity-70">
-            Selected ({applications?.length ?? 0})
+            Selected ({visibleApplications.length}
+            {applications && applications.length !== visibleApplications.length
+              ? ` of ${applications.length}`
+              : ''}
+            )
           </h2>
           <div className="flex flex-col gap-2">
-            {applications?.map((app) => {
+            {visibleApplications.map((app) => {
               const roleId = roleIdByApplicationId.get(app.id);
               return (
                 <div key={app.id} className="flex flex-col gap-1">
@@ -251,6 +320,9 @@ export default function ApplicationsPage() {
               <p className="text-sm opacity-60">
                 No applications yet — add one above or select a role on the left.
               </p>
+            )}
+            {applications && applications.length > 0 && visibleApplications.length === 0 && (
+              <p className="text-sm opacity-60">All selected applications are hidden by the current filters.</p>
             )}
           </div>
         </div>

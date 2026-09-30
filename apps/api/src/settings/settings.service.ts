@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export interface UpdateSettingsInput {
   inactivityThresholdDays?: number;
   deadlineThresholdDays?: number;
+  minMatchScoreFilter?: number | null;
+  postedBeforeTodayFilterOn?: boolean;
 }
 
 @Injectable()
@@ -26,6 +28,12 @@ export class SettingsService {
         }),
         ...(input.deadlineThresholdDays !== undefined && {
           deadlineThresholdDays: input.deadlineThresholdDays,
+        }),
+        ...(input.minMatchScoreFilter !== undefined && {
+          minMatchScoreFilter: input.minMatchScoreFilter,
+        }),
+        ...(input.postedBeforeTodayFilterOn !== undefined && {
+          postedBeforeTodayFilterOn: input.postedBeforeTodayFilterOn,
         }),
       },
     });
