@@ -241,6 +241,24 @@ export class CompanyRolesService implements OnModuleDestroy {
     return this.browser;
   }
 
+  /** Navigates and waits for the page to settle, tolerating boards that
+   * never go fully idle (persistent polling/analytics/websockets — verified
+   * on Expedia's careers page: `waitUntil: 'networkidle'` timed out
+   * completely even though the page had loaded and rendered 192 real job
+   * listings, so the whole candidate URL was silently abandoned via the
+   * caller's catch-and-continue). Tries networkidle first (the strongest
+   * signal that dynamic content has finished rendering) and, only if that
+   * throws, falls back to domcontentloaded + a fixed settle delay instead of
+   * giving up on the page entirely. */
+  private async gotoAndSettle(page: Page, url: string, timeout = 15000): Promise<void> {
+    try {
+      await page.goto(url, { waitUntil: 'networkidle', timeout });
+    } catch {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+      await page.waitForTimeout(2000);
+    }
+  }
+
   /** One row per tracked company, combining open-role discovery status with
    * resume status — the single unified list the Company Resumes page shows
    * (previously two separate lists: tracked companies here, and a resume
@@ -636,7 +654,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     }
 
     try {
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+      await this.gotoAndSettle(page, url);
       // This is a fresh page/navigation (separate from the one that found
       // firstPageRoles), so any sort selection from that earlier page's
       // client-side state doesn't carry over here — re-apply it.
@@ -723,7 +741,7 @@ export class CompanyRolesService implements OnModuleDestroy {
       userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)',
     });
     try {
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+      await this.gotoAndSettle(page, url);
       // Only listing pages (includeLinks: true) get sorted — a single JD
       // fetch has no sort control to find. Sorting BEFORE expanding/reading
       // matters: the staleness-stop and known-role-stop optimizations both
@@ -1184,7 +1202,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     const roles: DiscoveredRoleDto[] = [];
 
     try {
-      await page.goto(listingUrl, { waitUntil: 'networkidle', timeout: 15000 });
+      await this.gotoAndSettle(page, listingUrl);
 
       // Best-effort dismissal of any blocking modal (e.g. Netflix's
       // "upload your resume" prompt with a SKIP button) — a modal that
