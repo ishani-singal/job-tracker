@@ -115,6 +115,17 @@ const MAX_LOAD_MORE_ROUNDS = 15;
  * page rather than expanding this one in place. */
 const LOAD_MORE_TEXT_PATTERN = /\b(show|load|see|view)\s+more\b/i;
 
+/** Some boards (e.g. Microsoft's careers site) paginate through a JS-driven
+ * "next page" BUTTON that re-fetches and replaces the results in place —
+ * there's no real hyperlink for extractRolesWithLlm's nextPageUrl to catch,
+ * so this is a distinct fallback from both link-following (paginateRoles)
+ * and in-place expansion (expandShowMoreListing): click, wait, re-extract,
+ * repeat — replacing the accumulated roles each round rather than expanding
+ * the same page's content. Matched by aria-label since these buttons are
+ * often icon-only with no visible text. */
+const NEXT_PAGE_BUTTON_SELECTOR =
+  '[aria-label*="next" i]:not([aria-label*="similar" i]), button[aria-label*="Next page" i]';
+
 function buildRoleListExtractionPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
   return `You extract a list of open job postings from raw career-page text. Today's date is
@@ -316,8 +327,19 @@ export class CompanyRolesService implements OnModuleDestroy {
     });
 
     try {
-      const { careerPageUrl, roles } = await this.findRolesForCompany(name, seedUrl);
       const company = await this.prisma.trackedCompany.findUniqueOrThrow({ where: { name } });
+      // Re-scans stop paginating as soon as a page's roles overlap with ones
+      // already known for this company — boards are date-sorted newest-first,
+      // so hitting an already-seen role means everything past that point was
+      // already captured in a prior scan. A brand-new company has no known
+      // URLs, so its first scan naturally isn't affected by this at all.
+      const existingRoles = await this.prisma.discoveredRole.findMany({
+        where: { companyId: company.id },
+        select: { roleUrl: true },
+      });
+      const knownRoleUrls = new Set(existingRoles.map((r) => r.roleUrl));
+
+      const { careerPageUrl, roles } = await this.findRolesForCompany(name, seedUrl, knownRoleUrls);
 
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
@@ -368,7 +390,8 @@ export class CompanyRolesService implements OnModuleDestroy {
 
   private async findRolesForCompany(
     name: string,
-    seedUrl?: string,
+    seedUrl: string | undefined,
+    knownRoleUrls: Set<string>,
   ): Promise<{ careerPageUrl?: string; roles: DiscoveredRoleDto[] }> {
     // A known-good URL (derived from a real job posting, or manually
     // entered) is tried before any guess — it's known to work for this
@@ -383,7 +406,9 @@ export class CompanyRolesService implements OnModuleDestroy {
         const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url);
         if (firstPageRoles.length === 0) continue;
 
-        const roles = await this.paginateRoles(firstPageRoles, nextPageUrl, url);
+        const roles = nextPageUrl
+          ? await this.paginateRoles(firstPageRoles, nextPageUrl, url, knownRoleUrls)
+          : await this.paginateWithClicks(firstPageRoles, url, knownRoleUrls);
         return { careerPageUrl: url, roles };
       } catch {
         // Try the next candidate URL — a 404/timeout on one guess is expected.
@@ -395,14 +420,17 @@ export class CompanyRolesService implements OnModuleDestroy {
   }
 
   /** Follows a listing's "Next page" links, accumulating roles, until: no
-   * more roles come back, there's no next page, the page cap is hit, or a
+   * more roles come back, there's no next page, the page cap is hit, a
    * page's roles are ALL older than the staleness cutoff (later pages of a
    * date-sorted listing only get older, so this is a safe stop condition,
-   * not just an optimization). */
+   * not just an optimization), OR — on a re-scan — a page contains a role
+   * already known for this company, since boards are newest-first and
+   * hitting a known role means everything after it was already captured. */
   private async paginateRoles(
     firstPageRoles: DiscoveredRoleDto[],
     nextPageUrl: string | undefined,
     firstPageUrl: string,
+    knownRoleUrls: Set<string>,
   ): Promise<DiscoveredRoleDto[]> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
@@ -411,11 +439,15 @@ export class CompanyRolesService implements OnModuleDestroy {
       const posted = new Date(r.postedDate);
       return !isNaN(posted.getTime()) && posted < cutoff;
     };
+    const hitsKnownRole = (pageRoles: DiscoveredRoleDto[]) =>
+      pageRoles.some((r) => knownRoleUrls.has(r.url));
 
     const allRoles = [...firstPageRoles];
     let currentNextUrl = nextPageUrl;
     let previousUrl = firstPageUrl;
     let pageCount = 1;
+
+    if (hitsKnownRole(firstPageRoles)) return allRoles;
 
     while (currentNextUrl && pageCount < MAX_LISTING_PAGES) {
       // Guard against a broken pagination link that points back to a page
@@ -435,13 +467,96 @@ export class CompanyRolesService implements OnModuleDestroy {
         allRoles.push(...pageRoles);
         pageCount += 1;
 
-        if (pageRoles.every(isStale)) break;
+        if (hitsKnownRole(pageRoles) || pageRoles.every(isStale)) break;
 
         previousUrl = currentNextUrl;
         currentNextUrl = followingUrl;
       } catch {
         break;
       }
+    }
+
+    return allRoles;
+  }
+
+  /** Fallback for boards that paginate via a JS-driven "next page" BUTTON
+   * rather than a real link (e.g. Microsoft's careers site) — extractRolesWithLlm
+   * never gets a nextPageUrl for these, so paginateRoles alone stops after
+   * page 1. Opens its own page (rather than reusing renderPageText's, which
+   * closes its page before returning) and stays on it across clicks, since
+   * each click mutates the SAME page's DOM in place instead of navigating to
+   * a new URL. Same stop conditions as paginateRoles: page cap, no roles
+   * found, an entire round is stale, or (on a re-scan) a round hits an
+   * already-known role — plus stopping the moment the "next" button itself
+   * is gone or disabled. */
+  private async paginateWithClicks(
+    firstPageRoles: DiscoveredRoleDto[],
+    url: string,
+    knownRoleUrls: Set<string>,
+  ): Promise<DiscoveredRoleDto[]> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
+    const isStale = (r: DiscoveredRoleDto) => {
+      if (!r.postedDate) return false;
+      const posted = new Date(r.postedDate);
+      return !isNaN(posted.getTime()) && posted < cutoff;
+    };
+    const hitsKnownRole = (pageRoles: DiscoveredRoleDto[]) =>
+      pageRoles.some((r) => knownRoleUrls.has(r.url));
+
+    const browser = await this.getBrowser();
+    const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)' });
+    const allRoles = [...firstPageRoles];
+
+    if (hitsKnownRole(firstPageRoles)) {
+      await page.close();
+      return allRoles;
+    }
+
+    try {
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+
+      for (let pageCount = 1; pageCount < MAX_LISTING_PAGES; pageCount++) {
+        const nextButton = page.locator(NEXT_PAGE_BUTTON_SELECTOR).first();
+        const buttonCount = await nextButton.count();
+        if (buttonCount === 0) break;
+
+        const isDisabled = await nextButton
+          .evaluate((el) => el.getAttribute('aria-disabled') === 'true' || (el as HTMLButtonElement).disabled)
+          .catch(() => true);
+        if (isDisabled) break;
+
+        const visible = await nextButton.isVisible().catch(() => false);
+        if (!visible) break;
+
+        await nextButton.click().catch(() => {
+          throw new Error('next-page button click failed');
+        });
+
+        try {
+          await page.waitForLoadState('networkidle', { timeout: 5000 });
+        } catch {
+          // Some boards never go fully idle (polling/analytics) — the fixed
+          // settle delay below still lets new roles render.
+        }
+        await page.waitForTimeout(500);
+
+        const html = await page.content();
+        const $ = cheerio.load(html);
+        $('script, style, noscript').remove();
+        const pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 60000);
+        if (!pageText || pageText.length < 200) break;
+
+        const { roles: pageRoles } = await this.extractRolesWithLlm(pageText, page.url());
+        if (pageRoles.length === 0) break;
+
+        allRoles.push(...pageRoles);
+        if (hitsKnownRole(pageRoles) || pageRoles.every(isStale)) break;
+      }
+    } catch (err) {
+      this.logger.warn(`Click-based pagination stopped early for ${url}: ${err}`);
+    } finally {
+      await page.close();
     }
 
     return allRoles;
