@@ -381,32 +381,19 @@ export class CompanyRolesService implements OnModuleDestroy {
       });
       const knownRoleUrls = new Set(existingRoles.map((r) => r.roleUrl));
 
-      const { careerPageUrl, roles } = await this.findRolesForCompany(name, seedUrl, knownRoleUrls);
+      // Each page's roles are written to the DB as soon as they're
+      // extracted (via this callback, threaded through findRolesForCompany
+      // -> paginateRoles/paginateWithClicks) instead of only at the very
+      // end of the whole scan — a large board (Amazon: ~2376 roles across
+      // dozens of pages) used to lose ALL progress if the scan was
+      // interrupted (rate-limited, restarted, stopped) before the last
+      // page finished; now every page already fetched is durably saved
+      // regardless of how far the scan gets.
+      const persistPage = async (pageRoles: DiscoveredRoleDto[]) => {
+        await this.persistRoles(company.id, pageRoles);
+      };
 
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
-
-      const kept = roles.filter((r) => {
-        if (!r.postedDate) return true;
-        const posted = new Date(r.postedDate);
-        return isNaN(posted.getTime()) || posted >= cutoff;
-      });
-
-      for (const role of kept) {
-        await this.prisma.discoveredRole.upsert({
-          where: { companyId_roleUrl: { companyId: company.id, roleUrl: role.url } },
-          update: {
-            title: role.title,
-            postedDate: role.postedDate ? new Date(role.postedDate) : null,
-          },
-          create: {
-            companyId: company.id,
-            title: role.title,
-            roleUrl: role.url,
-            postedDate: role.postedDate ? new Date(role.postedDate) : null,
-          },
-        });
-      }
+      const { careerPageUrl } = await this.findRolesForCompany(name, seedUrl, knownRoleUrls, persistPage);
 
       await this.prisma.trackedCompany.update({
         where: { id: company.id },
@@ -430,10 +417,45 @@ export class CompanyRolesService implements OnModuleDestroy {
     }
   }
 
+  /** Upserts one page's worth of roles immediately, filtering out anything
+   * past the staleness cutoff first. Called once per page during discovery
+   * (see the persistPage callback in discoverForCompany) rather than once
+   * for the whole scan's accumulated results, so progress is never lost if
+   * the scan is interrupted partway through. */
+  private async persistRoles(companyId: string, roles: DiscoveredRoleDto[]): Promise<void> {
+    if (roles.length === 0) return;
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
+
+    const kept = roles.filter((r) => {
+      if (!r.postedDate) return true;
+      const posted = new Date(r.postedDate);
+      return isNaN(posted.getTime()) || posted >= cutoff;
+    });
+
+    for (const role of kept) {
+      await this.prisma.discoveredRole.upsert({
+        where: { companyId_roleUrl: { companyId, roleUrl: role.url } },
+        update: {
+          title: role.title,
+          postedDate: role.postedDate ? new Date(role.postedDate) : null,
+        },
+        create: {
+          companyId,
+          title: role.title,
+          roleUrl: role.url,
+          postedDate: role.postedDate ? new Date(role.postedDate) : null,
+        },
+      });
+    }
+  }
+
   private async findRolesForCompany(
     name: string,
     seedUrl: string | undefined,
     knownRoleUrls: Set<string>,
+    persistPage: (pageRoles: DiscoveredRoleDto[]) => Promise<void>,
   ): Promise<{ careerPageUrl?: string; roles: DiscoveredRoleDto[] }> {
     // A known-good URL (derived from a real job posting, or manually
     // entered) is tried before any guess — it's known to work for this
@@ -450,10 +472,11 @@ export class CompanyRolesService implements OnModuleDestroy {
 
         const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url, links);
         if (firstPageRoles.length === 0) continue;
+        await persistPage(firstPageRoles);
 
         const roles = nextPageUrl
-          ? await this.paginateRoles(firstPageRoles, nextPageUrl, url, knownRoleUrls)
-          : await this.paginateWithClicks(firstPageRoles, url, knownRoleUrls);
+          ? await this.paginateRoles(firstPageRoles, nextPageUrl, url, knownRoleUrls, persistPage)
+          : await this.paginateWithClicks(firstPageRoles, url, knownRoleUrls, persistPage);
         return { careerPageUrl: url, roles };
       } catch {
         // Try the next candidate URL — a 404/timeout on one guess is expected.
@@ -476,6 +499,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     nextPageUrl: string | undefined,
     firstPageUrl: string,
     knownRoleUrls: Set<string>,
+    persistPage: (pageRoles: DiscoveredRoleDto[]) => Promise<void>,
   ): Promise<DiscoveredRoleDto[]> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
@@ -514,6 +538,7 @@ export class CompanyRolesService implements OnModuleDestroy {
         if (pageRoles.length === 0) break;
 
         allRoles.push(...pageRoles);
+        await persistPage(pageRoles);
         pageCount += 1;
 
         if (hitsKnownRole(pageRoles) || pageRoles.every(isStale)) break;
@@ -542,6 +567,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     firstPageRoles: DiscoveredRoleDto[],
     url: string,
     knownRoleUrls: Set<string>,
+    persistPage: (pageRoles: DiscoveredRoleDto[]) => Promise<void>,
   ): Promise<DiscoveredRoleDto[]> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
@@ -615,6 +641,7 @@ export class CompanyRolesService implements OnModuleDestroy {
         if (pageRoles.length === 0) break;
 
         allRoles.push(...pageRoles);
+        await persistPage(pageRoles);
         if (hitsKnownRole(pageRoles) || pageRoles.every(isStale)) break;
       }
     } catch (err) {
