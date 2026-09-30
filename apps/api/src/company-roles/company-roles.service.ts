@@ -96,8 +96,13 @@ const CAREER_URL_GUESSES = (company: string): string[] => {
 
 /** Follows a listing's pagination up to this many pages — a safety cap so a
  * broken "Next" link (e.g. one that points back to itself) can't loop
- * forever. Most boards' open-role counts fit well within this. */
-const MAX_LISTING_PAGES = 10;
+ * forever, not an intended per-company limit. Sized generously because
+ * per-page role counts vary wildly across boards — e.g. Microsoft's careers
+ * site pages just 4 roles at a time via paginateWithClicks, so a cap of 10
+ * (fine for a 20-50-per-page board) silently truncated it at 40 roles. The
+ * hitsKnownRole/staleness stop conditions in paginateRoles/paginateWithClicks
+ * are what actually end a normal scan early; this is only the backstop. */
+const MAX_LISTING_PAGES = 100;
 
 /** Some career boards (e.g. many custom/Workday-embedded sites) don't paginate
  * via a "Next page" link at all — they use a "Show more"/"Load more" button or
