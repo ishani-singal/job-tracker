@@ -65,7 +65,8 @@ export class ApplicationsController {
     const template = isStructuredResume(application.resumeContent)
       ? await this.resumes.getResumeTemplate()
       : undefined;
-    const pdf = await renderResumePdf(title || 'Resume', application.resumeContent, template);
+    const profile = await this.resumes.getProfile();
+    const pdf = await renderResumePdf(title || 'Resume', application.resumeContent, template, profile.candidateName);
 
     const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
     res

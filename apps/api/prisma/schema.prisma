@@ -140,6 +140,8 @@ model ResumePromptTemplate {
   templateBody String
 
   // Profile fields — personal facts substituted into the template at generation time
+  // Candidate's own full name — printed top-center on the generated resume PDF.
+  candidateName         String?
   targetRoleArchetype   String?
   disqualifierKeywords  String[] @default([])
   // Candidate's location, used to limit/flag scanning to matching roles.

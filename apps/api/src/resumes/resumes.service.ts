@@ -9,6 +9,7 @@ import { extractTextFromFile } from './extract-text';
 const UPLOAD_DIR = join(process.cwd(), '..', '..', 'data', 'uploads');
 
 export interface ProfileFieldsInput {
+  candidateName?: string;
   targetRoleArchetype?: string;
   disqualifierKeywords?: string[];
   locationCountry?: string | null;
@@ -110,6 +111,7 @@ export class ResumesService {
   async updateProfile(input: ProfileFieldsInput) {
     const existing = await this.getProfile();
     const data: Prisma.ResumePromptTemplateUpdateInput = {
+      ...(input.candidateName !== undefined && { candidateName: input.candidateName }),
       ...(input.targetRoleArchetype !== undefined && {
         targetRoleArchetype: input.targetRoleArchetype,
       }),

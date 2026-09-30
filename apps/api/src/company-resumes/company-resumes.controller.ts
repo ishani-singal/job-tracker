@@ -33,7 +33,8 @@ export class CompanyResumesController {
     const template = isStructuredResume(resume.resumeContent)
       ? await this.resumes.getResumeTemplate()
       : undefined;
-    const pdf = await renderResumePdf(decoded, resume.resumeContent, template);
+    const profile = await this.resumes.getProfile();
+    const pdf = await renderResumePdf(decoded, resume.resumeContent, template, profile.candidateName);
     const safeName = decoded.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/pdf')

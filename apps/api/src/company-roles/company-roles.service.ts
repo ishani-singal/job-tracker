@@ -1379,15 +1379,9 @@ export class CompanyRolesService implements OnModuleDestroy {
     return { unselected: true };
   }
 
-  /** Scores every unscored role for a company, and ALSO retries any role
-   * stuck at atsScore=0 — a 0 score usually means the previous attempt
-   * couldn't resolve real JD content (a redirect, a blocked fetch, a
-   * transient LLM error swallowed as "couldn't score this") rather than a
-   * genuine 0% match, so it's worth a fresh attempt every time this company
-   * gets scored again rather than leaving it stuck. */
   private async scoreUnscoredRolesForCompany(companyId: string) {
     const roles = await this.prisma.discoveredRole.findMany({
-      where: { companyId, OR: [{ atsScore: null }, { atsScore: 0 }] },
+      where: { companyId, atsScore: null },
     });
     if (roles.length === 0) return;
 

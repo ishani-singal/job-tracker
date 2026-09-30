@@ -177,7 +177,7 @@ export default function ApplicationsPage() {
   const minScore = minScoreFilter === '' ? null : Number(minScoreFilter);
   const unselectedRoles = unselectedRolesRaw?.filter(
     (r) =>
-      (minScore === null || r.atsScore === null || r.atsScore === 0 || r.atsScore >= minScore) &&
+      (minScore === null || r.atsScore === null || r.atsScore >= minScore) &&
       (!postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), postedWithinDays)) &&
       (!hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
       (!locationFilterOn || matchesLocationFilter(r, profile)) &&

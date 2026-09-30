@@ -201,6 +201,7 @@ function PromptPreviewSection() {
 function ProfileForm({ profile }: { profile: ResumeProfile }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
+    candidateName: profile.candidateName ?? '',
     targetRoleArchetype: profile.targetRoleArchetype ?? '',
     disqualifierKeywords: (profile.disqualifierKeywords ?? []).join(', '),
     locationCountry: profile.locationCountry ?? '',
@@ -223,6 +224,7 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
     setSaving(true);
     try {
       await api.updateProfile({
+        candidateName: form.candidateName,
         targetRoleArchetype: form.targetRoleArchetype,
         disqualifierKeywords: form.disqualifierKeywords
           .split(',')
@@ -249,6 +251,13 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
         edit once, applies to all future generations.
       </p>
 
+      <Field label="Candidate Name">
+        <input
+          className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+          value={form.candidateName}
+          onChange={(e) => setForm({ ...form, candidateName: e.target.value })}
+        />
+      </Field>
       <Field label="Target Role Archetype">
         <input
           className="border rounded px-2 py-1 text-sm w-full bg-transparent"
