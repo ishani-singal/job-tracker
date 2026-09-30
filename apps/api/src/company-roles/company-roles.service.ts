@@ -199,6 +199,19 @@ its link text) — null if there's no next page or the page isn't paginated. If 
 isn't a career/jobs listing page at all, return {"roles": [], "nextPageUrl": null}.`;
 }
 
+/** Job titles only, no URL — used by discoverRolesByClickingCards for boards
+ * with real listings but zero real per-posting <a href> links (URLs get
+ * discovered separately by clicking each matching card). */
+function buildTitleOnlyExtractionPrompt(): string {
+  return `You extract job posting TITLES ONLY from raw career-page text — this page has no
+usable per-posting links, so URLs will be discovered separately by clicking each card. Return
+ONLY a JSON object: {"titles": [string, ...]}. Each entry is the exact job title as posted,
+verbatim (needed to find and click the matching element later — do not paraphrase, truncate, or
+reformat it). Only include actual open roles — skip navigation, footer text, "view all jobs"
+links, benefits/culture content, and anything that isn't a specific job posting. If the page
+clearly isn't a career/jobs listing page at all, return {"titles": []}.`;
+}
+
 export interface DiscoveredRoleDto {
   title: string;
   url: string;
@@ -485,7 +498,24 @@ export class CompanyRolesService implements OnModuleDestroy {
         if (!pageText || pageText.length < 200) continue;
 
         const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url, links);
-        if (firstPageRoles.length === 0) continue;
+        if (firstPageRoles.length === 0) {
+          // Real content but zero real per-posting <a href> links anywhere
+          // (not just zero the LLM could match) — some boards select a job
+          // by clicking a role-less <div role="button"> card instead of
+          // navigating a real link (e.g. Netflix's Eightfold board: no href
+          // at all, only an aria-label + a click that updates ?pid=<id> in
+          // the URL). Worth a bounded click-per-card attempt before giving
+          // up on this candidate; a board with real content but genuinely
+          // no jobs still correctly returns nothing either way.
+          if (links.length === 0 && pageText.length > 500) {
+            const clickedRoles = await this.discoverRolesByClickingCards(url);
+            if (clickedRoles.length > 0) {
+              await persistPage(clickedRoles);
+              return { careerPageUrl: url, roles: clickedRoles };
+            }
+          }
+          continue;
+        }
         await persistPage(firstPageRoles);
 
         const roles = nextPageUrl
@@ -1095,6 +1125,112 @@ export class CompanyRolesService implements OnModuleDestroy {
       roles: (parsed.roles ?? []).filter((r) => r.title && r.url && (!knownHrefs || knownHrefs.has(r.url))),
       nextPageUrl: parsed.nextPageUrl ?? undefined,
     };
+  }
+
+  private async extractTitlesWithLlm(pageText: string): Promise<string[]> {
+    const endpoint = process.env.AZURE_LLM_ENDPOINT;
+    const apiKey = process.env.AZURE_LLM_API_KEY;
+    const deployment = process.env.AZURE_LLM_DEPLOYMENT_NAME ?? 'gpt-4.1';
+    const apiVersion = process.env.AZURE_LLM_API_VERSION ?? '2024-12-01-preview';
+    if (!endpoint || !apiKey) throw new Error('AZURE_LLM_ENDPOINT / AZURE_LLM_API_KEY not configured');
+
+    const baseEndpoint = endpoint.replace(/\/openai\/?$/, '');
+    const url = `${baseEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+    const response = await this.fetchWithRetry(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: buildTitleOnlyExtractionPrompt() },
+          { role: 'user', content: `Page text:\n${pageText}` },
+        ],
+        temperature: 0,
+        response_format: { type: 'json_object' },
+      }),
+    });
+    if (!response.ok) throw new Error(`Title extraction request failed: ${response.status}`);
+
+    const data = (await response.json()) as { choices: { message: { content: string } }[] };
+    const raw = data.choices[0]?.message?.content ?? '{"titles":[]}';
+    const parsed = JSON.parse(raw) as { titles?: string[] };
+    return (parsed.titles ?? []).filter((t) => typeof t === 'string' && t.trim());
+  }
+
+  /** Last-resort role discovery for boards with real job listings but zero
+   * usable <a href> per-posting links anywhere in the markup (e.g. Netflix's
+   * Eightfold board: job cards are <div role="button"> elements with no
+   * href, selected via a click that updates a ?pid=<id> query param, behind
+   * a one-time "upload your resume" modal that must be dismissed first).
+   *
+   * Bounded deliberately hard on every axis after an earlier version of
+   * this (without these bounds) contributed to a production hang: a fixed
+   * WALL_CLOCK_BUDGET_MS caps the whole operation regardless of how many
+   * titles were found or how slow individual clicks are, every Playwright
+   * call has its own short explicit timeout (nothing waits on a default),
+   * and CARD_LIMIT keeps a huge listing from turning into hundreds of
+   * sequential clicks. Hitting either bound just returns whatever roles
+   * were found so far rather than throwing — partial results from this
+   * fallback are still useful. */
+  private async discoverRolesByClickingCards(listingUrl: string): Promise<DiscoveredRoleDto[]> {
+    const WALL_CLOCK_BUDGET_MS = 45_000;
+    const CARD_LIMIT = 15;
+    const deadline = Date.now() + WALL_CLOCK_BUDGET_MS;
+
+    const browser = await this.getBrowser();
+    const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)' });
+    const roles: DiscoveredRoleDto[] = [];
+
+    try {
+      await page.goto(listingUrl, { waitUntil: 'networkidle', timeout: 15000 });
+
+      // Best-effort dismissal of any blocking modal (e.g. Netflix's
+      // "upload your resume" prompt with a SKIP button) — a modal that
+      // isn't there or can't be dismissed this way just means the
+      // subsequent clicks fail individually, not fatal to the whole thing.
+      await page
+        .evaluate(() => {
+          const dismissPattern = /^(skip|close|no thanks|dismiss|x)$/i;
+          const candidates = Array.from(
+            document.querySelectorAll<HTMLElement>('button, a, [role="button"]'),
+          );
+          const target = candidates.find(
+            (el) => el.offsetParent !== null && dismissPattern.test((el.textContent ?? '').trim()),
+          );
+          target?.click();
+        })
+        .catch(() => {});
+      await page.waitForTimeout(300);
+
+      const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 60000));
+      const titles = await this.extractTitlesWithLlm(bodyText);
+
+      for (const title of titles.slice(0, CARD_LIMIT)) {
+        if (Date.now() > deadline) break;
+
+        try {
+          const locator = page.getByText(title, { exact: true }).first();
+          if ((await locator.count().catch(() => 0)) === 0) continue;
+
+          await locator.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+          await locator.click({ timeout: 3000 });
+          await page.waitForTimeout(500);
+
+          const resultUrl = page.url();
+          if (resultUrl && resultUrl !== listingUrl) {
+            roles.push({ title, url: resultUrl });
+          }
+        } catch {
+          // One card failing to click/resolve shouldn't abort the rest.
+        }
+      }
+    } catch {
+      // Whole-page navigation/setup failed — return whatever was found
+      // (likely nothing), same as any other candidate URL failing.
+    } finally {
+      await page.close().catch(() => {});
+    }
+
+    return roles;
   }
 
   async listRoles(params: { unselectedOnly?: boolean; selectedOnly?: boolean }) {
