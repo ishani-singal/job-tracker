@@ -99,6 +99,13 @@ model DiscoveredRole {
   roleCity        String?
   locationMismatch Boolean?
 
+  // Minimum years of experience the JD requires, extracted at scoring time
+  // (e.g. "5+ years" -> 5, "3-5 years" -> 3 — the low end, since that's the
+  // real qualifying bar). Null means not yet scored, or the JD stated no
+  // numeric experience requirement at all (not the same as 0).
+  roleMinYearsExperience Int?
+  experienceMismatch     Boolean?
+
   applicationId String? @unique
 
   createdAt DateTime @default(now())

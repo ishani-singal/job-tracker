@@ -148,6 +148,8 @@ export interface DiscoveredRole {
   roleState: string | null;
   roleCity: string | null;
   locationMismatch: boolean | null;
+  roleMinYearsExperience: number | null;
+  experienceMismatch: boolean | null;
   applicationId: string | null;
   createdAt: string;
   updatedAt: string;

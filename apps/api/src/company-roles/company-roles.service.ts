@@ -39,6 +39,23 @@ function looksLikeJsonDump(text: string): boolean {
   return structuralChars / sample.length > 0.15;
 }
 
+/** Some SPAs (e.g. Google's careers site) return HTTP 200 on the same URL
+ * with no redirect for a delisted/removed/not-found job, but silently fall
+ * back to rendering a generic SEARCH RESULTS listing (other, unrelated open
+ * roles) instead of a real 404 or the requested JD — verified directly
+ * against a stale Google job URL: 200, same origin, page text literally
+ * contains "Jobs search results" and "N jobs matched" followed by a list of
+ * other jobs' titles/locations, not the requested posting. A naive
+ * "contains JD vocabulary" check is fooled by this, since the fallback
+ * listing's job titles/snippets do contain real words like "experience" —
+ * matching on the search-results page's own literal UI copy is far more
+ * precise. requireSameOrigin's domain/generic-listing checks don't catch
+ * this either, since the URL is a genuine specific-job path, not a bounce to
+ * a listing root. */
+function looksLikeSearchResultsFallback(text: string): boolean {
+  return /jobs?\s+search\s+results|\b\d[\d,]*\s+jobs?\s+matched\b/i.test(text.slice(0, 3000));
+}
+
 /** Strips common legal-entity suffixes and normalizes case/punctuation so
  * "Amazon" and "Amazon.com Services LLC" collapse to the same key. Not
  * exhaustive — good enough to catch the common patterns without an external
@@ -112,13 +129,14 @@ const CAREER_URL_GUESSES = (company: string): string[] => {
 
 /** Follows a listing's pagination up to this many pages — a safety cap so a
  * broken "Next" link (e.g. one that points back to itself) can't loop
- * forever, not an intended per-company limit. Sized generously because
- * per-page role counts vary wildly across boards — e.g. Microsoft's careers
- * site pages just 4 roles at a time via paginateWithClicks, so a cap of 10
- * (fine for a 20-50-per-page board) silently truncated it at 40 roles. The
- * hitsKnownRole/staleness stop conditions in paginateRoles/paginateWithClicks
- * are what actually end a normal scan early; this is only the backstop. */
-const MAX_LISTING_PAGES = 100;
+ * forever — not a page-count cap. Pagination in paginateRoles/
+ * paginateWithClicks stops only on the real conditions: no more roles, no
+ * next page, hitting an already-known role (re-scans), or every role on a
+ * page being past the staleness cutoff (later pages of a date-sorted
+ * listing only get older). MAX_LISTING_PAGES exists purely so a broken
+ * pagination link/button that cycles back to itself can't loop forever —
+ * it should never be the thing that actually ends a normal scan. */
+const MAX_LISTING_PAGES = Number.MAX_SAFE_INTEGER;
 
 /** Some career boards (e.g. many custom/Workday-embedded sites) don't paginate
  * via a "Next page" link at all — they use a "Show more"/"Load more" button or
@@ -152,16 +170,19 @@ function buildRoleListExtractionPrompt(): string {
   return `You extract a list of open job postings from raw career-page text. Today's date is
 ${today} — use it to resolve any relative date phrasing. Return ONLY a JSON object:
 {"roles": [...], "nextPageUrl": string|null}. Each role entry: title (string, the job title as
-posted), url (string, the FULL absolute URL to that specific posting — resolve relative links
-against the page's own URL given to you; omit the role if you cannot determine a real
-per-posting URL), postedDate (ISO date string YYYY-MM-DD, or null — resolve relative phrasing
-like "Posted 3 days ago" or "2 weeks ago" against today's date; only null if there's truly no
-recency signal for that role). Only include actual open roles — skip navigation links, footer
-text, "view all jobs" links, benefits/culture content, and anything that isn't a specific job
-posting. nextPageUrl: the FULL absolute URL of a "Next page"/"Next"/pagination-forward link if
-this listing spans multiple pages and one is present on this page, resolved against the page's
-own URL — null if there's no next page or the page isn't paginated. If the page clearly isn't a
-career/jobs listing page at all, return {"roles": [], "nextPageUrl": null}.`;
+posted), url (string — if a "Real links found on this page" list is provided, you MUST copy the
+url for this role EXACTLY from that list; NEVER construct, guess, or slugify a URL yourself from
+the job title even if it looks like a plausible pattern for this site — if no matching link is in
+the list, omit the role entirely rather than inventing one. If no links list is provided, resolve
+a relative link against the page's own URL, and still omit the role if you cannot find a real
+URL for it), postedDate (ISO date string YYYY-MM-DD, or null — resolve relative phrasing like
+"Posted 3 days ago" or "2 weeks ago" against today's date; only null if there's truly no recency
+signal for that role). Only include actual open roles — skip navigation links, footer text, "view
+all jobs" links, benefits/culture content, and anything that isn't a specific job posting.
+nextPageUrl: the FULL absolute URL of a "Next page"/"Next"/pagination-forward link if this
+listing spans multiple pages and one is present (prefer picking it from the links list too, by
+its link text) — null if there's no next page or the page isn't paginated. If the page clearly
+isn't a career/jobs listing page at all, return {"roles": [], "nextPageUrl": null}.`;
 }
 
 export interface DiscoveredRoleDto {
@@ -421,10 +442,13 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     for (const url of candidates) {
       try {
-        const pageText = await this.renderPageText(url, { expandShowMoreListing: true });
+        const { text: pageText, links } = await this.renderPageText(url, {
+          expandShowMoreListing: true,
+          includeLinks: true,
+        });
         if (!pageText || pageText.length < 200) continue;
 
-        const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url);
+        const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url, links);
         if (firstPageRoles.length === 0) continue;
 
         const roles = nextPageUrl
@@ -476,12 +500,16 @@ export class CompanyRolesService implements OnModuleDestroy {
       if (currentNextUrl === previousUrl) break;
 
       try {
-        const pageText = await this.renderPageText(currentNextUrl, { expandShowMoreListing: true });
+        const { text: pageText, links } = await this.renderPageText(currentNextUrl, {
+          expandShowMoreListing: true,
+          includeLinks: true,
+        });
         if (!pageText || pageText.length < 200) break;
 
         const { roles: pageRoles, nextPageUrl: followingUrl } = await this.extractRolesWithLlm(
           pageText,
           currentNextUrl,
+          links,
         );
         if (pageRoles.length === 0) break;
 
@@ -564,11 +592,22 @@ export class CompanyRolesService implements OnModuleDestroy {
 
         const html = await page.content();
         const $ = cheerio.load(html);
+        const currentUrl = page.url();
+        const pageLinks = $('a[href]')
+          .map((_, el) => {
+            const $el = $(el);
+            const text = $el.text().replace(/\s+/g, ' ').trim();
+            const href = $el.attr('href')?.trim() ?? '';
+            return { text, href };
+          })
+          .get()
+          .filter((l) => l.text && l.href && !l.href.startsWith('#') && !l.href.startsWith('javascript:'))
+          .map((l) => ({ ...l, href: this.resolveUrl(l.href, currentUrl) }));
         $('script, style, noscript').remove();
         const pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 60000);
         if (!pageText || pageText.length < 200 || looksLikeJsonDump(pageText)) break;
 
-        const { roles: pageRoles } = await this.extractRolesWithLlm(pageText, page.url());
+        const { roles: pageRoles } = await this.extractRolesWithLlm(pageText, currentUrl, pageLinks);
         if (pageRoles.length === 0) break;
 
         allRoles.push(...pageRoles);
@@ -583,10 +622,24 @@ export class CompanyRolesService implements OnModuleDestroy {
     return allRoles;
   }
 
+  /** Overload used by listing extraction (includeLinks: true) — returns real
+   * <a href> links alongside the page text so extractRolesWithLlm can pick
+   * actual URLs from a candidate list instead of having to infer/construct
+   * one from prose, which some boards' LLM extraction was doing incorrectly
+   * (fabricating plausible-but-fake URLs from the job title when no real URL
+   * was visible in plain text — verified on Stripe and Microsoft's boards). */
   private async renderPageText(
     url: string,
-    opts?: { requireSameOrigin?: boolean; expandShowMoreListing?: boolean },
-  ): Promise<string> {
+    opts: { requireSameOrigin?: boolean; expandShowMoreListing?: boolean; includeLinks: true },
+  ): Promise<{ text: string; links: { text: string; href: string }[] }>;
+  private async renderPageText(
+    url: string,
+    opts?: { requireSameOrigin?: boolean; expandShowMoreListing?: boolean; includeLinks?: false },
+  ): Promise<string>;
+  private async renderPageText(
+    url: string,
+    opts?: { requireSameOrigin?: boolean; expandShowMoreListing?: boolean; includeLinks?: boolean },
+  ): Promise<string | { text: string; links: { text: string; href: string }[] }> {
     const browser = await this.getBrowser();
     const page = await browser.newPage({
       userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)',
@@ -617,11 +670,28 @@ export class CompanyRolesService implements OnModuleDestroy {
           !domainChanged &&
           /\/(careers|jobs)\/?(search)?\/?$/i.test(finalUrl.pathname) &&
           finalUrl.pathname !== requestedUrl.pathname;
-        if (domainChanged || landedOnGenericListing) return '';
+        if (domainChanged || landedOnGenericListing) {
+          return opts?.includeLinks ? { text: '', links: [] } : '';
+        }
       }
       const html = await page.content();
       const $ = cheerio.load(html);
       const ogDescription = $('meta[property="og:description"]').attr('content')?.trim();
+
+      let links: { text: string; href: string }[] = [];
+      if (opts?.includeLinks) {
+        links = $('a[href]')
+          .map((_, el) => {
+            const $el = $(el);
+            const text = $el.text().replace(/\s+/g, ' ').trim();
+            const href = $el.attr('href')?.trim() ?? '';
+            return { text, href };
+          })
+          .get()
+          .filter((l) => l.text && l.href && !l.href.startsWith('#') && !l.href.startsWith('javascript:'))
+          .map((l) => ({ ...l, href: this.resolveUrl(l.href, url) }));
+      }
+
       $('script, style, noscript').remove();
       const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
       // Some Eightfold-powered boards (e.g. Netflix) render a large JSON app-
@@ -630,9 +700,18 @@ export class CompanyRolesService implements OnModuleDestroy {
       // pure garbage for both JD extraction and date parsing. Prefer
       // og:description whenever bodyText is short OR JSON-dominated.
       const useBodyText = bodyText.length > 200 && !looksLikeJsonDump(bodyText);
-      return (useBodyText ? bodyText : ogDescription || bodyText).slice(0, 60000);
+      const text = (useBodyText ? bodyText : ogDescription || bodyText).slice(0, 60000);
+      return opts?.includeLinks ? { text, links } : text;
     } finally {
       await page.close();
+    }
+  }
+
+  private resolveUrl(href: string, baseUrl: string): string {
+    try {
+      return new URL(href, baseUrl).toString();
+    } catch {
+      return href;
     }
   }
 
@@ -682,12 +761,20 @@ export class CompanyRolesService implements OnModuleDestroy {
   private async extractRolesWithLlm(
     pageText: string,
     pageUrl: string,
+    links: { text: string; href: string }[] = [],
   ): Promise<{ roles: DiscoveredRoleDto[]; nextPageUrl?: string }> {
     const endpoint = process.env.AZURE_LLM_ENDPOINT;
     const apiKey = process.env.AZURE_LLM_API_KEY;
     const deployment = process.env.AZURE_LLM_DEPLOYMENT_NAME ?? 'gpt-4.1';
     const apiVersion = process.env.AZURE_LLM_API_VERSION ?? '2024-12-01-preview';
     if (!endpoint || !apiKey) throw new Error('AZURE_LLM_ENDPOINT / AZURE_LLM_API_KEY not configured');
+
+    // Cap the link list too — some boards have hundreds of nav/footer links;
+    // keep it generous but bounded rather than blowing up the prompt size.
+    const linksBlock = links
+      .slice(0, 500)
+      .map((l) => `"${l.text}" -> ${l.href}`)
+      .join('\n');
 
     const baseEndpoint = endpoint.replace(/\/openai\/?$/, '');
     const url = `${baseEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
@@ -697,7 +784,16 @@ export class CompanyRolesService implements OnModuleDestroy {
       body: JSON.stringify({
         messages: [
           { role: 'system', content: buildRoleListExtractionPrompt() },
-          { role: 'user', content: `Page URL: ${pageUrl}\n\nPage text:\n${pageText}` },
+          {
+            role: 'user',
+            content:
+              `Page URL: ${pageUrl}\n\n` +
+              (linksBlock
+                ? `Real links found on this page (link text -> actual URL) — you MUST pick each ` +
+                  `role's url from THIS list verbatim, never construct or guess one:\n${linksBlock}\n\n`
+                : '') +
+              `Page text:\n${pageText}`,
+          },
         ],
         temperature: 0,
         response_format: { type: 'json_object' },
@@ -708,8 +804,17 @@ export class CompanyRolesService implements OnModuleDestroy {
     const data = (await response.json()) as { choices: { message: { content: string } }[] };
     const raw = data.choices[0]?.message?.content ?? '{"roles":[]}';
     const parsed = JSON.parse(raw) as { roles?: DiscoveredRoleDto[]; nextPageUrl?: string | null };
+
+    // Belt-and-suspenders: when we gave the model a real link list, reject
+    // any role whose URL isn't actually in it — this is what catches a
+    // fabricated URL even if the model ignores the "pick from this list"
+    // instruction (verified happening on Stripe's and Microsoft's boards
+    // before this fix: plausible-looking but fake /jobs/<slug-from-title>
+    // URLs that don't correspond to any real posting).
+    const knownHrefs = links.length > 0 ? new Set(links.map((l) => l.href)) : null;
+
     return {
-      roles: (parsed.roles ?? []).filter((r) => r.title && r.url),
+      roles: (parsed.roles ?? []).filter((r) => r.title && r.url && (!knownHrefs || knownHrefs.has(r.url))),
       nextPageUrl: parsed.nextPageUrl ?? undefined,
     };
   }
@@ -795,6 +900,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     const [profile, entries] = await Promise.all([this.fetchCandidateProfile(), this.fetchCandidateEntries()]);
 
     const candidateLocation = this.extractCandidateLocation(profile);
+    const candidateMaxYears = this.extractCandidateMaxYears(profile);
 
     await this.runWithConcurrency(roles, SCORING_CONCURRENCY, async (role) => {
       try {
@@ -818,6 +924,8 @@ export class CompanyRolesService implements OnModuleDestroy {
             roleState: result.state,
             roleCity: result.city,
             locationMismatch: this.computeLocationMismatch(result, candidateLocation),
+            roleMinYearsExperience: result.minYearsExperience,
+            experienceMismatch: this.computeExperienceMismatch(result.minYearsExperience, candidateMaxYears),
           },
         });
       } catch (err) {
@@ -845,6 +953,11 @@ export class CompanyRolesService implements OnModuleDestroy {
       state: countryCode && p.locationState ? this.locations.stateName(countryCode, p.locationState) : null,
       openToRemote: !!p.openToRemote,
     };
+  }
+
+  private extractCandidateMaxYears(profile: unknown): number | null {
+    const p = (profile ?? {}) as { maxYearsExperience?: number | null };
+    return typeof p.maxYearsExperience === 'number' ? p.maxYearsExperience : null;
   }
 
   /** Runs `fn` over `items` with at most `limit` in flight at once — scoring
@@ -877,6 +990,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     }
     const result = await this.estimateAtsScore(jdText, profile, entries);
     const candidateLocation = this.extractCandidateLocation(profile);
+    const candidateMaxYears = this.extractCandidateMaxYears(profile);
 
     return this.prisma.discoveredRole.update({
       where: { id: roleId },
@@ -889,6 +1003,8 @@ export class CompanyRolesService implements OnModuleDestroy {
         roleState: result.state,
         roleCity: result.city,
         locationMismatch: this.computeLocationMismatch(result, candidateLocation),
+        roleMinYearsExperience: result.minYearsExperience,
+        experienceMismatch: this.computeExperienceMismatch(result.minYearsExperience, candidateMaxYears),
       },
     });
   }
@@ -896,6 +1012,7 @@ export class CompanyRolesService implements OnModuleDestroy {
   private async fetchRoleJd(roleUrl: string): Promise<string> {
     try {
       const pageText = await this.renderPageText(roleUrl, { requireSameOrigin: true });
+      if (looksLikeSearchResultsFallback(pageText)) return '';
       return pageText.slice(0, 20000);
     } catch {
       return '';
@@ -934,8 +1051,16 @@ export class CompanyRolesService implements OnModuleDestroy {
     country: string | null;
     state: string | null;
     city: string | null;
+    minYearsExperience: number | null;
   }> {
-    const empty = { score: null, isRemote: null, country: null, state: null, city: null };
+    const empty = {
+      score: null,
+      isRemote: null,
+      country: null,
+      state: null,
+      city: null,
+      minYearsExperience: null,
+    };
     if (!jdText) return empty;
 
     const endpoint = process.env.AZURE_LLM_ENDPOINT;
@@ -955,22 +1080,28 @@ export class CompanyRolesService implements OnModuleDestroy {
             role: 'system',
             content:
               'You estimate how well a candidate matches a job description for ATS/recruiter ' +
-              'screening purposes, and extract the JD\'s work-location signal. Return ONLY a ' +
-              'JSON object: {"score": <integer 0-100>, "isRemote": boolean|null, ' +
-              '"country": string|null, "state": string|null, "city": string|null}. score: base ' +
-              'it on keyword/skill overlap, seniority match, and domain relevance between the ' +
-              "candidate's background and the JD's requirements. Be realistic, not generous. " +
-              'isRemote: true if the JD says the role is remote/work-from-home/distributed (even ' +
-              'if restricted to certain locations), false if it explicitly requires onsite/hybrid ' +
-              'office presence, null if the JD says nothing about work location at all. country: ' +
-              'full country name (e.g. "United States") the role is based in, or — if remote — the ' +
-              'country its remote eligibility is restricted to if the JD states one (e.g. "Remote ' +
-              '(US only)" -> "United States"); null if unstated or remote with no country ' +
-              'restriction. state: the state/province/region the role is based in, or the specific ' +
-              'state remote eligibility is restricted to if the JD states one; null otherwise ' +
-              '(including remote roles open anywhere in the country). city: the city the role is ' +
-              'based in if stated; null for remote roles or if unstated. Use full names, not ' +
-              'abbreviations or codes.',
+              'screening purposes, and extract the JD\'s work-location and experience-requirement ' +
+              'signals. Return ONLY a JSON object: {"score": <integer 0-100>, "isRemote": ' +
+              'boolean|null, "country": string|null, "state": string|null, "city": string|null, ' +
+              '"minYearsExperience": integer|null}. score: base it on keyword/skill overlap, ' +
+              "seniority match, and domain relevance between the candidate's background and the " +
+              'JD\'s requirements. Be realistic, not generous. isRemote: true if the JD says the ' +
+              'role is remote/work-from-home/distributed (even if restricted to certain ' +
+              'locations), false if it explicitly requires onsite/hybrid office presence, null if ' +
+              'the JD says nothing about work location at all. country: full country name (e.g. ' +
+              '"United States") the role is based in, or — if remote — the country its remote ' +
+              'eligibility is restricted to if the JD states one (e.g. "Remote (US only)" -> ' +
+              '"United States"); null if unstated or remote with no country restriction. state: ' +
+              'the state/province/region the role is based in, or the specific state remote ' +
+              'eligibility is restricted to if the JD states one; null otherwise (including remote ' +
+              'roles open anywhere in the country). city: the city the role is based in if stated; ' +
+              'null for remote roles or if unstated. Use full names, not abbreviations or codes. ' +
+              'minYearsExperience: the minimum years of professional experience the JD requires as ' +
+              'an integer — for a range like "3-5 years" use the LOW end (3), since that\'s the ' +
+              'actual qualifying bar; for "5+ years" use 5; for a stated experience LEVEL with no ' +
+              'number (e.g. "Senior", "Entry-level", "New grad") infer a reasonable typical number ' +
+              'of years for that level rather than leaving it null; null only if the JD truly gives ' +
+              'no experience signal at all, numeric or level-based.',
           },
           {
             role: 'user',
@@ -991,6 +1122,7 @@ export class CompanyRolesService implements OnModuleDestroy {
       country?: string | null;
       state?: string | null;
       city?: string | null;
+      minYearsExperience?: number | null;
     };
     return {
       score: typeof parsed.score === 'number' ? Math.max(0, Math.min(100, Math.round(parsed.score))) : null,
@@ -998,6 +1130,8 @@ export class CompanyRolesService implements OnModuleDestroy {
       country: parsed.country || null,
       state: parsed.state || null,
       city: parsed.city || null,
+      minYearsExperience:
+        typeof parsed.minYearsExperience === 'number' ? Math.max(0, Math.round(parsed.minYearsExperience)) : null,
     };
   }
 
@@ -1035,5 +1169,19 @@ export class CompanyRolesService implements OnModuleDestroy {
     if (!namesMatch(role.country, candidate.country)) return true;
     if (role.state && !namesMatch(role.state, candidate.state)) return true;
     return false;
+  }
+
+  /** A role mismatches on experience if it requires MORE years than the
+   * candidate's profile maxYearsExperience allows — the candidate having
+   * fewer years than a role wants is a real overqualification-in-reverse
+   * signal, but having MORE years than a role wants is never treated as a
+   * mismatch (a senior candidate can always apply to a less senior role).
+   * Null (can't judge) when either side has no number to compare. */
+  private computeExperienceMismatch(
+    roleMinYears: number | null,
+    candidateMaxYears: number | null,
+  ): boolean | null {
+    if (roleMinYears === null || candidateMaxYears === null) return null;
+    return roleMinYears > candidateMaxYears;
   }
 }

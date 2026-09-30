@@ -23,6 +23,18 @@ function matchesLocationFilter(role: DiscoveredRole, profile: ResumeProfile | un
   return true;
 }
 
+/** A role passes the experience filter if the JD's required minimum years
+ * is AT OR BELOW the candidate's profile maxYearsExperience — a role that
+ * wants more years than the candidate has is filtered out; a role wanting
+ * fewer is always shown (a senior candidate can apply to a junior-friendly
+ * role). Roles with no extracted experience signal are never hidden, same
+ * "unknown isn't a mismatch" rule as the location filter. */
+function matchesExperienceFilter(role: DiscoveredRole, profile: ResumeProfile | undefined): boolean {
+  if (profile?.maxYearsExperience == null) return true; // no profile cap set — filter is a no-op
+  if (role.roleMinYearsExperience === null) return true; // unknown requirement
+  return role.roleMinYearsExperience <= profile.maxYearsExperience;
+}
+
 function AtsScoreBadge({ score }: { score: number | null }) {
   if (score === null) return <span className="text-xs opacity-40">Scoring...</span>;
   const color =
@@ -42,9 +54,20 @@ function RoleLocation({ role }: { role: DiscoveredRole }) {
   );
 }
 
+function RoleExperience({ role }: { role: DiscoveredRole }) {
+  if (role.roleMinYearsExperience === null) return null;
+  return (
+    <span className={`text-xs ${role.experienceMismatch ? 'text-red-600' : 'opacity-60'}`}>
+      {role.roleMinYearsExperience}+ yrs
+      {role.experienceMismatch ? ' · above your experience range' : ''}
+    </span>
+  );
+}
+
 export default function ApplicationsPage() {
   const queryClient = useQueryClient();
   const [locationFilterOn, setLocationFilterOn] = useState(true);
+  const [experienceFilterOn, setExperienceFilterOn] = useState(true);
   const { data: applications, isLoading } = useQuery({
     queryKey: ['applications'],
     queryFn: api.listApplications,
@@ -61,9 +84,11 @@ export default function ApplicationsPage() {
       return anyUnscored ? 4000 : false;
     },
   });
-  const unselectedRoles = locationFilterOn
-    ? unselectedRolesRaw?.filter((r) => matchesLocationFilter(r, profile))
-    : unselectedRolesRaw;
+  const unselectedRoles = unselectedRolesRaw?.filter(
+    (r) =>
+      (!locationFilterOn || matchesLocationFilter(r, profile)) &&
+      (!experienceFilterOn || matchesExperienceFilter(r, profile)),
+  );
   const { data: selectedRoles } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
     queryFn: () => api.listDiscoveredRoles('selected'),
@@ -113,24 +138,36 @@ export default function ApplicationsPage() {
 
       <div className="grid grid-cols-2 gap-6">
         <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-sm font-medium opacity-70">
               Open Roles ({unselectedRoles?.length ?? 0}
-              {locationFilterOn && unselectedRolesRaw && unselectedRolesRaw.length !== unselectedRoles?.length
+              {unselectedRolesRaw && unselectedRolesRaw.length !== unselectedRoles?.length
                 ? ` of ${unselectedRolesRaw.length}`
                 : ''}
               )
             </h2>
-            <label className="flex items-center gap-1.5 text-xs opacity-70 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={locationFilterOn}
-                onChange={(e) => setLocationFilterOn(e.target.checked)}
-              />
-              {profile?.locationCountry
-                ? `Filter to ${[profile.locationState, profile.locationCountry].filter(Boolean).join(', ')}${profile.openToRemote ? ' + remote' : ''}`
-                : 'Filter to my location'}
-            </label>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-xs opacity-70 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={locationFilterOn}
+                  onChange={(e) => setLocationFilterOn(e.target.checked)}
+                />
+                {profile?.locationCountry
+                  ? `Filter to ${[profile.locationState, profile.locationCountry].filter(Boolean).join(', ')}${profile.openToRemote ? ' + remote' : ''}`
+                  : 'Filter to my location'}
+              </label>
+              <label className="flex items-center gap-1.5 text-xs opacity-70 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={experienceFilterOn}
+                  onChange={(e) => setExperienceFilterOn(e.target.checked)}
+                />
+                {profile?.maxYearsExperience != null
+                  ? `Filter to ≤${profile.maxYearsExperience} yrs experience`
+                  : 'Filter to my experience'}
+              </label>
+            </div>
           </div>
           <div className="flex flex-col gap-2">
             {unselectedRoles?.map((role) => (
@@ -209,6 +246,7 @@ function DiscoveredRoleRow({
             : 'Posted date unknown'}
         </span>
         <RoleLocation role={role} />
+        <RoleExperience role={role} />
         <AtsScoreBadge score={role.atsScore} />
       </div>
       <button
