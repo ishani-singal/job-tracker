@@ -473,10 +473,14 @@ export class CompanyRolesService implements OnModuleDestroy {
         const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url, links);
         if (firstPageRoles.length === 0) continue;
         await persistPage(firstPageRoles);
+        this.logger.warn(
+          `[DIAG] ${name}: firstPageRoles=${firstPageRoles.length}, nextPageUrl=${nextPageUrl ?? 'null'}`,
+        );
 
         const roles = nextPageUrl
           ? await this.paginateRoles(firstPageRoles, nextPageUrl, url, knownRoleUrls, persistPage)
           : await this.paginateWithClicks(firstPageRoles, url, knownRoleUrls, persistPage);
+        this.logger.warn(`[DIAG] ${name}: final roles=${roles.length}`);
         return { careerPageUrl: url, roles };
       } catch {
         // Try the next candidate URL — a 404/timeout on one guess is expected.
@@ -598,15 +602,24 @@ export class CompanyRolesService implements OnModuleDestroy {
       for (let pageCount = 1; pageCount < MAX_LISTING_PAGES; pageCount++) {
         const nextButton = page.locator(NEXT_PAGE_BUTTON_SELECTOR).first();
         const buttonCount = await nextButton.count();
-        if (buttonCount === 0) break;
+        if (buttonCount === 0) {
+          this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount}: no next button found, stopping`);
+          break;
+        }
 
         const isDisabled = await nextButton
           .evaluate((el) => el.getAttribute('aria-disabled') === 'true' || (el as HTMLButtonElement).disabled)
           .catch(() => true);
-        if (isDisabled) break;
+        if (isDisabled) {
+          this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount}: next button disabled, stopping`);
+          break;
+        }
 
         const visible = await nextButton.isVisible().catch(() => false);
-        if (!visible) break;
+        if (!visible) {
+          this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount}: next button not visible, stopping`);
+          break;
+        }
 
         await nextButton.click().catch(() => {
           throw new Error('next-page button click failed');
@@ -635,14 +648,25 @@ export class CompanyRolesService implements OnModuleDestroy {
           .map((l) => ({ ...l, href: this.resolveUrl(l.href, currentUrl) }));
         $('script, style, noscript').remove();
         const pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 60000);
-        if (!pageText || pageText.length < 200 || looksLikeJsonDump(pageText)) break;
+        if (!pageText || pageText.length < 200 || looksLikeJsonDump(pageText)) {
+          this.logger.warn(
+            `[DIAG] paginateWithClicks page ${pageCount + 1}: bad pageText (len=${pageText?.length ?? 0}, jsonDump=${looksLikeJsonDump(pageText ?? '')}), stopping`,
+          );
+          break;
+        }
 
         const { roles: pageRoles } = await this.extractRolesWithLlm(pageText, currentUrl, pageLinks);
+        this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount + 1}: extracted ${pageRoles.length} roles`);
         if (pageRoles.length === 0) break;
 
         allRoles.push(...pageRoles);
         await persistPage(pageRoles);
-        if (hitsKnownRole(pageRoles) || pageRoles.every(isStale)) break;
+        const known = hitsKnownRole(pageRoles);
+        const stale = pageRoles.every(isStale);
+        if (known || stale) {
+          this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount + 1}: stopping (hitsKnownRole=${known}, allStale=${stale})`);
+          break;
+        }
       }
     } catch (err) {
       this.logger.warn(`Click-based pagination stopped early for ${url}: ${err}`);
@@ -813,20 +837,24 @@ export class CompanyRolesService implements OnModuleDestroy {
       // "Relevance"/"Newest" radio inputs, each option's own label just the
       // bare word "Newest" — no "sort" text anywhere near it, so neither the
       // <select> nor the "sort"-containing click matchers below can find it).
-      // Matches the associated <label> text (via the input's own id, or by
-      // being its ancestor) rather than requiring "sort" in the same element.
+      // Meta's markup has no <label> element at all — the option text lives
+      // in a plain sibling <div> one level up from the <input>, unassociated
+      // by "for"/id or containment — so this walks up a few ancestors
+      // looking for one whose OWN text is exactly the option word (verified
+      // directly against metacareers.com: the radio's immediate parent's
+      // textContent is exactly "Newest").
       const clickedRadio = await page.evaluate(() => {
         const datePattern = /^\s*(newest|latest|most recent|date)\s*$/i;
         const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
         for (const radio of radios) {
           if (radio.offsetParent === null || radio.checked) continue;
-          const labelEl = radio.id
-            ? document.querySelector<HTMLElement>(`label[for="${radio.id}"]`)
-            : radio.closest('label');
-          const text = (labelEl?.textContent ?? radio.getAttribute('aria-label') ?? '').trim();
-          if (datePattern.test(text)) {
-            radio.click();
-            return true;
+          let container: HTMLElement | null = radio.parentElement;
+          for (let hops = 0; container && hops < 5; hops++, container = container.parentElement) {
+            const text = (container.textContent ?? '').trim();
+            if (datePattern.test(text)) {
+              radio.click();
+              return true;
+            }
           }
         }
         return false;
