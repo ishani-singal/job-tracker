@@ -1087,7 +1087,53 @@ export class CompanyRolesService implements OnModuleDestroy {
     }
   }
 
+  /** Batches large link lists into multiple LLM calls instead of one giant
+   * request — verified on Okta's careers board (a single flat page with
+   * ~370 real job links, all present from initial load, no pagination):
+   * a single call asking the model to extract every role from all 370
+   * links at once silently under-returned (only ~30 came back, matching
+   * the alphabetically-first ones), most plausibly the model's own output
+   * hitting a practical length limit for one JSON response rather than any
+   * code-side truncation (page text and link-list caps were both confirmed
+   * NOT hit — 31KB of page text, 510 total links under the old 500 cap).
+   * Each batch gets the FULL page text (cheap to repeat, keeps context for
+   * dates/locations near each role) but only its slice of links, with the
+   * model told to extract roles ONLY for links in the batch. Batches run
+   * sequentially (not Promise.all) to stay within the LLM rate limit that
+   * already causes retries elsewhere in this file. */
   private async extractRolesWithLlm(
+    pageText: string,
+    pageUrl: string,
+    links: { text: string; href: string }[] = [],
+  ): Promise<{ roles: DiscoveredRoleDto[]; nextPageUrl?: string }> {
+    const LINKS_PER_BATCH = 80;
+    if (links.length <= LINKS_PER_BATCH) {
+      return this.extractRolesWithLlmSingleBatch(pageText, pageUrl, links);
+    }
+
+    const allRoles: DiscoveredRoleDto[] = [];
+    const seenUrls = new Set<string>();
+    let nextPageUrl: string | undefined;
+
+    for (let i = 0; i < links.length; i += LINKS_PER_BATCH) {
+      const batch = links.slice(i, i + LINKS_PER_BATCH);
+      const result = await this.extractRolesWithLlmSingleBatch(pageText, pageUrl, batch);
+      for (const role of result.roles) {
+        if (!seenUrls.has(role.url)) {
+          seenUrls.add(role.url);
+          allRoles.push(role);
+        }
+      }
+      // Only the first batch's nextPageUrl is meaningful — a "Next page"
+      // link (if this board even has one) shows up once in the full link
+      // list, not per-batch, so whichever batch happens to contain it wins.
+      if (!nextPageUrl && result.nextPageUrl) nextPageUrl = result.nextPageUrl;
+    }
+
+    return { roles: allRoles, nextPageUrl };
+  }
+
+  private async extractRolesWithLlmSingleBatch(
     pageText: string,
     pageUrl: string,
     links: { text: string; href: string }[] = [],
@@ -1100,6 +1146,8 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     // Cap the link list too — some boards have hundreds of nav/footer links;
     // keep it generous but bounded rather than blowing up the prompt size.
+    // (This cap is now mostly redundant with the batching above, but stays
+    // as a hard backstop for a single batch that's somehow still huge.)
     const linksBlock = links
       .slice(0, 500)
       .map((l) => `"${l.text}" -> ${l.href}`)
