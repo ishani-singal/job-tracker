@@ -1,10 +1,27 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { AddApplicationDialog } from '@/components/add-application-dialog';
 import { ApplicationRow } from '@/components/application-row';
-import type { DiscoveredRole } from '@job-tracker/shared-types';
+import type { DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
+
+/** A role passes the location filter if: it's remote AND the candidate's
+ * profile has openToRemote set (remote is always shown only when the user
+ * has actually opted into remote roles, not unconditionally), or its
+ * country/state match the candidate's profile location, or the role's
+ * location couldn't be determined at all (never hide a role just because
+ * scoring hasn't run/found a location signal yet — that's not the same as
+ * "doesn't match"). */
+function matchesLocationFilter(role: DiscoveredRole, profile: ResumeProfile | undefined): boolean {
+  if (role.roleIsRemote && profile?.openToRemote) return true;
+  if (!profile?.locationCountry) return true; // no profile location set — filter is a no-op
+  if (role.roleCountry === null && role.roleState === null) return true; // unknown location
+  if (role.roleCountry !== profile.locationCountry) return false;
+  if (profile.locationState && role.roleState && role.roleState !== profile.locationState) return false;
+  return true;
+}
 
 function AtsScoreBadge({ score }: { score: number | null }) {
   if (score === null) return <span className="text-xs opacity-40">Scoring...</span>;
@@ -27,11 +44,16 @@ function RoleLocation({ role }: { role: DiscoveredRole }) {
 
 export default function ApplicationsPage() {
   const queryClient = useQueryClient();
+  const [locationFilterOn, setLocationFilterOn] = useState(true);
   const { data: applications, isLoading } = useQuery({
     queryKey: ['applications'],
     queryFn: api.listApplications,
   });
-  const { data: unselectedRoles } = useQuery({
+  const { data: profile } = useQuery({
+    queryKey: ['profile'],
+    queryFn: api.getProfile,
+  });
+  const { data: unselectedRolesRaw } = useQuery({
     queryKey: ['discovered-roles', 'unselected'],
     queryFn: () => api.listDiscoveredRoles('unselected'),
     refetchInterval: (query) => {
@@ -39,6 +61,9 @@ export default function ApplicationsPage() {
       return anyUnscored ? 4000 : false;
     },
   });
+  const unselectedRoles = locationFilterOn
+    ? unselectedRolesRaw?.filter((r) => matchesLocationFilter(r, profile))
+    : unselectedRolesRaw;
   const { data: selectedRoles } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
     queryFn: () => api.listDiscoveredRoles('selected'),
@@ -88,9 +113,25 @@ export default function ApplicationsPage() {
 
       <div className="grid grid-cols-2 gap-6">
         <div className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium opacity-70">
-            Open Roles ({unselectedRoles?.length ?? 0})
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium opacity-70">
+              Open Roles ({unselectedRoles?.length ?? 0}
+              {locationFilterOn && unselectedRolesRaw && unselectedRolesRaw.length !== unselectedRoles?.length
+                ? ` of ${unselectedRolesRaw.length}`
+                : ''}
+              )
+            </h2>
+            <label className="flex items-center gap-1.5 text-xs opacity-70 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={locationFilterOn}
+                onChange={(e) => setLocationFilterOn(e.target.checked)}
+              />
+              {profile?.locationCountry
+                ? `Filter to ${[profile.locationState, profile.locationCountry].filter(Boolean).join(', ')}${profile.openToRemote ? ' + remote' : ''}`
+                : 'Filter to my location'}
+            </label>
+          </div>
           <div className="flex flex-col gap-2">
             {unselectedRoles?.map((role) => (
               <DiscoveredRoleRow
