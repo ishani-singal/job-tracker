@@ -17,6 +17,21 @@ export interface ParsedJob {
   fetchFailed: boolean;
 }
 
+/** Some career pages (e.g. Netflix's Eightfold-powered board) render a large
+ * JSON app-state/theming blob as literal visible body text, not inside a
+ * <script> tag — real prose text, so cheerio's text-stripping never removes
+ * it, and it can run tens of thousands of characters (long enough to look
+ * "real" to a naive length check). Detects this by checking whether the text
+ * is dominated by JSON-structural characters — real JD prose has very few
+ * brace/bracket/quote characters relative to length; a JSON dump is mostly
+ * punctuation and short quoted tokens. */
+function looksLikeJsonDump(text: string): boolean {
+  const sample = text.slice(0, 2000);
+  if (!sample) return false;
+  const structuralChars = (sample.match(/[{}[\]":,]/g) ?? []).length;
+  return structuralChars / sample.length > 0.15;
+}
+
 /**
  * Extracts a platform-native job/req ID straight from the URL structure —
  * deliberately regex-based rather than LLM-inferred, since these IDs are
@@ -106,7 +121,12 @@ export class JobsService implements OnModuleDestroy {
         const ogDescription = $('meta[property="og:description"]').attr('content')?.trim();
         $('script, style, nav, footer, header, noscript').remove();
         const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
-        pageText = (bodyText.length > 200 ? bodyText : ogDescription || bodyText).slice(0, 60000);
+        // Some boards (e.g. Netflix's Eightfold-powered pages) render a huge
+        // JSON app-state blob as literal body text — long enough to pass a
+        // length-only check, but pure garbage for extraction. Prefer
+        // og:description whenever bodyText is short OR JSON-dominated.
+        const useBodyText = bodyText.length > 200 && !looksLikeJsonDump(bodyText);
+        pageText = (useBodyText ? bodyText : ogDescription || bodyText).slice(0, 60000);
       } finally {
         await page.close();
       }

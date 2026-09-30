@@ -23,6 +23,22 @@ const MAX_ROLE_AGE_DAYS = 30;
  * browser pages and LLM requests rather than being an arbitrary batch size. */
 const SCORING_CONCURRENCY = 4;
 
+/** Some career pages (e.g. Netflix's Eightfold-powered board) render a large
+ * JSON app-state/theming blob as literal visible body text — real prose, not
+ * a <script> tag, so cheerio's text-stripping never removes it, and it can
+ * run tens of thousands of characters. Naively preferring og:description
+ * only when bodyText is SHORT misses this case entirely (the JSON blob is
+ * long, so it looks "substantial" while being pure garbage). Detects this by
+ * checking whether the text is dominated by JSON-structural characters — a
+ * real JD full of prose has very few brace/bracket/quote characters relative
+ * to its length; a JSON dump is mostly punctuation and short quoted tokens. */
+function looksLikeJsonDump(text: string): boolean {
+  const sample = text.slice(0, 2000);
+  if (!sample) return false;
+  const structuralChars = (sample.match(/[{}[\]":,]/g) ?? []).length;
+  return structuralChars / sample.length > 0.15;
+}
+
 /** Strips common legal-entity suffixes and normalizes case/punctuation so
  * "Amazon" and "Amazon.com Services LLC" collapse to the same key. Not
  * exhaustive — good enough to catch the common patterns without an external
@@ -550,7 +566,7 @@ export class CompanyRolesService implements OnModuleDestroy {
         const $ = cheerio.load(html);
         $('script, style, noscript').remove();
         const pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 60000);
-        if (!pageText || pageText.length < 200) break;
+        if (!pageText || pageText.length < 200 || looksLikeJsonDump(pageText)) break;
 
         const { roles: pageRoles } = await this.extractRolesWithLlm(pageText, page.url());
         if (pageRoles.length === 0) break;
@@ -608,7 +624,13 @@ export class CompanyRolesService implements OnModuleDestroy {
       const ogDescription = $('meta[property="og:description"]').attr('content')?.trim();
       $('script, style, noscript').remove();
       const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
-      return (bodyText.length > 200 ? bodyText : ogDescription || bodyText).slice(0, 60000);
+      // Some Eightfold-powered boards (e.g. Netflix) render a large JSON app-
+      // state blob as literal body text, not inside a <script> tag — it's
+      // long, so a length-only check treats it as "real" content, but it's
+      // pure garbage for both JD extraction and date parsing. Prefer
+      // og:description whenever bodyText is short OR JSON-dominated.
+      const useBodyText = bodyText.length > 200 && !looksLikeJsonDump(bodyText);
+      return (useBodyText ? bodyText : ogDescription || bodyText).slice(0, 60000);
     } finally {
       await page.close();
     }
