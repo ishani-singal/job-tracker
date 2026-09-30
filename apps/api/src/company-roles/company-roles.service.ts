@@ -250,12 +250,17 @@ export class CompanyRolesService implements OnModuleDestroy {
    * signal that dynamic content has finished rendering) and, only if that
    * throws, falls back to domcontentloaded + a fixed settle delay instead of
    * giving up on the page entirely. */
-  private async gotoAndSettle(page: Page, url: string, timeout = 15000): Promise<void> {
+  private async gotoAndSettle(page: Page, url: string, timeout = 25000): Promise<void> {
     try {
       await page.goto(url, { waitUntil: 'networkidle', timeout });
     } catch {
+      // Verified on Autodesk's careers SPA: networkidle sometimes takes just
+      // over the timeout (~12-16s, right at the boundary — a genuinely slow
+      // but working page, not a page that never idles like Expedia), and a
+      // too-short settle delay here (2s) reliably undershoots how long its
+      // client-side render actually takes (~5-6s+ after domcontentloaded).
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(6000);
     }
   }
 
