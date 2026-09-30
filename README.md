@@ -26,11 +26,9 @@ Runs on a personal server (`<your-host>`) managed by PM2:
 Port 8741 is already Soma's backend (`soma-backend` systemd service) on that server —
 don't reuse it here.
 
-Source lives at `~/job-tracker` on the server, pushed via `scp`/tarball (no git remote
-yet — this repo hasn't been pushed anywhere). `.env`/`.env.local` files are **not**
-committed; they're copied directly to the server and must be kept in sync manually until a
-real deploy script exists (see Finra's `deploy.sh` for the pattern to follow once this
-graduates past manual scp'ing).
+Source lives at `~/job-tracker` on the server as a real git clone of this repo's
+`origin` (public GitHub remote). `.env`/`.env.local` files are **not** committed; they're
+kept only on the server (and locally, gitignored) and never touched by a deploy.
 
 **Important**: `apps/web/.env.local` must point `NEXT_PUBLIC_API_URL` at the server's
 address (e.g. `http://<your-host>:4100`), not `localhost` — it's baked into the client bundle
@@ -38,13 +36,18 @@ at build time and read from the *browser*, so `localhost` there means the visito
 machine, not the server. Getting this wrong makes API calls (uploads, etc.) fail silently
 with no visible error unless the caller checks `res.ok`.
 
-To redeploy after a code change:
+To redeploy after pushing a commit:
 ```bash
-scp <changed file> <user>@<your-host>:~/job-tracker/<same path>
-ssh <user>@<your-host>
-cd ~/job-tracker/apps/api && pnpm build   # if API changed
-pm2 restart job-tracker-api job-tracker-web job-tracker-agent
+bash deploy.sh
 ```
+This SSHs in, `git pull`s, installs deps, applies any new Prisma migrations, builds
+`apps/api` and `apps/web`, and restarts all three PM2 services — then health-checks both
+the API and web app before reporting done. See the script itself for the exact steps; the
+one non-obvious bit is that `job-tracker-web` and `job-tracker-agent` both have to be
+started with `--interpreter bash` under PM2, since their real entrypoints
+(`node_modules/.bin/next`, and the `uv run uvicorn ...` command) are shell scripts/command
+strings, not plain JS files — PM2's default fork-mode interpreter tries to execute them as
+Node and fails with a cryptic `SyntaxError: missing ) after argument list`.
 
 ## Local setup (alternative — if not using the server)
 
