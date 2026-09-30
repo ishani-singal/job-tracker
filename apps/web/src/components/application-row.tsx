@@ -8,6 +8,8 @@ import { api } from '@/lib/api';
 import { AddApplicationDialog } from './add-application-dialog';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
+
 function rowBackgroundClass(application: Application): string {
   if (application.derivedStatus === 'rejected' || application.derivedStatus === 'inactive') {
     return 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900';
@@ -93,8 +95,16 @@ export function ApplicationRow({
           onClick={() => startSession.mutate()}
           disabled={startSession.isPending}
         >
-          {startSession.isPending ? 'Starting...' : 'Generate Resume'}
+          {startSession.isPending ? 'Starting...' : application.resumeContent ? 'Regenerate' : 'Generate Resume'}
         </button>
+        {application.resumeContent && (
+          <a
+            href={`${API_BASE}/applications/${application.id}/resume.pdf`}
+            className="px-2 py-1 text-xs rounded border"
+          >
+            Download PDF
+          </a>
+        )}
         <button className="px-2 py-1 text-xs rounded border" onClick={() => setEditOpen(true)}>
           Edit
         </button>
