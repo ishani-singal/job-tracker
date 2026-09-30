@@ -473,14 +473,10 @@ export class CompanyRolesService implements OnModuleDestroy {
         const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url, links);
         if (firstPageRoles.length === 0) continue;
         await persistPage(firstPageRoles);
-        this.logger.warn(
-          `[DIAG] ${name}: firstPageRoles=${firstPageRoles.length}, nextPageUrl=${nextPageUrl ?? 'null'}`,
-        );
 
         const roles = nextPageUrl
           ? await this.paginateRoles(firstPageRoles, nextPageUrl, url, knownRoleUrls, persistPage)
           : await this.paginateWithClicks(firstPageRoles, url, knownRoleUrls, persistPage);
-        this.logger.warn(`[DIAG] ${name}: final roles=${roles.length}`);
         return { careerPageUrl: url, roles };
       } catch {
         // Try the next candidate URL — a 404/timeout on one guess is expected.
@@ -602,24 +598,15 @@ export class CompanyRolesService implements OnModuleDestroy {
       for (let pageCount = 1; pageCount < MAX_LISTING_PAGES; pageCount++) {
         const nextButton = page.locator(NEXT_PAGE_BUTTON_SELECTOR).first();
         const buttonCount = await nextButton.count();
-        if (buttonCount === 0) {
-          this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount}: no next button found, stopping`);
-          break;
-        }
+        if (buttonCount === 0) break;
 
         const isDisabled = await nextButton
           .evaluate((el) => el.getAttribute('aria-disabled') === 'true' || (el as HTMLButtonElement).disabled)
           .catch(() => true);
-        if (isDisabled) {
-          this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount}: next button disabled, stopping`);
-          break;
-        }
+        if (isDisabled) break;
 
         const visible = await nextButton.isVisible().catch(() => false);
-        if (!visible) {
-          this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount}: next button not visible, stopping`);
-          break;
-        }
+        if (!visible) break;
 
         await nextButton.click().catch(() => {
           throw new Error('next-page button click failed');
@@ -648,25 +635,14 @@ export class CompanyRolesService implements OnModuleDestroy {
           .map((l) => ({ ...l, href: this.resolveUrl(l.href, currentUrl) }));
         $('script, style, noscript').remove();
         const pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 60000);
-        if (!pageText || pageText.length < 200 || looksLikeJsonDump(pageText)) {
-          this.logger.warn(
-            `[DIAG] paginateWithClicks page ${pageCount + 1}: bad pageText (len=${pageText?.length ?? 0}, jsonDump=${looksLikeJsonDump(pageText ?? '')}), stopping`,
-          );
-          break;
-        }
+        if (!pageText || pageText.length < 200 || looksLikeJsonDump(pageText)) break;
 
         const { roles: pageRoles } = await this.extractRolesWithLlm(pageText, currentUrl, pageLinks);
-        this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount + 1}: extracted ${pageRoles.length} roles`);
         if (pageRoles.length === 0) break;
 
         allRoles.push(...pageRoles);
         await persistPage(pageRoles);
-        const known = hitsKnownRole(pageRoles);
-        const stale = pageRoles.every(isStale);
-        if (known || stale) {
-          this.logger.warn(`[DIAG] paginateWithClicks page ${pageCount + 1}: stopping (hitsKnownRole=${known}, allStale=${stale})`);
-          break;
-        }
+        if (hitsKnownRole(pageRoles) || pageRoles.every(isStale)) break;
       }
     } catch (err) {
       this.logger.warn(`Click-based pagination stopped early for ${url}: ${err}`);
@@ -872,7 +848,23 @@ export class CompanyRolesService implements OnModuleDestroy {
           applyButton?.click();
         });
         await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-        await page.waitForTimeout(500);
+        // networkidle can fire before the results list finishes re-rendering
+        // — verified directly on Meta: right after networkidle + 500ms, the
+        // pagination "next" button exists in the DOM but has a zero-size
+        // bounding box (mid-transition), and a caller checking isVisible()
+        // right after this returns immediately gets a false negative,
+        // stopping pagination after only page 1. Poll for the results list
+        // to actually gain real layout instead of a fixed short wait.
+        await page
+          .waitForFunction(
+            () => {
+              const jobLinks = document.querySelectorAll('a[href*="job"], [role="listitem"], article');
+              return jobLinks.length > 0 && Array.from(jobLinks).some((el) => el.getBoundingClientRect().height > 0);
+            },
+            { timeout: 4000 },
+          )
+          .catch(() => {});
+        await page.waitForTimeout(1000);
         return;
       }
 
