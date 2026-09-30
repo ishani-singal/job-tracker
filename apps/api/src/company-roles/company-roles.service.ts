@@ -902,7 +902,7 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     const baseEndpoint = endpoint.replace(/\/openai\/?$/, '');
     const url = `${baseEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
-    const response = await fetch(url, {
+    const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
       body: JSON.stringify({
@@ -1084,6 +1084,34 @@ export class CompanyRolesService implements OnModuleDestroy {
     return typeof p.maxYearsExperience === 'number' ? p.maxYearsExperience : null;
   }
 
+  /** Retries a fetch on 429 (rate limit) and 5xx (transient server error)
+   * responses with exponential backoff, honoring a Retry-After header when
+   * the API sends one. Without this, a single rate-limit hit partway
+   * through a large scan (verified happening on Amazon: 429 after ~4 pages)
+   * silently ends the ENTIRE pagination loop and discards every page not
+   * yet fetched — a scan that should find thousands of roles quietly
+   * stopped at 100. Other error types (4xx auth/bad-request) are not
+   * retried since retrying won't fix them. */
+  private async fetchWithRetry(url: string, init: RequestInit, maxRetries = 5): Promise<Response> {
+    let lastResponse: Response | undefined;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const response = await fetch(url, init);
+      if (response.ok || (response.status < 500 && response.status !== 429)) return response;
+
+      lastResponse = response;
+      if (attempt === maxRetries) break;
+
+      const retryAfterHeader = response.headers.get('retry-after');
+      const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : NaN;
+      const backoffMs = !isNaN(retryAfterMs) ? retryAfterMs : Math.min(1000 * 2 ** attempt, 15000);
+      this.logger.warn(
+        `LLM request got ${response.status}, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${maxRetries})`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+    return lastResponse!;
+  }
+
   /** Runs `fn` over `items` with at most `limit` in flight at once — scoring
    * a company's roles one-at-a-time (each a headless-browser page load plus
    * an LLM round trip) made discovery scoring take minutes for companies with
@@ -1195,7 +1223,7 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     const baseEndpoint = endpoint.replace(/\/openai\/?$/, '');
     const url = `${baseEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
-    const response = await fetch(url, {
+    const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
       body: JSON.stringify({
