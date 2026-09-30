@@ -776,6 +776,20 @@ export class CompanyRolesService implements OnModuleDestroy {
    * order alone rather than failing the whole scan over it. */
   private async sortByDateIfAvailable(page: Page): Promise<void> {
     try {
+      // Some boards (e.g. Microsoft: a button literally labeled "Sort:
+      // Latest") already default to date/newest order — verified directly:
+      // clicking that button doesn't open a real alternate-options menu (it
+      // just re-exposes unrelated page chrome), so attempting the two-step
+      // open-menu flow below is both unnecessary and unreliable here. Check
+      // for an already-sorted label FIRST and skip everything else if found.
+      const alreadySorted = await page.evaluate(() => {
+        const alreadySortedPattern = /\bsort\s*[:\-]?\s*(latest|newest|recent|date)\b/i;
+        return Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"], span, div')).some(
+          (el) => el.offsetParent !== null && alreadySortedPattern.test((el.textContent ?? '').trim()),
+        );
+      });
+      if (alreadySorted) return;
+
       const changedSelect = await page.evaluate(() => {
         const datePattern = /\b(date|newest|recent|new to old)\b/i;
         const selects = Array.from(document.querySelectorAll<HTMLSelectElement>('select'));
@@ -875,11 +889,40 @@ export class CompanyRolesService implements OnModuleDestroy {
    * one is now visible, then wait briefly for new content. Stops once a round
    * adds nothing new, or after MAX_LOAD_MORE_ROUNDS regardless — a listing
    * that keeps growing every round (e.g. a broken loader re-appending the same
-   * roles) must not be followed forever. */
+   * roles) must not be followed forever.
+   *
+   * Scrolling document.body is a no-op on boards where the job list lives in
+   * its own inner scrollable panel instead of the page itself — verified on
+   * Microsoft's board: the real job-card list is a fixed-height <div> with
+   * overflow-y:auto (scrollHeight 1947 vs clientHeight 488), independent of
+   * the page body, which never grows no matter how much you scroll the page.
+   * Finds and scrolls that actual overflow container when body-scrolling
+   * produces no height growth, instead of giving up. */
   private async expandShowMoreListing(page: Page): Promise<void> {
     let previousHeight = 0;
+    let useInnerScroller = false;
+
     for (let round = 0; round < MAX_LOAD_MORE_ROUNDS; round++) {
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      const scrolledHeight = await page.evaluate((tryInner) => {
+        if (tryInner) {
+          // Largest-overflow scrollable element on the page, excluding
+          // document.documentElement/body themselves.
+          const candidates = Array.from(document.querySelectorAll<HTMLElement>('*')).filter((el) => {
+            const style = getComputedStyle(el);
+            return (
+              (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+              el.scrollHeight > el.clientHeight + 50
+            );
+          });
+          const target = candidates.sort((a, b) => b.scrollHeight - b.clientHeight - (a.scrollHeight - a.clientHeight))[0];
+          if (target) {
+            target.scrollTop = target.scrollHeight;
+            return target.scrollHeight;
+          }
+        }
+        window.scrollTo(0, document.body.scrollHeight);
+        return document.body.scrollHeight;
+      }, useInnerScroller);
       await page.waitForTimeout(500);
 
       const clicked = await page.evaluate((pattern) => {
@@ -903,8 +946,19 @@ export class CompanyRolesService implements OnModuleDestroy {
       }
       await page.waitForTimeout(500);
 
-      const newHeight = await page.evaluate(() => document.body.scrollHeight);
-      if (!clicked && newHeight <= previousHeight) break;
+      const newHeight = scrolledHeight;
+      if (!clicked && newHeight <= previousHeight) {
+        // Body-scroll produced no growth and we haven't tried the inner-
+        // container path yet — switch strategies once before giving up,
+        // rather than concluding the listing is fully loaded when we may
+        // just have been scrolling the wrong element.
+        if (!useInnerScroller) {
+          useInnerScroller = true;
+          previousHeight = 0;
+          continue;
+        }
+        break;
+      }
       previousHeight = newHeight;
     }
   }
