@@ -57,12 +57,32 @@ export class ApplicationsService {
     });
   }
 
+  /** Falls back to a company+role match (case-insensitive) when jobId is
+   * absent — catches the same posting appearing on two different boards
+   * (e.g. a company's own careers site and LinkedIn), which never share a
+   * jobId and would otherwise dedup as separate Applications. */
+  async findDuplicateByCompanyAndRole(company: string, role: string) {
+    return this.prisma.application.findFirst({
+      where: {
+        company: { equals: company, mode: 'insensitive' },
+        role: { equals: role, mode: 'insensitive' },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async create(input: CreateApplicationInput) {
-    if (input.jobId && !input.allowDuplicate) {
-      const existing = await this.findDuplicateByJobId(input.jobId);
+    if (!input.allowDuplicate) {
+      const existing = input.jobId
+        ? await this.findDuplicateByJobId(input.jobId)
+        : input.role
+          ? await this.findDuplicateByCompanyAndRole(input.company, input.role)
+          : null;
       if (existing) {
         throw new ConflictException({
-          message: `An application for this posting (job ID ${input.jobId}) already exists.`,
+          message: input.jobId
+            ? `An application for this posting (job ID ${input.jobId}) already exists.`
+            : `An application for ${input.company} — ${input.role} already exists.`,
           duplicateOf: existing,
         });
       }
