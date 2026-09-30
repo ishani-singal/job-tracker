@@ -33,7 +33,10 @@ model Application {
   lastMessageReceivedDate DateTime?
   rejectedDate        DateTime?
 
-  resumeContent    String?
+  // Structured resume content (StructuredResume shape — see shared-types) as
+  // of the resume-template rework; older rows may still hold the pre-rework
+  // markdown string and are not migrated (see resume-template feature notes).
+  resumeContent    Json?
   resumeGeneratedAt DateTime?
 
   createdAt DateTime @default(now())
@@ -212,6 +215,10 @@ model ProjectEntry {
   name       String
   repoUrl    String?
   liveUrl    String?
+  // Distinct from liveUrl (the deployed product itself) — a demo video/GIF/
+  // recording/sandbox link, when the live product isn't public or a quick
+  // demo is more useful to a reviewer than the real thing.
+  demoUrl    String?
   location   String?
   startMonth Int?
   startYear  Int?
@@ -222,6 +229,77 @@ model ProjectEntry {
   sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+// Published/preprint papers, patents, or similar academic-style credits —
+// a separate background section from Projects since authorship/venue/date
+// matter more than a tech stack or a live demo here.
+model PaperEntry {
+  id             String   @id @default(cuid())
+  title          String
+  venue          String?
+  // "Jane Doe, John Smith, ..." — kept as one field rather than a list since
+  // author order/formatting conventions vary a lot by field/venue.
+  authors        String?
+  url            String?
+  publishedMonth Int?
+  publishedYear  Int?
+  required       Boolean  @default(false)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// Formatting rules for rendering a structured resume to PDF/preview. Every
+// numeric field is a MIN/MAX range, not a fixed value — the renderer picks
+// the largest values that still fit the content on one page, shrinking
+// toward each field's min before ever truncating content. Constraints that
+// tie fields together (name font vs. bullet font, header font vs. section
+// font, "always bold") are enforced in the renderer, not stored here twice.
+model ResumeTemplate {
+  id   String @id @default(cuid())
+  name String @default("default")
+
+  marginTopMin    Float @default(36)
+  marginTopMax    Float @default(54)
+  marginBottomMin Float @default(36)
+  marginBottomMax Float @default(54)
+  marginLeftMin   Float @default(36)
+  marginLeftMax   Float @default(54)
+  marginRightMin  Float @default(36)
+  marginRightMax  Float @default(54)
+
+  // Bullet text font size — the base every other font-size rule is relative
+  // to. Hard floor of 9pt enforced in the renderer regardless of what's
+  // stored here (a lower min would silently violate the "never below 9pt"
+  // rule the user has to be able to trust).
+  bulletFontMin Float @default(9)
+  bulletFontMax Float @default(11)
+
+  // Entry name (company/school/project title) font size, expressed as an
+  // offset ABOVE the bullet font actually used that render, not an absolute
+  // size — e.g. nameFontOffsetMin=1 means "at least 1pt larger than
+  // whatever bullet size this render landed on." Always bold (not a toggle).
+  nameFontOffsetMin Float @default(1)
+  nameFontOffsetMax Float @default(4)
+
+  // Section header (e.g. "Work Experience") font size offset ABOVE the name
+  // font used that render — 0 means "same size as name font" is allowed,
+  // per the "same or up to 1pt larger" spec. Always bold.
+  sectionHeaderFontOffsetMin Float @default(0)
+  sectionHeaderFontOffsetMax Float @default(1)
+
+  horizontalTabStop Float @default(36)
+
+  spacingBeforeSectionMin  Float @default(6)
+  spacingBeforeSectionMax  Float @default(14)
+  spacingAfterSectionMin   Float @default(2)
+  spacingAfterSectionMax   Float @default(6)
+  spacingBetweenBulletsMin Float @default(1)
+  spacingBetweenBulletsMax Float @default(4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model AppSettings {
@@ -328,7 +406,8 @@ model LinkedinProfile {
 model CompanyResume {
   id            String   @id @default(cuid())
   company       String   @unique
-  resumeContent String
+  // See Application.resumeContent — same StructuredResume shape/migration note.
+  resumeContent Json
   updatedAt     DateTime @updatedAt
 }
 
