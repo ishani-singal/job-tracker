@@ -45,6 +45,7 @@ export interface AppSettings {
   deadlineThresholdDays: number;
   minMatchScoreFilter: number | null;
   postedBeforeTodayFilterOn: boolean;
+  postedWithinDaysFilter: number;
   updatedAt: string;
 }
 

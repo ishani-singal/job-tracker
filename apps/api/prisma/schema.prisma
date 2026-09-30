@@ -320,6 +320,10 @@ model AppSettings {
   // roles shouldn't vanish before they've had a chance to see them.
   minMatchScoreFilter       Int?
   postedBeforeTodayFilterOn Boolean @default(false)
+  // Cutoff for postedBeforeTodayFilterOn, in days back from today — 0 means
+  // "before today" (the original behavior), N means "before N days ago",
+  // keeping roles posted in the last N days.
+  postedWithinDaysFilter    Int     @default(0)
 
   updatedAt DateTime @updatedAt
 }

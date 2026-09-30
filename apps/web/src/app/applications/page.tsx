@@ -72,11 +72,16 @@ function effectivePostedDate(role: DiscoveredRole): string {
   return role.postedDate ?? role.createdAt;
 }
 
-function isBeforeToday(dateStr: string): boolean {
+/** True when dateStr falls before the cutoff (today minus daysBack, at
+ * midnight) — daysBack=0 means "before today" (keep only roles posted
+ * today or later), daysBack=3 means "before 3 days ago" (keep roles posted
+ * in the last 3 days). */
+function isBeforeCutoff(dateStr: string, daysBack: number): boolean {
   const date = new Date(dateStr);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return date < today;
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - daysBack);
+  return date < cutoff;
 }
 
 export default function ApplicationsPage() {
@@ -91,9 +96,11 @@ export default function ApplicationsPage() {
   const [minScoreFilter, setMinScoreFilter] = useState('');
   const [minScoreFilterInitialized, setMinScoreFilterInitialized] = useState(false);
   const [postedBeforeTodayFilterOn, setPostedBeforeTodayFilterOn] = useState(false);
+  const [postedWithinDaysFilter, setPostedWithinDaysFilter] = useState('0');
   if (settings && !minScoreFilterInitialized) {
     setMinScoreFilter(settings.minMatchScoreFilter != null ? String(settings.minMatchScoreFilter) : '');
     setPostedBeforeTodayFilterOn(settings.postedBeforeTodayFilterOn);
+    setPostedWithinDaysFilter(String(settings.postedWithinDaysFilter));
     setMinScoreFilterInitialized(true);
   }
 
@@ -111,6 +118,16 @@ export default function ApplicationsPage() {
     setPostedBeforeTodayFilterOn(checked);
     updateSettings.mutate({ postedBeforeTodayFilterOn: checked });
   }
+
+  function handlePostedWithinDaysFilterChange(value: string) {
+    setPostedWithinDaysFilter(value);
+    const days = Number(value);
+    if (value !== '' && !Number.isNaN(days) && days >= 0) {
+      updateSettings.mutate({ postedWithinDaysFilter: days });
+    }
+  }
+
+  const postedWithinDays = Math.max(0, Number(postedWithinDaysFilter) || 0);
 
   const { data: applications, isLoading } = useQuery({
     queryKey: ['applications'],
@@ -132,7 +149,7 @@ export default function ApplicationsPage() {
   const unselectedRoles = unselectedRolesRaw?.filter(
     (r) =>
       (minScore === null || r.atsScore === null || r.atsScore === 0 || r.atsScore >= minScore) &&
-      (!postedBeforeTodayFilterOn || !isBeforeToday(effectivePostedDate(r))) &&
+      (!postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), postedWithinDays)) &&
       (!locationFilterOn || matchesLocationFilter(r, profile)) &&
       (!experienceFilterOn || matchesExperienceFilter(r, profile)),
   );
@@ -166,7 +183,7 @@ export default function ApplicationsPage() {
   const hiddenApplicationIds = new Set(
     postedBeforeTodayFilterOn
       ? (selectedRolesRaw ?? [])
-          .filter((r) => r.applicationId && isBeforeToday(effectivePostedDate(r)))
+          .filter((r) => r.applicationId && isBeforeCutoff(effectivePostedDate(r), postedWithinDays))
           .map((r) => r.applicationId as string)
       : [],
   );
@@ -265,7 +282,15 @@ export default function ApplicationsPage() {
                   checked={postedBeforeTodayFilterOn}
                   onChange={(e) => handlePostedBeforeTodayFilterChange(e.target.checked)}
                 />
-                Hide roles posted before today
+                Hide roles posted before
+                <input
+                  type="number"
+                  min={0}
+                  className="w-10 border rounded px-1 py-0.5 bg-transparent"
+                  value={postedWithinDaysFilter}
+                  onChange={(e) => handlePostedWithinDaysFilterChange(e.target.value)}
+                />
+                days ago
               </label>
             </div>
           </div>

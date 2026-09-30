@@ -6,6 +6,7 @@ export interface UpdateSettingsInput {
   deadlineThresholdDays?: number;
   minMatchScoreFilter?: number | null;
   postedBeforeTodayFilterOn?: boolean;
+  postedWithinDaysFilter?: number;
 }
 
 @Injectable()
@@ -34,6 +35,9 @@ export class SettingsService {
         }),
         ...(input.postedBeforeTodayFilterOn !== undefined && {
           postedBeforeTodayFilterOn: input.postedBeforeTodayFilterOn,
+        }),
+        ...(input.postedWithinDaysFilter !== undefined && {
+          postedWithinDaysFilter: input.postedWithinDaysFilter,
         }),
       },
     });
