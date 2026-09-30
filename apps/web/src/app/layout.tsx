@@ -23,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/dashboard">Dashboard</Link>
               <Link href="/linkedin">LinkedIn</Link>
               <Link href="/company-resumes">Company Resumes</Link>
+              <Link href="/resume-template">Resume Template</Link>
               <NavChatButton />
             </nav>
             <main className="p-6">{children}</main>

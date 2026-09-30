@@ -102,8 +102,81 @@ export interface ProjectEntry extends DateRangeFields {
   name: string;
   repoUrl: string | null;
   liveUrl: string | null;
+  demoUrl: string | null;
   required: boolean;
   sortOrder: number;
+}
+
+export interface PaperEntry {
+  id: string;
+  title: string;
+  venue: string | null;
+  authors: string | null;
+  url: string | null;
+  publishedMonth: number | null;
+  publishedYear: number | null;
+  required: boolean;
+  sortOrder: number;
+}
+
+export interface ResumeTemplate {
+  id: string;
+  name: string;
+
+  marginTopMin: number;
+  marginTopMax: number;
+  marginBottomMin: number;
+  marginBottomMax: number;
+  marginLeftMin: number;
+  marginLeftMax: number;
+  marginRightMin: number;
+  marginRightMax: number;
+
+  bulletFontMin: number;
+  bulletFontMax: number;
+
+  nameFontOffsetMin: number;
+  nameFontOffsetMax: number;
+
+  sectionHeaderFontOffsetMin: number;
+  sectionHeaderFontOffsetMax: number;
+
+  horizontalTabStop: number;
+
+  spacingBeforeSectionMin: number;
+  spacingBeforeSectionMax: number;
+  spacingAfterSectionMin: number;
+  spacingAfterSectionMax: number;
+  spacingBetweenBulletsMin: number;
+  spacingBetweenBulletsMax: number;
+
+  updatedAt: string;
+}
+
+/**
+ * The shape `resumeContent` takes once the agent emits structured output
+ * (not yet wired up — see project notes). Sections render in array order;
+ * each entry's dateRange/location are formatted from its own fields, not
+ * stored redundantly here. `kind` picks which icon/date-format convention
+ * the renderer uses per section.
+ */
+export interface StructuredResumeEntry {
+  name: string;
+  subtitle: string | null;
+  location: string | null;
+  dateRange: string | null;
+  bullets: string[];
+}
+
+export interface StructuredResumeSection {
+  heading: string;
+  kind: 'work' | 'education' | 'project' | 'paper';
+  entries: StructuredResumeEntry[];
+}
+
+export interface StructuredResume {
+  contactLine: string;
+  sections: StructuredResumeSection[];
 }
 
 export interface ParsedJob {

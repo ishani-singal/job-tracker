@@ -130,6 +130,41 @@ export class ResumesService {
     };
     return this.prisma.resumePromptTemplate.update({ where: { id: existing.id }, data });
   }
+
+  async getResumeTemplate() {
+    const existing = await this.prisma.resumeTemplate.findFirst();
+    if (existing) return existing;
+    return this.prisma.resumeTemplate.create({ data: { name: 'default' } });
+  }
+
+  async updateResumeTemplate(input: ResumeTemplateInput) {
+    const existing = await this.getResumeTemplate();
+    return this.prisma.resumeTemplate.update({ where: { id: existing.id }, data: input });
+  }
+}
+
+export interface ResumeTemplateInput {
+  marginTopMin?: number;
+  marginTopMax?: number;
+  marginBottomMin?: number;
+  marginBottomMax?: number;
+  marginLeftMin?: number;
+  marginLeftMax?: number;
+  marginRightMin?: number;
+  marginRightMax?: number;
+  bulletFontMin?: number;
+  bulletFontMax?: number;
+  nameFontOffsetMin?: number;
+  nameFontOffsetMax?: number;
+  sectionHeaderFontOffsetMin?: number;
+  sectionHeaderFontOffsetMax?: number;
+  horizontalTabStop?: number;
+  spacingBeforeSectionMin?: number;
+  spacingBeforeSectionMax?: number;
+  spacingAfterSectionMin?: number;
+  spacingAfterSectionMax?: number;
+  spacingBetweenBulletsMin?: number;
+  spacingBetweenBulletsMax?: number;
 }
 
 // Fixed skeleton — the 7-step ATS resume-optimization process. Role/candidate-specific

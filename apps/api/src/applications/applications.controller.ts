@@ -17,12 +17,15 @@ import {
 } from './applications.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { renderResumePdf } from './resume-pdf';
+import { isStructuredResume } from './structured-resume-content';
+import { ResumesService } from '../resumes/resumes.service';
 
 @Controller('applications')
 export class ApplicationsController {
   constructor(
     private readonly applications: ApplicationsService,
     private readonly analytics: AnalyticsService,
+    private readonly resumes: ResumesService,
   ) {}
 
   @Get()
@@ -59,7 +62,10 @@ export class ApplicationsController {
     }
 
     const title = [application.company, application.role].filter(Boolean).join(' — ');
-    const pdf = await renderResumePdf(title || 'Resume', application.resumeContent);
+    const template = isStructuredResume(application.resumeContent)
+      ? await this.resumes.getResumeTemplate()
+      : undefined;
+    const pdf = await renderResumePdf(title || 'Resume', application.resumeContent, template);
 
     const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
     res

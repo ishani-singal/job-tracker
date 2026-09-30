@@ -16,6 +16,7 @@ import type {
   ParsedJob,
   ProjectEntry,
   ResumeProfile,
+  ResumeTemplate,
   TrackedCompany,
   WorkExperienceEntry,
 } from '@job-tracker/shared-types';
@@ -78,6 +79,9 @@ export const api = {
     request<{ prompt: string; prefix: string; template_body: string }>(
       '/resumes/prompt-preview',
     ),
+  getResumeTemplate: () => request<ResumeTemplate>('/resumes/template'),
+  updateResumeTemplate: (data: Partial<ResumeTemplate>) =>
+    request<ResumeTemplate>('/resumes/template', { method: 'PATCH', body: JSON.stringify(data) }),
   listStories: () => request<{ id: string; filename: string }[]>('/resumes/stories'),
   listResumeFiles: () => request<{ id: string; filename: string }[]>('/resumes/files'),
   deleteStory: (id: string) => request<void>(`/resumes/stories/${id}`, { method: 'DELETE' }),

@@ -1,21 +1,27 @@
 import PDFDocument from 'pdfkit';
 import type { Prisma } from '@prisma/client';
+import type { ResumeTemplate } from '@job-tracker/shared-types';
+import { isStructuredResume } from './structured-resume-content';
+import { renderStructuredResumePdf } from './structured-resume-pdf';
 
 /**
- * Renders generated resume text into a simple single-column PDF. The text is
- * free-form model output, not structured fields, so this does lightweight
- * markdown-style parsing rather than a true multi-section resume template:
- * "# "/"## " lines become headers, "- "/"* " lines become indented bullets,
- * "**bold**" spans render bold, everything else is a normal paragraph line.
- *
- * resumeContent is stored as Json now (structured-resume rework in progress —
- * see ResumeTemplate/PaperEntry) but this renderer hasn't been ported to the
- * new structured renderer yet. Until that lands, coerce: a plain string is
- * rendered as before, anything else (the new structured object, or legacy
- * non-string JSON) is stringified so this never throws, even though the
- * output won't look right for structured content.
+ * Renders generated resume content into a PDF. Two shapes are supported:
+ * - Structured (StructuredResume: {contactLine, sections}) — rendered via
+ *   the shrink-to-fit-one-page ResumeTemplate-driven renderer. Requires
+ *   `template` (fetch via ResumesService.getResumeTemplate() first).
+ * - Legacy free-form markdown-ish string (what the Resu agent still
+ *   produces as of this writing) — rendered via lightweight markdown
+ *   parsing, unchanged from before structured resumes existed.
+ * Any other JSON shape is stringified so this never throws.
  */
-export function renderResumePdf(title: string, content: Prisma.JsonValue): Promise<Buffer> {
+export function renderResumePdf(
+  title: string,
+  content: Prisma.JsonValue,
+  template?: ResumeTemplate,
+): Promise<Buffer> {
+  if (isStructuredResume(content) && template) {
+    return renderStructuredResumePdf(content, template);
+  }
   const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
   return renderResumePdfFromText(title, text);
 }

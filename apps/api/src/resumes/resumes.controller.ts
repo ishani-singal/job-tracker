@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
-import { ProfileFieldsInput, ResumesService } from './resumes.service';
+import { ProfileFieldsInput, ResumeTemplateInput, ResumesService } from './resumes.service';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
@@ -62,6 +62,16 @@ export class ResumesController {
   @Patch('profile')
   updateProfile(@Body() body: ProfileFieldsInput) {
     return this.resumes.updateProfile(body);
+  }
+
+  @Get('template')
+  getResumeTemplate() {
+    return this.resumes.getResumeTemplate();
+  }
+
+  @Patch('template')
+  updateResumeTemplate(@Body() body: ResumeTemplateInput) {
+    return this.resumes.updateResumeTemplate(body);
   }
 
   @Get('prompt-preview')
