@@ -35,11 +35,12 @@ function matchesExperienceFilter(role: DiscoveredRole, profile: ResumeProfile | 
   return role.roleMinYearsExperience <= profile.maxYearsExperience;
 }
 
-/** True when a role fails a hard disqualifying condition — a location or
- * experience mismatch, or the JD containing one of the candidate's
- * disqualifierKeywords — in which case its numeric score (even a nonzero
- * one) isn't a meaningful match signal and shouldn't be shown as one. */
+/** True when a role fails a hard disqualifying condition — a literal 0%
+ * score, a location or experience mismatch, or the JD containing one of the
+ * candidate's disqualifierKeywords — in which case its numeric score isn't
+ * a meaningful match signal and shouldn't be shown as one. */
 function hasInvalidCondition(role: DiscoveredRole, profile: ResumeProfile | undefined): boolean {
+  if (role.atsScore === 0) return true;
   if (role.locationMismatch) return true;
   if (role.experienceMismatch) return true;
   const keywords = profile?.disqualifierKeywords ?? [];
