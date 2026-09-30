@@ -5,7 +5,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { AddApplicationDialog } from '@/components/add-application-dialog';
 import { ApplicationRow } from '@/components/application-row';
-import type { DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
+import type { Application, DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
 
 /** A role passes the location filter if: it's remote AND the candidate's
  * profile has openToRemote set (remote is always shown only when the user
@@ -68,6 +68,10 @@ export default function ApplicationsPage() {
   const queryClient = useQueryClient();
   const [locationFilterOn, setLocationFilterOn] = useState(true);
   const [experienceFilterOn, setExperienceFilterOn] = useState(true);
+  // Filters out roles scored strictly between 0 and this limit — 0 and
+  // unscored (null) roles are always kept, since 0 usually means "not
+  // scored yet with a real value" or a deliberate override, not "worst fit".
+  const [minScoreFilter, setMinScoreFilter] = useState('');
   const { data: applications, isLoading } = useQuery({
     queryKey: ['applications'],
     queryFn: api.listApplications,
@@ -84,8 +88,10 @@ export default function ApplicationsPage() {
       return anyUnscored ? 4000 : false;
     },
   });
+  const minScore = minScoreFilter === '' ? null : Number(minScoreFilter);
   const unselectedRoles = unselectedRolesRaw?.filter(
     (r) =>
+      (minScore === null || r.atsScore === null || r.atsScore === 0 || r.atsScore >= minScore) &&
       (!locationFilterOn || matchesLocationFilter(r, profile)) &&
       (!experienceFilterOn || matchesExperienceFilter(r, profile)),
   );
@@ -124,6 +130,22 @@ export default function ApplicationsPage() {
       queryClient.invalidateQueries({ queryKey: ['applications'] });
     },
   });
+
+  // Applications added directly (via AddApplicationDialog) have no backing
+  // DiscoveredRole to detach — "unselect" for these just removes them from
+  // Selected the same way Delete does.
+  const unselectDirectlyAddedApplication = useMutation({
+    mutationFn: (id: string) => api.deleteApplication(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['applications'] });
+    },
+  });
+
+  function unselectDirectlyAdded(app: Application) {
+    if (confirm(`Unselect ${app.company}${app.role ? ` — ${app.role}` : ''}? This removes it from Selected.`)) {
+      unselectDirectlyAddedApplication.mutate(app.id);
+    }
+  }
 
   return (
     <div className="max-w-7xl mx-auto flex flex-col gap-4">
@@ -167,6 +189,19 @@ export default function ApplicationsPage() {
                   ? `Filter to ≤${profile.maxYearsExperience} yrs experience`
                   : 'Filter to my experience'}
               </label>
+              <label className="flex items-center gap-1.5 text-xs opacity-70">
+                Min match score
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  placeholder="off"
+                  className="w-14 border rounded px-1 py-0.5 bg-transparent"
+                  value={minScoreFilter}
+                  onChange={(e) => setMinScoreFilter(e.target.value)}
+                />
+                %
+              </label>
             </div>
           </div>
           <div className="flex flex-col gap-2">
@@ -197,8 +232,12 @@ export default function ApplicationsPage() {
                 <div key={app.id} className="flex flex-col gap-1">
                   <ApplicationRow
                     application={app}
-                    onUnselect={roleId ? () => unselectRole.mutate(roleId) : undefined}
-                    unselecting={unselectRole.isPending}
+                    onUnselect={
+                      roleId ? () => unselectRole.mutate(roleId) : () => unselectDirectlyAdded(app)
+                    }
+                    unselecting={
+                      roleId ? unselectRole.isPending : unselectDirectlyAddedApplication.isPending
+                    }
                   />
                   {scoreByApplicationId.has(app.id) && (
                     <div className="px-4">
