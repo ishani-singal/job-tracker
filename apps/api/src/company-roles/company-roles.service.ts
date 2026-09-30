@@ -499,15 +499,18 @@ export class CompanyRolesService implements OnModuleDestroy {
 
         const { roles: firstPageRoles, nextPageUrl } = await this.extractRolesWithLlm(pageText, url, links);
         if (firstPageRoles.length === 0) {
-          // Real content but zero real per-posting <a href> links anywhere
-          // (not just zero the LLM could match) — some boards select a job
-          // by clicking a role-less <div role="button"> card instead of
-          // navigating a real link (e.g. Netflix's Eightfold board: no href
-          // at all, only an aria-label + a click that updates ?pid=<id> in
-          // the URL). Worth a bounded click-per-card attempt before giving
-          // up on this candidate; a board with real content but genuinely
-          // no jobs still correctly returns nothing either way.
-          if (links.length === 0 && pageText.length > 500) {
+          // The LLM found no roles it could match to a real link — this
+          // includes both "genuinely no jobs on this page" AND "real jobs,
+          // but the per-posting elements have no <a href> at all" (e.g.
+          // Netflix's Eightfold board: nav/footer links exist, so links
+          // isn't empty, but none of them are job postings — a role-less
+          // <div role="button"> card is clicked instead, updating a
+          // ?pid=<id> query param). Not gated on links.length === 0: a page
+          // can have real (nav-only) links and still need the click
+          // fallback. Worth a bounded attempt before giving up on this
+          // candidate; a genuinely job-less page still correctly returns
+          // nothing from the title extraction either way.
+          if (pageText.length > 500) {
             const clickedRoles = await this.discoverRolesByClickingCards(url);
             if (clickedRoles.length > 0) {
               await persistPage(clickedRoles);
