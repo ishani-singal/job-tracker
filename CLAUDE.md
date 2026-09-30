@@ -56,6 +56,7 @@
   pattern as `agent/resu`.
 - `extension/` — Chrome/Edge (Manifest V3) browser extension for quick job-application
   capture from any posting tab; see `extension/README.md`.
+- `deploy.sh` — the deploy pipeline (see Deployment section below). Run it, don't scp.
 
 ## Deployment
 - Runs on `pavan-mazumdar-server` (SSH as `pavan-mazumdar`), app dir `~/job-tracker`,
@@ -68,28 +69,46 @@
   | API | `job-tracker-api` | 4100 |
   | Web | `job-tracker-web` | 3100 |
   | Resu + LinkedIn agent | `job-tracker-agent` | 8743 |
-- No CI/CD — deploy by hand:
+- **Deploy with `bash deploy.sh`** (run from the local repo root, not on the server).
+  It SSHs in, `git pull`s `~/job-tracker` (a real clone of this repo's `origin`),
+  installs Node/Python deps, runs `prisma migrate deploy` + `prisma generate`, builds
+  `apps/api` and `apps/web`, restarts all three PM2 services, and health-checks both
+  the API and web app before reporting done. Commit and push first — it deploys
+  whatever's on `origin/master`, not local working-tree changes.
+- Do not scp individual files to the server as a substitute for `deploy.sh` — it works
+  in the moment but leaves the server's git working tree with uncommitted local
+  changes that then block the next `git pull` with "local changes would be
+  overwritten by merge," and untracked files block it too ("untracked working tree
+  files would be overwritten"). If you ever must patch something directly on the
+  server for fast iteration, get the equivalent change committed and pushed
+  afterward, then run `deploy.sh` (or at least `git status`/`git diff` on the server)
+  to reconcile before trusting `git pull` there again — check the diff DIRECTION
+  file-by-file first (`git diff -b origin/master -- <file>`, `-b` to ignore line-ending
+  noise) since either side can legitimately be ahead; don't assume and don't discard
+  without verifying.
+- On the server, `pnpm`/`pm2`/`uv` aren't on the default non-interactive SSH `$PATH` —
+  `deploy.sh` already sets this up; for a one-off manual command use:
   ```bash
-  scp <changed file> pavan-mazumdar@pavan-mazumdar-server:~/job-tracker/<same path>
-  ssh pavan-mazumdar@pavan-mazumdar-server
-  cd ~/job-tracker/apps/api && pnpm build   # if API changed
-  cd ~/job-tracker/apps/web && pnpm build   # if web changed
-  # agent/*.py changes need no build step — just restart job-tracker-agent
-  pm2 restart job-tracker-api job-tracker-web job-tracker-agent   # only the ones that changed
-  ```
-- On the server, `pnpm`/`pm2` aren't on the default non-interactive SSH `$PATH` — use:
-  ```bash
-  PATH=/usr/lib/node_modules/corepack/shims:/mnt/ssd/npm-global/bin:$PATH pnpm ...
+  PATH=/usr/lib/node_modules/corepack/shims:/mnt/ssd/npm-global/bin:/home/pavan-mazumdar/.local/bin:$PATH pnpm ...
   /mnt/ssd/npm-global/bin/pm2 ...
   ```
+- `job-tracker-web` and `job-tracker-agent` both need `--interpreter bash` if you ever
+  start them manually with `pm2 start` — their real entrypoints
+  (`node_modules/.bin/next`, and the `uv run uvicorn ...` command) are shell
+  scripts/command strings, not plain JS, and PM2's default fork-mode interpreter fails
+  on them with `SyntaxError: missing ) after argument list`. `deploy.sh` already does
+  this correctly — see the script for the exact invocation shape.
 - After a `job-tracker-api` restart, the very first request can transiently fail
   (`TypeError: fetch failed` from a caller) for a few seconds while it comes up — this
-  is expected, not a bug; retry once rather than chasing it.
+  is expected, not a bug; retry once rather than chasing it. Similarly, if a Prisma
+  column's type changed in a migration, requests can fail with Postgres error
+  `"cached plan must not change result type"` until the API process restarts and
+  drops its stale cached query plans — another restart fixes it, not a real bug.
 - Prisma migrations: hand-write the SQL (`apps/api/prisma/migrations/<timestamp>_<name>/
   migration.sql`) rather than trusting an auto-diff when a table has existing rows the
-  diff could drop/require unsafely. Apply with
-  `pnpm exec prisma migrate deploy` on the server, then `pnpm exec prisma generate`
-  before building.
+  diff could drop/require unsafely. `deploy.sh` applies migrations automatically; when
+  testing one in isolation, apply with `pnpm exec prisma migrate deploy` on the server,
+  then `pnpm exec prisma generate` before building.
 
 ## Database Access
 - Server: `pavan-mazumdar-server` (SSH as `pavan-mazumdar`), app dir `~/job-tracker`.
