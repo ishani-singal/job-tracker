@@ -1,8 +1,13 @@
 import PDFDocument from 'pdfkit';
 import type { Prisma } from '@prisma/client';
-import type { ResumeTemplate } from '@job-tracker/shared-types';
+import type { ResumeTemplate as SharedResumeTemplate } from '@job-tracker/shared-types';
 import { isStructuredResume } from './structured-resume-content';
 import { renderStructuredResumePdf } from './structured-resume-pdf';
+
+// Callers pass either Prisma's raw ResumeTemplate row (updatedAt: Date) or
+// the API's serialized shape (updatedAt: string) — the renderer only reads
+// the numeric range fields, so both are accepted here.
+type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
 
 /**
  * Renders generated resume content into a PDF. Two shapes are supported:

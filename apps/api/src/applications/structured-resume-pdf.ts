@@ -1,5 +1,11 @@
 import PDFDocument from 'pdfkit';
-import type { ResumeTemplate, StructuredResume } from '@job-tracker/shared-types';
+import type { ResumeTemplate as SharedResumeTemplate, StructuredResume } from '@job-tracker/shared-types';
+
+// The renderer only reads the numeric range fields — never updatedAt — so it
+// accepts either the API's serialized shape (updatedAt: string) or Prisma's
+// raw model (updatedAt: Date) without forcing callers to convert one to the
+// other just to satisfy this function's signature.
+type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
 
 /**
  * Renders a StructuredResume against a ResumeTemplate's min/max ranges,
