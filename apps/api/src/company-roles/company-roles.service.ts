@@ -564,6 +564,10 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     try {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+      // This is a fresh page/navigation (separate from the one that found
+      // firstPageRoles), so any sort selection from that earlier page's
+      // client-side state doesn't carry over here — re-apply it.
+      await this.sortByDateIfAvailable(page);
 
       for (let pageCount = 1; pageCount < MAX_LISTING_PAGES; pageCount++) {
         const nextButton = page.locator(NEXT_PAGE_BUTTON_SELECTOR).first();
@@ -646,6 +650,14 @@ export class CompanyRolesService implements OnModuleDestroy {
     });
     try {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+      // Only listing pages (includeLinks: true) get sorted — a single JD
+      // fetch has no sort control to find. Sorting BEFORE expanding/reading
+      // matters: the staleness-stop and known-role-stop optimizations both
+      // assume newest-first order, so an unsorted (or oldest-first) listing
+      // would silently cut off before reaching genuinely new roles.
+      if (opts?.includeLinks) {
+        await this.sortByDateIfAvailable(page);
+      }
       if (opts?.expandShowMoreListing) {
         await this.expandShowMoreListing(page);
       }
@@ -680,6 +692,17 @@ export class CompanyRolesService implements OnModuleDestroy {
 
       let links: { text: string; href: string }[] = [];
       if (opts?.includeLinks) {
+        // Resolve relative hrefs against the page's ACTUAL final URL
+        // (page.url()), not the originally-requested url — some boards
+        // (e.g. Stripe's Greenhouse embed) client-side-redirect to a
+        // different domain before rendering the listing, so a root-relative
+        // href like "/careers/listing/..." must resolve against the real
+        // landing domain (stripe.com) or it silently strips onto the wrong
+        // origin entirely (verified: resolving against the original
+        // boards.greenhouse.io URL produced boards.greenhouse.io/careers/
+        // listing/... — a URL that 404s — instead of the real
+        // stripe.com/careers/listing/... one).
+        const resolveBase = page.url();
         links = $('a[href]')
           .map((_, el) => {
             const $el = $(el);
@@ -689,7 +712,7 @@ export class CompanyRolesService implements OnModuleDestroy {
           })
           .get()
           .filter((l) => l.text && l.href && !l.href.startsWith('#') && !l.href.startsWith('javascript:'))
-          .map((l) => ({ ...l, href: this.resolveUrl(l.href, url) }));
+          .map((l) => ({ ...l, href: this.resolveUrl(l.href, resolveBase) }));
       }
 
       $('script, style, noscript').remove();
@@ -712,6 +735,107 @@ export class CompanyRolesService implements OnModuleDestroy {
       return new URL(href, baseUrl).toString();
     } catch {
       return href;
+    }
+  }
+
+  /** Selects a "sort by date/newest" control if the listing page has one,
+   * before any content is read — the staleness-cutoff and known-role stop
+   * conditions both assume newest-first order, so scanning an unsorted (or
+   * oldest-first) listing risks stopping before reaching genuinely new
+   * roles, or never reaching the staleness cutoff at all. Handles both
+   * common patterns: a <select> dropdown (set its value + fire change), and
+   * a clickable sort link/button/menu-item (click it). Best-effort — if no
+   * sort control is found or it can't be resolved, leaves the page's default
+   * order alone rather than failing the whole scan over it. */
+  private async sortByDateIfAvailable(page: Page): Promise<void> {
+    try {
+      const changedSelect = await page.evaluate(() => {
+        const datePattern = /\b(date|newest|recent|new to old)\b/i;
+        const selects = Array.from(document.querySelectorAll<HTMLSelectElement>('select'));
+        for (const select of selects) {
+          const option = Array.from(select.options).find((o) => datePattern.test(o.textContent ?? ''));
+          if (option && select.value !== option.value) {
+            select.value = option.value;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+        }
+        return false;
+      });
+      if (changedSelect) {
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(500);
+        return;
+      }
+
+      // Clickable sort control (button/link/menu-item) — deliberately
+      // excludes "old to new" phrasing so we don't pick the reverse sort.
+      const clicked = await page.evaluate(() => {
+        const datePattern = /\b(sort.{0,15}(date|newest|recent)|new to old|date posted)\b/i;
+        const excludePattern = /old to new|oldest/i;
+        const candidates = Array.from(
+          document.querySelectorAll<HTMLElement>('button, a, [role="button"], [role="menuitem"], option'),
+        );
+        const target = candidates.find((el) => {
+          const t = el.textContent ?? '';
+          return el.offsetParent !== null && datePattern.test(t) && !excludePattern.test(t);
+        });
+        if (!target) return false;
+        target.click();
+        return true;
+      });
+      if (clicked) {
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(500);
+        return;
+      }
+
+      // Two-step "Sort by" menu (e.g. Amazon: a closed dropdown button whose
+      // own label is just "Sort by: Most relevant" — the "Latest"/"Newest"
+      // option text only exists once the menu is opened, so the direct
+      // single-click match above can never see it). Open the trigger, wait
+      // for new content to render, then look for a date option again.
+      const opened = await page.evaluate(() => {
+        const triggerPattern = /\bsort\b/i;
+        const candidates = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            'button, a, [role="button"], [aria-haspopup="true"], [aria-haspopup="listbox"], [aria-haspopup="menu"]',
+          ),
+        );
+        const target = candidates.find(
+          (el) => el.offsetParent !== null && triggerPattern.test(el.textContent ?? ''),
+        );
+        if (!target) return false;
+        target.click();
+        return true;
+      });
+      if (!opened) return;
+
+      await page.waitForTimeout(400);
+
+      const clickedMenuOption = await page.evaluate(() => {
+        const datePattern = /\b(date|newest|recent|new to old|latest)\b/i;
+        const excludePattern = /old to new|oldest/i;
+        const candidates = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            'button, a, li, [role="option"], [role="menuitem"], [role="menuitemradio"]',
+          ),
+        );
+        const target = candidates.find((el) => {
+          const t = el.textContent ?? '';
+          return el.offsetParent !== null && datePattern.test(t) && !excludePattern.test(t);
+        });
+        if (!target) return false;
+        target.click();
+        return true;
+      });
+      if (clickedMenuOption) {
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(500);
+      }
+    } catch {
+      // Best-effort — a sort control that exists but can't be resolved is
+      // not worth failing the scan over; default order is still usable.
     }
   }
 
