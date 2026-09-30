@@ -56,6 +56,20 @@ function looksLikeSearchResultsFallback(text: string): boolean {
   return /jobs?\s+search\s+results|\b\d[\d,]*\s+jobs?\s+matched\b/i.test(text.slice(0, 3000));
 }
 
+/** Some boards (e.g. Google careers) render each job card as a visually
+ * empty full-card overlay <a href> with no text content at all — the actual
+ * title lives in a sibling/descendant element for styling purposes — but the
+ * anchor still carries a descriptive aria-label like "Learn more about
+ * <title>". Falls back to that (with the common "Learn more about " prefix
+ * stripped) whenever the anchor's own visible text is empty, so these links
+ * aren't silently dropped by the "no text = not a real link" filter. */
+function extractLinkText($el: ReturnType<cheerio.CheerioAPI>): string {
+  const text = $el.text().replace(/\s+/g, ' ').trim();
+  if (text) return text;
+  const ariaLabel = $el.attr('aria-label')?.trim() ?? '';
+  return ariaLabel.replace(/^(learn more about|view|apply (for|to))\s+/i, '').trim();
+}
+
 /** Strips common legal-entity suffixes and normalizes case/punctuation so
  * "Amazon" and "Amazon.com Services LLC" collapse to the same key. Not
  * exhaustive — good enough to catch the common patterns without an external
@@ -626,7 +640,7 @@ export class CompanyRolesService implements OnModuleDestroy {
         const pageLinks = $('a[href]')
           .map((_, el) => {
             const $el = $(el);
-            const text = $el.text().replace(/\s+/g, ' ').trim();
+            const text = extractLinkText($el);
             const href = $el.attr('href')?.trim() ?? '';
             return { text, href };
           })
@@ -733,7 +747,7 @@ export class CompanyRolesService implements OnModuleDestroy {
         links = $('a[href]')
           .map((_, el) => {
             const $el = $(el);
-            const text = $el.text().replace(/\s+/g, ' ').trim();
+            const text = extractLinkText($el);
             const href = $el.attr('href')?.trim() ?? '';
             return { text, href };
           })
