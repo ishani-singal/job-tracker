@@ -35,27 +35,73 @@ _model = OpenAIChatModel(
 )
 
 
+class ResumeEntry(BaseModel):
+    """One work/education/project/paper entry — mirrors shared-types'
+    StructuredResumeEntry exactly (field names and nullability) since this is
+    serialized straight to JSON and read by the TS renderer unchanged.
+    """
+
+    name: str
+    subtitle: str | None = None
+    location: str | None = None
+    dateRange: str | None = None
+    bullets: list[str]
+
+
+class ResumeSection(BaseModel):
+    """Mirrors shared-types' StructuredResumeSection."""
+
+    heading: str
+    kind: str  # 'work' | 'education' | 'project' | 'paper'
+    entries: list[ResumeEntry]
+
+
+class StructuredResume(BaseModel):
+    """Mirrors shared-types' StructuredResume — this exact shape is what
+    gets JSON-serialized into SessionMessage.content and, on accept, into
+    Application.resumeContent / CompanyResume.resumeContent, where the
+    one-page-fit PDF renderer (structured-resume-pdf.ts) expects it.
+    """
+
+    contactLine: str
+    sections: list[ResumeSection]
+
+
 class ResuTurnOutput(BaseModel):
     """What the agent produces each turn. `done=False` means `question` holds
     something the user must answer before the resume can be finalized (e.g.
     the Step 7 clarifying questions, or a disqualifier-keyword stop). `done=True`
-    means `resume` holds the finished, ready-to-save resume text.
+    means `resume` holds the finished, ready-to-save structured resume.
     """
 
     done: bool
-    resume: str | None = None
+    resume: StructuredResume | None = None
     question: str | None = None
 
 
 _BASE_SYSTEM_PROMPT = (
     f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}\n\n"
     "Respond with structured output every turn: set done=true and put the "
-    "complete finished resume in `resume` once you've gone through the full "
-    "process template with no open questions. If you still need something "
-    "from the user (answers to Step 7 questions, or you hit a disqualifier "
-    "stop and want to confirm before continuing), set done=false and put "
-    "exactly one clear question in `question` — the user will reply and you "
-    "will continue from there in the next turn."
+    "complete finished resume in `resume` as a StructuredResume object "
+    "(contactLine + sections, each section holding heading/kind/entries, "
+    "each entry holding name/subtitle/location/dateRange/bullets) once "
+    "you've gone through the full process template with no open questions. "
+    "Do not put a name, job title, or 'open to remote' in contactLine — it "
+    "is rendered separately above the contact line; contactLine holds only "
+    "the exact value given to you below under 'Contact line'. Every bullet "
+    "string in `entries[].bullets` must be plain text with no leading "
+    "bullet character — the renderer adds its own. If you still need "
+    "something from the user (answers to Step 7 questions, or you hit a "
+    "disqualifier stop and want to confirm before continuing), set "
+    "done=false, leave `resume` unset, and put exactly one clear question "
+    "in `question` — the user will reply and you will continue from there "
+    "in the next turn.\n\n"
+    "Each section's `kind` must be exactly one of 'work', 'education', "
+    "'project', or 'paper' — pick the closest match (e.g. internships are "
+    "'work'). The process template's instruction to bold newly-incorporated "
+    "keywords refers to markdown **like this** inside a bullet string — "
+    "keep that convention; the renderer strips or renders it, bullets "
+    "should not otherwise contain markdown."
 )
 
 resu_agent = Agent(

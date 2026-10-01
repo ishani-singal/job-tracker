@@ -56,6 +56,37 @@ function formatLinkedinMessage(content: string): string {
   }
 }
 
+function formatResumeMessage(content: string): string {
+  // Done-turn messages are JSON-encoded StructuredResume ({contactLine,
+  // sections}) (see SessionsService.runApplicationTurn/runCompanyTurn on the
+  // backend); a question is plain text and won't parse as that shape, so
+  // just fall back to showing it as-is.
+  try {
+    const parsed = JSON.parse(content) as {
+      contactLine?: string;
+      sections?: {
+        heading: string;
+        entries: { name: string; subtitle?: string | null; location?: string | null; dateRange?: string | null; bullets: string[] }[];
+      }[];
+    };
+    if (!parsed.contactLine && !parsed.sections) return content;
+    const sections = (parsed.sections ?? []).map((section) => {
+      const entryLines = section.entries
+        .map((entry) => {
+          const trailing = [entry.dateRange, entry.location].filter(Boolean).join(' | ');
+          const header = [entry.name, trailing].filter(Boolean).join(' — ');
+          const bullets = entry.bullets.map((b) => `  • ${b}`).join('\n');
+          return [header, entry.subtitle, bullets].filter(Boolean).join('\n');
+        })
+        .join('\n\n');
+      return `${section.heading.toUpperCase()}\n${entryLines}`;
+    });
+    return [parsed.contactLine, ...sections].filter(Boolean).join('\n\n');
+  } catch {
+    return content;
+  }
+}
+
 function sessionLabel(session: GenerationSession): string {
   if (session.scope === 'LINKEDIN') return 'LinkedIn';
   if (session.scope === 'COMPANY') return session.company ?? 'Company';
@@ -188,9 +219,11 @@ function SessionChat({ session }: { session: GenerationSession }) {
                 : 'bg-black/5 dark:bg-white/5 self-start max-w-[90%]'
             }`}
           >
-            {session.scope === 'LINKEDIN' && message.role === 'ASSISTANT'
+            {message.role === 'ASSISTANT' && session.scope === 'LINKEDIN'
               ? formatLinkedinMessage(message.content)
-              : message.content}
+              : message.role === 'ASSISTANT'
+                ? formatResumeMessage(message.content)
+                : message.content}
           </div>
         ))}
         {isRunning && (

@@ -18,7 +18,7 @@ from pydantic_ai.messages import ModelMessage
 
 import httpx
 
-from .agent import ResuTurnOutput, run_company_turn, run_turn
+from .agent import ResuTurnOutput, StructuredResume, run_company_turn, run_turn
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, build_profile_context
 
 app = FastAPI(title="resu-agent")
@@ -27,8 +27,10 @@ app = FastAPI(title="resu-agent")
 # agent/linkedin/service.py) — mounted here rather than run as a separate
 # uvicorn process, per the plan's "one Python process serves both agents".
 from linkedin.service import router as linkedin_router  # noqa: E402
+from .stories.service import router as stories_router
 
 app.include_router(linkedin_router)
+app.include_router(stories_router)
 
 API_BASE_URL = os.environ.get("JOB_TRACKER_API_URL", "http://localhost:4100")
 
@@ -52,7 +54,7 @@ class RunCompanyTurnRequest(BaseModel):
 
 class RunTurnResponse(BaseModel):
     done: bool
-    resume: str | None
+    resume: StructuredResume | None
     question: str | None
     # JSON-encoded message history to pass back in on the next turn.
     message_history_json: str

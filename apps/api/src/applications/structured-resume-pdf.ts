@@ -249,8 +249,30 @@ function layoutEntry(
     doc.font('Helvetica').fontSize(fields.bulletFont);
     const bulletTop = doc.y;
     doc.text('•', doc.page.margins.left, bulletTop, { width: fields.tabStop });
-    doc.text(bullet, startX, bulletTop, { width: bulletWidth });
+    doc.x = startX;
+    doc.y = bulletTop;
+    layoutBoldedText(doc, bullet, fields.bulletFont, bulletWidth);
     doc.moveDown(fields.spacingBetweenBullets / fields.bulletFont);
   }
   doc.moveDown(fields.spacingAfterSection / fields.bulletFont / 2);
+}
+
+/**
+ * Renders a bullet string containing **bold** markdown spans as actual bold
+ * runs (the process template instructs the model to bold newly-incorporated
+ * keywords) — splits on the markers and alternates Helvetica/Helvetica-Bold
+ * via PDFKit's `continued` text so the wrapped paragraph still flows as one
+ * block at `width`.
+ */
+function layoutBoldedText(doc: PDFKit.PDFDocument, text: string, fontSize: number, width: number): void {
+  const segments = text.split(/\*\*([^*]+)\*\*/);
+  segments.forEach((segment, i) => {
+    if (!segment) return;
+    const isBold = i % 2 === 1;
+    const isLast = i === segments.length - 1;
+    doc
+      .font(isBold ? 'Helvetica-Bold' : 'Helvetica')
+      .fontSize(fontSize)
+      .text(segment, { continued: !isLast, width });
+  });
 }

@@ -1,12 +1,13 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { GenerationSessionScope, MessageRole } from '@prisma/client';
+import { GenerationSessionScope, MessageRole, Prisma } from '@prisma/client';
+import type { StructuredResume } from '@job-tracker/shared-types';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
 interface RunTurnResponse {
   done: boolean;
-  resume: string | null;
+  resume: StructuredResume | null;
   question: string | null;
   message_history_json: string;
 }
@@ -98,15 +99,21 @@ export class SessionsService {
     }
 
     if (session.scope === 'APPLICATION') {
+      const resumeContent = this.parseStructuredResume(lastAssistantMessage.content);
       await this.prisma.application.update({
         where: { id: session.applicationId! },
-        data: { resumeContent: lastAssistantMessage.content, resumeGeneratedAt: new Date() },
+        data: {
+          resumeContent: (resumeContent ?? Prisma.JsonNull) as unknown as Prisma.InputJsonValue,
+          resumeGeneratedAt: new Date(),
+        },
       });
     } else if (session.scope === 'COMPANY') {
+      const resumeContent = (this.parseStructuredResume(lastAssistantMessage.content) ??
+        {}) as Prisma.InputJsonValue;
       await this.prisma.companyResume.upsert({
         where: { company: session.company! },
-        create: { company: session.company!, resumeContent: lastAssistantMessage.content },
-        update: { resumeContent: lastAssistantMessage.content },
+        create: { company: session.company!, resumeContent },
+        update: { resumeContent },
       });
     } else if (session.scope === 'LINKEDIN') {
       const parsed = this.parseLinkedinContent(lastAssistantMessage.content);
@@ -122,6 +129,25 @@ export class SessionsService {
       where: { id: sessionId },
       data: { status: 'ACCEPTED' },
     });
+  }
+
+  /**
+   * A finished resume turn's message is stored as JSON-encoded StructuredResume
+   * (see runApplicationTurn/runCompanyTurn) so it can be parsed back out on
+   * accept. A question-turn message is plain text and won't parse as JSON —
+   * accept() is only ever called once status is DONE, so that case shouldn't
+   * reach here, but null is returned defensively rather than throwing.
+   */
+  private parseStructuredResume(content: string): StructuredResume | null {
+    try {
+      const parsed = JSON.parse(content) as Partial<StructuredResume>;
+      if (typeof parsed.contactLine === 'string' && Array.isArray(parsed.sections)) {
+        return parsed as StructuredResume;
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -189,7 +215,7 @@ export class SessionsService {
       data: {
         sessionId,
         role: MessageRole.ASSISTANT,
-        content: (result.done ? result.resume : result.question) ?? '(no output)',
+        content: (result.done ? JSON.stringify(result.resume) : result.question) ?? '(no output)',
       },
     });
     await this.prisma.generationSession.update({
@@ -223,7 +249,7 @@ export class SessionsService {
       data: {
         sessionId,
         role: MessageRole.ASSISTANT,
-        content: (result.done ? result.resume : result.question) ?? '(no output)',
+        content: (result.done ? JSON.stringify(result.resume) : result.question) ?? '(no output)',
       },
     });
     await this.prisma.generationSession.update({
