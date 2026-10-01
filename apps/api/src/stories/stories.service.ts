@@ -28,6 +28,16 @@ const ENTRY_TYPE_TO_PRISMA: Record<string, StoryEntryType> = {
   paper: StoryEntryType.PAPER,
 };
 
+// Internal source-type literals ('story_file' etc.) are lowercase/snake_case
+// throughout this file — including when sent to the Python agent as
+// source_type — but the Prisma enum is SCREAMING_SNAKE_CASE; map at the
+// Prisma-write boundary rather than changing the internal convention.
+const SOURCE_TYPE_TO_PRISMA: Record<string, StorySourceType> = {
+  story_file: StorySourceType.STORY_FILE,
+  resume_file: StorySourceType.RESUME_FILE,
+  github_repo: StorySourceType.GITHUB_REPO,
+};
+
 export interface RerunTrigger {
   sourceType?: StorySourceType;
   storyFileId?: string;
@@ -229,7 +239,7 @@ export class StoriesService {
         await this.prisma.storyCandidate.create({
           data: {
             parseRunId: runId,
-            sourceType: source.sourceType as StorySourceType,
+            sourceType: SOURCE_TYPE_TO_PRISMA[source.sourceType],
             storyFileId: source.storyFileId,
             resumeFileId: source.resumeFileId,
             repoFullName: source.repoFullName,
@@ -249,7 +259,7 @@ export class StoriesService {
       await this.prisma.storyCandidate.create({
         data: {
           parseRunId: runId,
-          sourceType: source.sourceType as StorySourceType,
+          sourceType: SOURCE_TYPE_TO_PRISMA[source.sourceType],
           storyFileId: source.storyFileId,
           resumeFileId: source.resumeFileId,
           repoFullName: source.repoFullName,
