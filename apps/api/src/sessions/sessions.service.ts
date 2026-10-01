@@ -14,26 +14,57 @@ const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 // that's still legitimately working (retrying through Azure rate limits,
 // chunked generation, etc.) past 300s is killed anyway by undici itself,
 // surfacing as "TypeError: fetch failed (cause: HeadersTimeoutError)".
-// Raising headersTimeout (and bodyTimeout, which has the same default and
-// the same failure mode once headers DO arrive) on a dedicated dispatcher,
+// Raising headersTimeout/bodyTimeout on a dedicated dispatcher (below),
 // passed explicitly to every agent-service fetch, is what actually extends
-// the ceiling — AbortSignal remains the mechanism for a clean, intentional
-// cutoff (via agentCallSignal below), now comfortably inside this larger
-// window instead of racing against a shorter, invisible one.
+// that ceiling — AbortSignal remains the mechanism for the real,
+// intentional cutoff (agentCallSignal), comfortably inside the dispatcher's
+// much larger window instead of racing against it.
 //
-// 15 minutes (not 8): an entry with several tagged sources still needs
-// O(log N) sequential LLM-call rounds even after the per-source-parallel +
-// tournament-merge redesign (see agent/resu/stories/agent.py), and each
-// round can itself retry for up to 90s on an Azure 429 — a real 4-source
-// entry hit the 8-minute ceiling in production (Azure's rate limit here is
-// persistently tight), so the ceiling needs real headroom above the
-// structurally-reduced-but-still-nonzero worst case, not just above the
-// common case.
-const AGENT_FETCH_TIMEOUT_MS = 15 * 60 * 1000;
+// A single flat AbortSignal timeout doesn't scale with how much work a
+// call actually has to do, though — a 35-chunk source (a real production
+// file: 416K characters) needs roughly 35x a single chunk's time,
+// sequentially, since sources are processed one chunk at a time by design
+// (see agent/resu/stories/agent.py). So for ENTRY_DOCUMENT calls
+// specifically, the AbortSignal's timeout is computed per-call from the
+// actual source text (see estimateEntryDocumentTimeoutMs) instead of this
+// fixed number; this constant is the FLOOR for that calculation, and also
+// what every OTHER scope's call still uses directly (they have no
+// chunk-count to scale from).
+const AGENT_FETCH_TIMEOUT_FLOOR_MS = 8 * 60 * 1000;
+// Generous enough to cover any single call's scaled timeout in practice —
+// the dispatcher's headersTimeout/bodyTimeout just need to not be the
+// binding constraint; the per-call AbortSignal is what actually cuts a call
+// off at its own scaled duration.
+const AGENT_DISPATCHER_TIMEOUT_MS = 60 * 60 * 1000;
 const agentDispatcher = new UndiciAgent({
-  headersTimeout: AGENT_FETCH_TIMEOUT_MS,
-  bodyTimeout: AGENT_FETCH_TIMEOUT_MS,
+  headersTimeout: AGENT_DISPATCHER_TIMEOUT_MS,
+  bodyTimeout: AGENT_DISPATCHER_TIMEOUT_MS,
 });
+
+// Mirrors agent/resu/stories/agent.py's _CHUNK_SIZE_CHARS — kept in sync so
+// this estimate reflects the same chunking the Python side actually does.
+const DOCUMENT_CHUNK_SIZE_CHARS = 12000;
+// Per the user's own worst-case math: ~30s per chunk, +10% buffer.
+const SECONDS_PER_CHUNK = 30 * 1.1;
+
+/**
+ * Estimates a generous but scaled timeout for one ENTRY_DOCUMENT run-turn
+ * call, based on how many sequential chunks its sources actually need —
+ * sources are processed one chunk at a time (see SOURCE_MAX_CONCURRENCY in
+ * agent/resu/stories/agent.py), so total chunks across all sources is a
+ * reasonable proxy for how long the whole call can legitimately take.
+ * Floors at AGENT_FETCH_TIMEOUT_FLOOR_MS so a small entry still gets a
+ * comfortable cushion (clarify-check call, retries, network latency) rather
+ * than a timeout scaled down to near-zero for a one-paragraph source.
+ */
+function estimateEntryDocumentTimeoutMs(rawSources: { text: string }[]): number {
+  const totalChunks = rawSources.reduce(
+    (sum, s) => sum + Math.max(1, Math.ceil(s.text.length / DOCUMENT_CHUNK_SIZE_CHARS)),
+    0,
+  );
+  const scaledMs = totalChunks * SECONDS_PER_CHUNK * 1000;
+  return Math.max(AGENT_FETCH_TIMEOUT_FLOOR_MS, scaledMs);
+}
 
 interface RunTurnResponse {
   done: boolean;
@@ -92,12 +123,15 @@ export class SessionsService {
   /** Combines the manual global kill-switch signal, a per-session abort
    * (so stop(sessionId) only cancels THIS session's call), and a per-call
    * timeout — without the timeout, a hung/slow agent call relies entirely
-   * on undici's internal default (see AGENT_FETCH_TIMEOUT_MS above) which
-   * gives no clear signal that it was a timeout. */
-  private agentCallSignal(sessionId: string): AbortSignal {
+   * on undici's internal default which gives no clear signal that it was a
+   * timeout. `timeoutMs` defaults to the flat floor (APPLICATION/COMPANY/
+   * LINKEDIN calls, which don't have a chunk-count to scale from) but
+   * ENTRY_DOCUMENT calls pass a scaled value (see
+   * estimateEntryDocumentTimeoutMs). */
+  private agentCallSignal(sessionId: string, timeoutMs: number = AGENT_FETCH_TIMEOUT_FLOOR_MS): AbortSignal {
     const controller = new AbortController();
     this.sessionControllers.set(sessionId, controller);
-    return AbortSignal.any([this.killSwitch.signal, controller.signal, AbortSignal.timeout(AGENT_FETCH_TIMEOUT_MS)]);
+    return AbortSignal.any([this.killSwitch.signal, controller.signal, AbortSignal.timeout(timeoutMs)]);
   }
 
   /** Cancels whatever this session's current turn is doing — the in-flight
@@ -452,6 +486,12 @@ export class SessionsService {
       };
     }
 
+    const timeoutMs = estimateEntryDocumentTimeoutMs(state.rawSources);
+    this.logger.log(
+      `Session ${sessionId}: estimated run-turn timeout ${Math.round(timeoutMs / 1000)}s ` +
+        `for ${state.rawSources.length} source(s)`,
+    );
+
     const response = await undiciFetch(`${AGENT_SERVICE_URL}/stories/run-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -463,7 +503,7 @@ export class SessionsService {
         user_reply: userReply,
         already_asked: state.alreadyAsked,
       }),
-      signal: this.agentCallSignal(sessionId),
+      signal: this.agentCallSignal(sessionId, timeoutMs),
       dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent /stories/run-turn failed: ${response.status}`);
