@@ -10,6 +10,7 @@ import httpx
 from pydantic_ai import RunContext
 
 from .deps import ResuDeps
+from .rate_limit import LLM_CONCURRENCY
 
 # fetch_structured_entries returns camelCase group keys (workExperience,
 # internships, projects, ...) and the model naturally echoes that casing
@@ -76,13 +77,19 @@ async def fetch_narratives_for_entry(
     source has been tagged to this entry yet.
     """
     prisma_entry_type = _ENTRY_TYPE_TO_PRISMA.get(entry_type, entry_type)
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.get(
-            f"{ctx.deps.api_base_url}/stories/narratives",
-            params={"entryType": prisma_entry_type, "entryId": entry_id, "entryLabel": entry_label},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    # Bounded by the same process-wide semaphore as the eager prefetch in
+    # agent.py's _fetch_all_narratives — this tool can also be called
+    # directly by the model mid-conversation, and on a cache miss triggers
+    # its own fan-out of LLM calls inside /stories/narratives, so it draws
+    # from the same Azure rate-limit budget.
+    async with LLM_CONCURRENCY:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.get(
+                f"{ctx.deps.api_base_url}/stories/narratives",
+                params={"entryType": prisma_entry_type, "entryId": entry_id, "entryLabel": entry_label},
+            )
+            resp.raise_for_status()
+            return resp.json()
 
 
 async def fetch_structured_entries(ctx: RunContext[ResuDeps]) -> dict:

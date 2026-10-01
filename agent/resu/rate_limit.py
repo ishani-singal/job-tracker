@@ -14,4 +14,4 @@ import os
 # agent (agent.py), since a burst in either one draws from the same Azure
 # deployment quota. Conservative by default; override via env if the
 # deployment's quota is raised.
-LLM_CONCURRENCY = asyncio.Semaphore(int(os.environ.get("LLM_MAX_CONCURRENCY", "4")))
+LLM_CONCURRENCY = asyncio.Semaphore(int(os.environ.get("LLM_MAX_CONCURRENCY", "2")))
