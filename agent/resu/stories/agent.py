@@ -71,7 +71,7 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai import Agent
 
 from .definition import CLARIFY_INSTRUCTIONS, CLARIFY_SOUL, DOCUMENT_INSTRUCTIONS, DOCUMENT_SOUL
-from ..rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
+from ..rate_limit import AZURE_HTTP_TIMEOUT, LLM_CONCURRENCY, retry_on_rate_limit
 
 # Gates how many sources (not LLM calls) can be drafting at once — same
 # limit as LLM_CONCURRENCY but a SEPARATE semaphore object, since a
@@ -109,6 +109,7 @@ _model = OpenAIChatModel(
         azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
         api_key=os.environ["AZURE_LLM_API_KEY"],
         api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
+        http_client=httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
     ),
 )
 

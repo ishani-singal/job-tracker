@@ -26,7 +26,7 @@ from pydantic_ai.providers.azure import AzureProvider
 from .deps import ResuDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS, build_profile_context
 from .html_text import html_to_text
-from .rate_limit import retry_on_rate_limit
+from .rate_limit import AZURE_HTTP_TIMEOUT, retry_on_rate_limit
 
 _model = OpenAIChatModel(
     os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
@@ -34,6 +34,7 @@ _model = OpenAIChatModel(
         azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
         api_key=os.environ["AZURE_LLM_API_KEY"],
         api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
+        http_client=httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
     ),
 )
 

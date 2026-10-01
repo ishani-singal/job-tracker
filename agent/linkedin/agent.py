@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import httpx
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage
@@ -24,12 +25,21 @@ from pydantic_ai.providers.azure import AzureProvider
 from .deps import LinkedinDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS
 
+# The OpenAI/Azure SDK's own default httpx timeout is generous enough that a
+# hung or silently-stalled connection to Azure can block a call indefinitely
+# with nothing ever raising — a resu-side generation got stuck 10+ minutes
+# this way with zero progress and no error. Duplicated here rather than
+# imported from agent/resu per this file's own copy-paste-not-import
+# convention (see module docstring).
+_AZURE_HTTP_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+
 _model = OpenAIChatModel(
     os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
     provider=AzureProvider(
         azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
         api_key=os.environ["AZURE_LLM_API_KEY"],
         api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
+        http_client=httpx.AsyncClient(timeout=_AZURE_HTTP_TIMEOUT),
     ),
 )
 

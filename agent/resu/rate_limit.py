@@ -12,7 +12,20 @@ import random
 import time
 from typing import Awaitable, Callable, TypeVar
 
+import httpx
 from pydantic_ai.exceptions import ModelHTTPError
+
+# The OpenAI/Azure SDK's own default httpx timeout is generous enough that a
+# hung or silently-stalled connection to Azure can sit for a very long time
+# with nothing ever raising — retry_on_rate_limit below only catches
+# ModelHTTPError (a real error response), so a call that never gets ANY
+# response (not even an error) just blocks forever, invisible to every
+# retry/backoff/concurrency guardrail in this module. A real production
+# generation got stuck for 10+ minutes with zero progress and no error this
+# way. Every Azure-backed model in this agent should pass this as its
+# http_client so a stalled connection surfaces as a catchable timeout
+# instead of hanging indefinitely.
+AZURE_HTTP_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
 # Concurrent LLM calls across the whole process, not per-request — shared by
 # both the narrative write-up agent (stories/agent.py) and the main resu
