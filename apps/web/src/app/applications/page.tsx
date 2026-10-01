@@ -88,13 +88,17 @@ function RoleExperience({ role }: { role: DiscoveredRole }) {
 }
 
 /** True when none of the user-entered exclude keywords (e.g. "Software
- * Engineer", "UX Researcher") appear in the role's title or JD text —
- * matched as whole phrases, case-insensitive. A role with no JD text yet
- * (not scored) is still checked against its title. */
+ * Engineer", "UX Researcher") appear in the role's TITLE — matched as
+ * substrings, case-insensitive. Deliberately title-only, not the JD body:
+ * broad single words like "Engineer" or "India" are common filler in almost
+ * any job description's prose, so matching against the full JD text would
+ * false-positive on unrelated roles (e.g. a PM posting that happens to
+ * mention "collaborate with engineers"). The title is short and specific
+ * enough that a substring match there reliably means "this role is that". */
 function matchesExcludeKeywordsFilter(role: DiscoveredRole, keywords: string[]): boolean {
   if (keywords.length === 0) return true;
-  const haystack = `${role.title} ${role.jdText ?? ''}`.toLowerCase();
-  return !keywords.some((k) => k.trim() && haystack.includes(k.trim().toLowerCase()));
+  const title = role.title.toLowerCase();
+  return !keywords.some((k) => k.trim() && title.includes(k.trim().toLowerCase()));
 }
 
 /** A role's "posted date" for filtering purposes: its real postedDate when
