@@ -202,6 +202,9 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
     candidateName: profile.candidateName ?? '',
+    candidateEmail: profile.candidateEmail ?? '',
+    candidatePhone: profile.candidatePhone ?? '',
+    linkedinUrl: profile.linkedinUrl ?? '',
     targetRoleArchetype: profile.targetRoleArchetype ?? '',
     disqualifierKeywords: (profile.disqualifierKeywords ?? []).join(', '),
     locationCountry: profile.locationCountry ?? '',
@@ -225,6 +228,9 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
     try {
       await api.updateProfile({
         candidateName: form.candidateName,
+        candidateEmail: form.candidateEmail,
+        candidatePhone: form.candidatePhone,
+        linkedinUrl: form.linkedinUrl,
         targetRoleArchetype: form.targetRoleArchetype,
         disqualifierKeywords: form.disqualifierKeywords
           .split(',')
@@ -263,6 +269,33 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
           className="border rounded px-2 py-1 text-sm w-full bg-transparent"
           value={form.targetRoleArchetype}
           onChange={(e) => setForm({ ...form, targetRoleArchetype: e.target.value })}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Email">
+          <input
+            type="email"
+            className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+            value={form.candidateEmail}
+            onChange={(e) => setForm({ ...form, candidateEmail: e.target.value })}
+          />
+        </Field>
+        <Field label="Phone Number">
+          <input
+            type="tel"
+            className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+            value={form.candidatePhone}
+            onChange={(e) => setForm({ ...form, candidatePhone: e.target.value })}
+          />
+        </Field>
+      </div>
+      <Field label="LinkedIn URL">
+        <input
+          type="url"
+          placeholder="https://linkedin.com/in/..."
+          className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+          value={form.linkedinUrl}
+          onChange={(e) => setForm({ ...form, linkedinUrl: e.target.value })}
         />
       </Field>
       <Field label="Disqualifier Keywords (comma-separated)">

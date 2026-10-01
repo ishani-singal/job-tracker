@@ -55,6 +55,9 @@ export interface ResumeProfile {
   name: string;
   templateBody: string;
   candidateName: string | null;
+  candidateEmail: string | null;
+  candidatePhone: string | null;
+  linkedinUrl: string | null;
   targetRoleArchetype: string | null;
   disqualifierKeywords: string[];
   locationCountry: string | null;

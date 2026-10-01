@@ -24,6 +24,8 @@ type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
  * legacy fallback text) is no longer printed on the page at all; it was a
  * mislabeled leftover from before the candidate's real name was tracked
  * anywhere, and looked like a stray job-title header at the top of the doc.
+ * In structured mode, candidateName is rendered bold above the contact line
+ * (email | city, state | phone | LinkedIn) built by the agent.
  */
 export function renderResumePdf(
   title: string,
@@ -32,7 +34,7 @@ export function renderResumePdf(
   candidateName?: string | null,
 ): Promise<Buffer> {
   if (isStructuredResume(content) && template) {
-    return renderStructuredResumePdf(content, template);
+    return renderStructuredResumePdf(content, template, candidateName);
   }
   const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
   return renderResumePdfFromText(candidateName ?? title, text);

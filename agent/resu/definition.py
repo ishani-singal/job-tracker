@@ -84,14 +84,34 @@ def build_profile_context(profile: dict, entries: dict | None = None) -> str:
             ("Open to remote roles", "Yes" if profile.get("openToRemote") else None),
             ("Max years experience cutoff", profile.get("maxYearsExperience")),
             ("ATS match score target", f"{profile.get('matchScoreTarget', 93)}%"),
+            ("Email", profile.get("candidateEmail")),
+            ("Phone", profile.get("candidatePhone")),
+            ("LinkedIn URL", profile.get("linkedinUrl")),
         ]
         if value
+    )
+
+    contact_parts = [
+        profile.get("candidateEmail"),
+        location or None,
+        profile.get("candidatePhone"),
+        profile.get("linkedinUrl"),
+    ]
+    contact_line_instruction = (
+        "## Contact line\n"
+        "Set `contactLine` to exactly these contact details, in this order, "
+        "joined by \" | \" — omit any part whose value is missing, but keep the "
+        "order. Do NOT include the candidate's name, target role, or "
+        "\"Open to remote\" in this line — the name is rendered separately "
+        "above it, and the other facts are not part of the contact line.\n"
+        f"Contact line value: {' | '.join(p for p in contact_parts if p)}\n\n"
     )
 
     entries_section = _render_entries(entries) if entries else ""
 
     return (
         f"## Candidate profile facts\n{facts}\n\n"
+        f"{contact_line_instruction}"
         f"{entries_section}"
         f"## Process template\n{profile.get('templateBody', '')}"
     )

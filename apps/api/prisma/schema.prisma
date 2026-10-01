@@ -142,6 +142,11 @@ model ResumePromptTemplate {
   // Profile fields — personal facts substituted into the template at generation time
   // Candidate's own full name — printed top-center on the generated resume PDF.
   candidateName         String?
+  // Contact details printed in the resume header line beneath the candidate
+  // name (email | city, state | phone | LinkedIn) — see structured-resume-pdf.ts.
+  candidateEmail        String?
+  candidatePhone        String?
+  linkedinUrl           String?
   targetRoleArchetype   String?
   disqualifierKeywords  String[] @default([])
   // Candidate's location, used to limit/flag scanning to matching roles.
