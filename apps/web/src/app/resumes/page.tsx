@@ -6,8 +6,6 @@ import { api } from '@/lib/api';
 import type { ResumeProfile } from '@job-tracker/shared-types';
 import { GithubConnectSection } from '@/components/github-connect-section';
 import { EntriesSection } from '@/components/entries-section';
-import { StoryReviewSection } from '@/components/story-review-section';
-import { useSessionsPanel } from '@/lib/sessions-panel-context';
 import type { StoryEntryType } from '@job-tracker/shared-types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
@@ -17,7 +15,6 @@ const BACKGROUND_TYPE_OPTIONS: { value: StoryEntryType; label: string }[] = [
   { value: 'EDUCATION', label: 'Education' },
   { value: 'INTERNSHIP', label: 'Internship' },
   { value: 'PROJECT', label: 'Project' },
-  { value: 'PAPER', label: 'Paper' },
 ];
 
 interface BackgroundSelection {
@@ -27,12 +24,11 @@ interface BackgroundSelection {
 
 const EMPTY_BACKGROUND_SELECTION: BackgroundSelection = { entryType: '', entryId: '' };
 
-/** Two-step picker shown before an upload: first the category (Work
- * Experience/Education/...), then — once picked — the specific entry
- * within it (e.g. "Dell" under Work Experience). Picking a specific entry
- * pins the whole document to it; picking only the category narrows the
- * extraction chat to that category without pinning one entry; leaving both
- * blank asks the chat to figure out attribution per section. */
+/** Required two-step picker shown before an upload: the category (Work
+ * Experience/Education/Internship/Project), then the specific entry within
+ * it (e.g. "Dell" under Work Experience). There is no extraction chat to
+ * resolve an untagged upload later — every file must be pinned to exactly
+ * one entry before it's used for anything, so both steps are required. */
 function BackgroundPicker({
   value,
   onChange,
@@ -85,27 +81,26 @@ function BackgroundPicker({
         value={value.entryType}
         onChange={(e) => onChange({ entryType: e.target.value as StoryEntryType | '', entryId: '' })}
       >
-        <option value="">Mixed / not sure — ask per section</option>
+        <option value="">Pick a category...</option>
         {BACKGROUND_TYPE_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
       </select>
-      {value.entryType && value.entryType !== 'PAPER' && (
-        <select
-          className="border rounded px-2 py-1 text-sm bg-transparent"
-          value={value.entryId}
-          onChange={(e) => onChange({ ...value, entryId: e.target.value })}
-        >
-          <option value="">Which one? (whole category)</option>
-          {entryOptions.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      )}
+      <select
+        className="border rounded px-2 py-1 text-sm bg-transparent"
+        value={value.entryId}
+        onChange={(e) => onChange({ ...value, entryId: e.target.value })}
+        disabled={!value.entryType}
+      >
+        <option value="">Pick which one...</option>
+        {entryOptions.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -135,7 +130,6 @@ function StopAllLlmCallsButton() {
 
 export default function ResumesPage() {
   const queryClient = useQueryClient();
-  const { openPanel } = useSessionsPanel();
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: api.getProfile });
   const { data: stories } = useQuery({ queryKey: ['stories'], queryFn: api.listStories });
   const { data: resumeFiles } = useQuery({
@@ -145,11 +139,14 @@ export default function ResumesPage() {
   const [storyBackground, setStoryBackground] = useState<BackgroundSelection>(EMPTY_BACKGROUND_SELECTION);
   const [resumeBackground, setResumeBackground] = useState<BackgroundSelection>(EMPTY_BACKGROUND_SELECTION);
 
+  const storyReady = !!storyBackground.entryType && !!storyBackground.entryId;
+  const resumeReady = !!resumeBackground.entryType && !!resumeBackground.entryId;
+
   async function uploadStory(file: File) {
     const form = new FormData();
     form.append('file', file);
-    if (storyBackground.entryType) form.append('backgroundType', storyBackground.entryType);
-    if (storyBackground.entryId) form.append('backgroundEntryId', storyBackground.entryId);
+    form.append('entryType', storyBackground.entryType);
+    form.append('entryId', storyBackground.entryId);
     const res = await fetch(`${API_BASE}/resumes/stories/upload`, { method: 'POST', body: form });
     if (!res.ok) {
       alert(`Upload failed: ${res.status} ${await res.text()}`);
@@ -157,19 +154,13 @@ export default function ResumesPage() {
     }
     setStoryBackground(EMPTY_BACKGROUND_SELECTION);
     queryClient.invalidateQueries({ queryKey: ['stories'] });
-    queryClient.invalidateQueries({ queryKey: ['story-parse-runs'] });
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    // The document's extraction chat starts in the background immediately —
-    // open the Chat panel so the user sees it (and any clarifying question)
-    // without having to go look for it.
-    openPanel();
   }
 
   async function uploadResume(file: File) {
     const form = new FormData();
     form.append('file', file);
-    if (resumeBackground.entryType) form.append('backgroundType', resumeBackground.entryType);
-    if (resumeBackground.entryId) form.append('backgroundEntryId', resumeBackground.entryId);
+    form.append('entryType', resumeBackground.entryType);
+    form.append('entryId', resumeBackground.entryId);
     const res = await fetch(`${API_BASE}/resumes/resume/upload`, { method: 'POST', body: form });
     if (!res.ok) {
       alert(`Upload failed: ${res.status} ${await res.text()}`);
@@ -177,9 +168,6 @@ export default function ResumesPage() {
     }
     setResumeBackground(EMPTY_BACKGROUND_SELECTION);
     queryClient.invalidateQueries({ queryKey: ['resume-files'] });
-    queryClient.invalidateQueries({ queryKey: ['story-parse-runs'] });
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    openPanel();
   }
 
   async function removeStory(id: string) {
@@ -204,17 +192,16 @@ export default function ResumesPage() {
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium">Stories (primary source)</h2>
         <p className="text-xs opacity-60">
-          Pick which background this document is about before uploading — a category (Work
-          Experience, Education, Internship, Project, Paper), then the specific entry within
-          it (e.g. &quot;Dell&quot; under Work Experience). Picking a specific entry pins the
-          whole document to it; picking just the category still narrows the chat to that
-          category. If the document covers more than one (e.g. a full resume), leave both
-          unset and the chat will ask you to confirm per section instead.
+          Pick which entry this document is about before uploading — a category (Work
+          Experience, Education, Internship, Project), then the specific entry within it (e.g.
+          &quot;Dell&quot; under Work Experience). Resume generation reads this file&apos;s raw
+          text live for that entry only.
         </p>
         <div className="flex gap-2 items-center">
           <BackgroundPicker value={storyBackground} onChange={setStoryBackground} />
           <input
             type="file"
+            disabled={!storyReady}
             onChange={(e) => e.target.files?.[0] && uploadStory(e.target.files[0])}
           />
         </div>
@@ -239,6 +226,7 @@ export default function ResumesPage() {
           <BackgroundPicker value={resumeBackground} onChange={setResumeBackground} />
           <input
             type="file"
+            disabled={!resumeReady}
             onChange={(e) => e.target.files?.[0] && uploadResume(e.target.files[0])}
           />
         </div>
@@ -260,8 +248,6 @@ export default function ResumesPage() {
       <GithubConnectSection />
 
       {profile && <ProfileForm profile={profile} />}
-
-      <StoryReviewSection />
 
       <EntriesSection />
 

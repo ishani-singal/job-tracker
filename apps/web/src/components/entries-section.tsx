@@ -4,10 +4,10 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type {
-  CandidateStory,
   EducationEntry,
   InternshipEntry,
   ProjectEntry,
+  StoryEntryType,
   WorkExperienceEntry,
 } from '@job-tracker/shared-types';
 import {
@@ -18,14 +18,22 @@ import {
   formatEntryDateRange,
 } from './date-range-fields';
 
-/** entryId -> confirmed story, for the given entryType — consumed by each
- * List component so its EntryRows can show a "Story:" block inline. */
-type StoryMap = Map<string, CandidateStory>;
+/** entryId -> number of sources (Stories/Resume files + connected repos)
+ * tagged to it — cheap to compute (no LLM call), unlike the actual
+ * narrative text, which is only extracted live at generation/preview time
+ * (see SourceCountBadge's "Preview" button). */
+type SourceCountMap = Map<string, number>;
 
-function useStoryMap(): StoryMap {
-  const { data } = useQuery({ queryKey: ['confirmed-stories'], queryFn: api.listConfirmedStories });
-  const map: StoryMap = new Map();
-  for (const s of data ?? []) map.set(s.entryId, s);
+function useSourceCountMap(entryType: StoryEntryType): SourceCountMap {
+  const { data: storyFiles } = useQuery({ queryKey: ['stories'], queryFn: api.listStories });
+  const { data: resumeFiles } = useQuery({ queryKey: ['resume-files'], queryFn: api.listResumeFiles });
+  const { data: repos } = useQuery({ queryKey: ['github-connected-repos'], queryFn: api.listConnectedRepos });
+
+  const map: SourceCountMap = new Map();
+  const bump = (entryId: string) => map.set(entryId, (map.get(entryId) ?? 0) + 1);
+  for (const f of storyFiles ?? []) if (f.entryType === entryType) bump(f.entryId);
+  for (const f of resumeFiles ?? []) if (f.entryType === entryType) bump(f.entryId);
+  for (const r of repos ?? []) if (r.entryType === entryType) bump(r.entryId);
   return map;
 }
 
@@ -38,9 +46,10 @@ export function EntriesSection() {
           Curate your work experience, education, internships, and projects once. Mark an
           entry &quot;Required&quot; to have it always included in generated resumes;
           unchecked entries are included only when they&apos;re relevant to the specific job
-          being tailored for. Each entry&apos;s confirmed Story (from the Stories review
-          panel above) shows inline below it — that text, and only that text, is what the
-          resume agent uses for this entry.
+          being tailored for. Tag a Stories/Resume file or connected GitHub repo to an entry
+          (when uploading/connecting) to give it content — resume generation reads that
+          source&apos;s raw text live, extracted fresh the first time it&apos;s needed and
+          cached after that.
         </p>
       </div>
       <WorkExperienceList />
@@ -86,7 +95,7 @@ function workExperienceToForm(e: WorkExperienceEntry): WorkExperienceForm {
 function WorkExperienceList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['work-experience'], queryFn: api.listWorkExperience });
-  const storyMap = useStoryMap();
+  const sourceCounts = useSourceCountMap('WORK_EXPERIENCE');
   const [form, setForm] = useState<WorkExperienceForm>(EMPTY_WORK_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -149,7 +158,10 @@ function WorkExperienceList() {
             setForm(workExperienceToForm(entry));
           }}
           onDelete={() => remove(entry.id)}
-          story={storyMap.get(entry.id)}
+          entryType="WORK_EXPERIENCE"
+          entryId={entry.id}
+          entryLabel={`${entry.company}${entry.title ? ` — ${entry.title}` : ''}`}
+          sourceCount={sourceCounts.get(entry.id) ?? 0}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
@@ -231,7 +243,7 @@ function educationToForm(e: EducationEntry): EducationForm {
 function EducationList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['education'], queryFn: api.listEducation });
-  const storyMap = useStoryMap();
+  const sourceCounts = useSourceCountMap('EDUCATION');
   const [form, setForm] = useState<EducationForm>(EMPTY_EDUCATION_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -288,7 +300,10 @@ function EducationList() {
             setForm(educationToForm(entry));
           }}
           onDelete={() => remove(entry.id)}
-          story={storyMap.get(entry.id)}
+          entryType="EDUCATION"
+          entryId={entry.id}
+          entryLabel={`${entry.school}${entry.degree ? ` — ${entry.degree}` : ''}`}
+          sourceCount={sourceCounts.get(entry.id) ?? 0}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
@@ -371,7 +386,7 @@ function internshipToForm(e: InternshipEntry): InternshipForm {
 function InternshipList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['internships'], queryFn: api.listInternships });
-  const storyMap = useStoryMap();
+  const sourceCounts = useSourceCountMap('INTERNSHIP');
   const [form, setForm] = useState<InternshipForm>(EMPTY_INTERNSHIP_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -437,7 +452,10 @@ function InternshipList() {
             setForm(internshipToForm(entry));
           }}
           onDelete={() => remove(entry.id)}
-          story={storyMap.get(entry.id)}
+          entryType="INTERNSHIP"
+          entryId={entry.id}
+          entryLabel={`${entry.company}${entry.title ? ` — ${entry.title}` : ''}`}
+          sourceCount={sourceCounts.get(entry.id) ?? 0}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
@@ -527,7 +545,7 @@ function projectToForm(e: ProjectEntry): ProjectForm {
 function ProjectList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
-  const storyMap = useStoryMap();
+  const sourceCounts = useSourceCountMap('PROJECT');
   const { data: connectedRepos } = useQuery({
     queryKey: ['github-connected-repos'],
     queryFn: api.listConnectedRepos,
@@ -592,7 +610,10 @@ function ProjectList() {
             setForm(projectToForm(entry));
           }}
           onDelete={() => remove(entry.id)}
-          story={storyMap.get(entry.id)}
+          entryType="PROJECT"
+          entryId={entry.id}
+          entryLabel={entry.name}
+          sourceCount={sourceCounts.get(entry.id) ?? 0}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
@@ -690,7 +711,10 @@ function EntryRow({
   onToggleRequired,
   onEdit,
   onDelete,
-  story,
+  entryType,
+  entryId,
+  entryLabel,
+  sourceCount,
 }: {
   label: string;
   sublabel: string;
@@ -698,7 +722,10 @@ function EntryRow({
   onToggleRequired: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  story?: CandidateStory;
+  entryType: StoryEntryType;
+  entryId: string;
+  entryLabel: string;
+  sourceCount: number;
 }) {
   return (
     <div className="flex flex-col border rounded px-3 py-2 text-sm gap-1">
@@ -720,16 +747,68 @@ function EntryRow({
           </button>
         </div>
       </div>
-      {story ? (
-        <p className="text-xs opacity-70 border-t pt-1">
-          <span className="font-medium opacity-90">Story: </span>
-          {story.storyText}
-        </p>
-      ) : (
-        <p className="text-xs opacity-50 italic border-t pt-1">
-          No confirmed story yet — upload a Stories/Resume file or connect a GitHub repo and
-          confirm a proposed story above to give this entry content for generation.
-        </p>
+      <NarrativePreview entryType={entryType} entryId={entryId} entryLabel={entryLabel} sourceCount={sourceCount} />
+    </div>
+  );
+}
+
+/** Shows how many sources (Stories/Resume files + connected repos) are
+ * tagged to this entry, with a button to extract/preview the actual
+ * narrative on demand — this is a real LLM call (cached after the first
+ * time), so it's never fetched eagerly for every entry on page load. */
+function NarrativePreview({
+  entryType,
+  entryLabel,
+  sourceCount,
+  entryId,
+}: {
+  entryType: StoryEntryType;
+  entryId: string;
+  entryLabel: string;
+  sourceCount: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const { data, isFetching, refetch } = useQuery({
+    queryKey: ['narratives', entryType, entryId],
+    queryFn: () => api.getNarrativesForEntry(entryType, entryId, entryLabel),
+    enabled: false,
+  });
+
+  if (sourceCount === 0) {
+    return (
+      <p className="text-xs opacity-50 italic border-t pt-1">
+        No Stories/Resume file or GitHub repo tagged to this entry yet — tag one when
+        uploading/connecting to give it content for generation.
+      </p>
+    );
+  }
+
+  return (
+    <div className="text-xs border-t pt-1">
+      <div className="flex items-center justify-between">
+        <span className="opacity-70">
+          {sourceCount} source{sourceCount === 1 ? '' : 's'} tagged
+        </span>
+        <button
+          className="opacity-70 hover:opacity-100 underline"
+          onClick={() => {
+            setExpanded(true);
+            refetch();
+          }}
+          disabled={isFetching}
+        >
+          {isFetching ? 'Extracting...' : expanded ? 'Re-extract' : 'Preview'}
+        </button>
+      </div>
+      {expanded && data && (
+        <div className="mt-1 flex flex-col gap-1">
+          {data.length === 0 && <p className="opacity-50 italic">No content extracted.</p>}
+          {data.map((narrative, i) => (
+            <p key={i} className="opacity-70 whitespace-pre-wrap">
+              {narrative}
+            </p>
+          ))}
+        </div>
       )}
     </div>
   );

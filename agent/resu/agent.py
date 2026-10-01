@@ -9,6 +9,7 @@ the model continues the same reasoning thread rather than starting over.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -113,6 +114,41 @@ resu_agent = Agent(
 )
 
 
+async def _fetch_all_narratives(api_base_url: str, entries: dict) -> list[dict]:
+    """Fetches every entry's live-extracted narrative(s) up front, in
+    parallel, so build_profile_context can inline each one directly rather
+    than the model having to call a per-entry tool itself. Each source
+    tagged to an entry is its own narrative string (see
+    StoriesService.getNarrativesForEntry) — multiple sources for the same
+    entry are joined here into one combined narrative for that entry's
+    prompt line, since the model only needs one Story per entry, not a list.
+    """
+    jobs: list[tuple[str, str, str]] = []  # (prisma_entry_type, entry_id, label)
+    for e in entries.get("workExperience", []):
+        jobs.append(("WORK_EXPERIENCE", e["id"], f"{e['company']} — {e.get('title') or 'Work Experience'}"))
+    for e in entries.get("education", []):
+        jobs.append(("EDUCATION", e["id"], f"{e['school']} — {e.get('degree') or 'Education'}"))
+    for e in entries.get("internships", []):
+        jobs.append(("INTERNSHIP", e["id"], f"{e['company']} — {e.get('title') or 'Internship'}"))
+    for e in entries.get("projects", []):
+        jobs.append(("PROJECT", e["id"], e["name"]))
+
+    async def fetch_one(entry_type: str, entry_id: str, label: str) -> dict | None:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.get(
+                f"{api_base_url}/stories/narratives",
+                params={"entryType": entry_type, "entryId": entry_id, "entryLabel": label},
+            )
+            resp.raise_for_status()
+            narratives = resp.json()
+        if not narratives:
+            return None
+        return {"entryType": entry_type, "entryId": entry_id, "storyText": "\n\n".join(narratives)}
+
+    results = await asyncio.gather(*(fetch_one(*job) for job in jobs))
+    return [r for r in results if r]
+
+
 @resu_agent.system_prompt
 async def _inject_profile(ctx: RunContext[ResuDeps]) -> str:
     """Appends the candidate's profile facts + structured entries + process
@@ -128,9 +164,7 @@ async def _inject_profile(ctx: RunContext[ResuDeps]) -> str:
         entries_resp.raise_for_status()
         entries = entries_resp.json()
 
-        stories_resp = await client.get(f"{ctx.deps.api_base_url}/stories/confirmed")
-        stories_resp.raise_for_status()
-        stories = stories_resp.json()
+    stories = await _fetch_all_narratives(ctx.deps.api_base_url, entries)
 
     return build_profile_context(profile, entries, stories)
 

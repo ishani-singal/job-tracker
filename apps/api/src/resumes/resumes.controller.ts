@@ -1,15 +1,29 @@
-import { Body, Controller, Delete, forwardRef, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  forwardRef,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Req,
+} from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { MultipartValue } from '@fastify/multipart';
 import { ProfileFieldsInput, ResumeTemplateInput, ResumesService } from './resumes.service';
 import { StoriesService } from '../stories/stories.service';
 import { StoryEntryType } from '@prisma/client';
 
-/** Reads the optional "backgroundType"/"backgroundEntryId" fields the upload
- * form sends alongside the file — the two-step dropdown the user picks
- * (category, then the specific entry e.g. "Dell" under Work Experience)
- * before uploading, so the extraction agent knows which entry this whole
- * document is about up front, not just its category. */
+/** Reads the required "entryType"/"entryId" fields the upload form sends
+ * alongside the file — the two-step dropdown the user picks (category, then
+ * the specific entry e.g. "Dell" under Work Experience) before uploading.
+ * Required: every Stories/Resume file must be pinned to exactly one entry
+ * so resume generation knows which entry's narrative to extract it into
+ * (see StoriesService.getNarrativesForEntry) — there is no more separate
+ * confirmation step to resolve an untagged upload later. */
 function readMultipartField(
   file: { fields: Record<string, unknown> },
   name: string,
@@ -18,13 +32,17 @@ function readMultipartField(
   return field?.value || undefined;
 }
 
-function readBackgroundTypeField(file: { fields: Record<string, unknown> }): StoryEntryType | undefined {
-  const value = readMultipartField(file, 'backgroundType');
-  return value && value in StoryEntryType ? (value as StoryEntryType) : undefined;
-}
-
-function readBackgroundEntryIdField(file: { fields: Record<string, unknown> }): string | undefined {
-  return readMultipartField(file, 'backgroundEntryId');
+function requireEntryFields(file: {
+  fields: Record<string, unknown>;
+}): { entryType: StoryEntryType; entryId: string } {
+  const entryType = readMultipartField(file, 'entryType');
+  const entryId = readMultipartField(file, 'entryId');
+  if (!entryType || !(entryType in StoryEntryType) || !entryId) {
+    throw new BadRequestException(
+      'entryType and entryId are required — pick which background entry this file belongs to before uploading',
+    );
+  }
+  return { entryType: entryType as StoryEntryType, entryId };
 }
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
@@ -41,15 +59,9 @@ export class ResumesController {
   async uploadStory(@Req() req: FastifyRequest) {
     const file = await req.file();
     if (!file) return { error: 'no file provided' };
+    const { entryType, entryId } = requireEntryFields(file);
     const buffer = await file.toBuffer();
-    const saved = await this.resumes.saveStoryFile(file.filename, file.mimetype, buffer);
-    // Auto-rerun parsing on every new upload — see StoriesService.
-    this.stories.createParseRunForUpload({
-      sourceType: 'STORY_FILE',
-      storyFileId: saved.id,
-      hintEntryType: readBackgroundTypeField(file),
-      hintEntryId: readBackgroundEntryIdField(file),
-    });
+    const saved = await this.resumes.saveStoryFile(file.filename, file.mimetype, buffer, entryType, entryId);
     return saved;
   }
 
@@ -57,14 +69,9 @@ export class ResumesController {
   async uploadResume(@Req() req: FastifyRequest) {
     const file = await req.file();
     if (!file) return { error: 'no file provided' };
+    const { entryType, entryId } = requireEntryFields(file);
     const buffer = await file.toBuffer();
-    const saved = await this.resumes.saveResumeFile(file.filename, file.mimetype, buffer);
-    this.stories.createParseRunForUpload({
-      sourceType: 'RESUME_FILE',
-      resumeFileId: saved.id,
-      hintEntryType: readBackgroundTypeField(file),
-      hintEntryId: readBackgroundEntryIdField(file),
-    });
+    const saved = await this.resumes.saveResumeFile(file.filename, file.mimetype, buffer, entryType, entryId);
     return saved;
   }
 
@@ -79,18 +86,15 @@ export class ResumesController {
   }
 
   @Delete('stories/:id')
-  deleteStory(@Param('id') id: string) {
-    return this.resumes.deleteStoryFile(id);
+  async deleteStory(@Param('id') id: string) {
+    await this.resumes.deleteStoryFile(id);
+    await this.stories.invalidateNarrativeForSource({ storyFileId: id });
   }
 
   @Delete('files/:id')
-  deleteResumeFile(@Param('id') id: string) {
-    return this.resumes.deleteResumeFile(id);
-  }
-
-  @Get('stories/text')
-  getAllStoriesText() {
-    return this.resumes.getAllStoriesText().then((text) => ({ text }));
+  async deleteResumeFile(@Param('id') id: string) {
+    await this.resumes.deleteResumeFile(id);
+    await this.stories.invalidateNarrativeForSource({ resumeFileId: id });
   }
 
   @Get('files/text')

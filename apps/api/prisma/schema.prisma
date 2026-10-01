@@ -116,20 +116,34 @@ model DiscoveredRole {
   @@index([applicationId])
 }
 
+// A freeform "Stories" document (work-history narrative, resume, etc.) the
+// user uploads and pins to exactly one structured background entry at
+// upload time — entryType+entryId says which. There is no separate
+// confirmation/extraction step at upload: resume generation reads this
+// file's raw text live, per entry, when a resume including that entry is
+// actually generated (see ExtractedNarrative for the resulting cache).
 model StoryFile {
-  id         String   @id @default(cuid())
+  id         String         @id @default(cuid())
   filename   String
   storedPath String
   mimeType   String
-  createdAt  DateTime @default(now())
+  entryType  StoryEntryType
+  entryId    String
+  createdAt  DateTime       @default(now())
+
+  @@index([entryType, entryId])
 }
 
 model ResumeFile {
-  id         String   @id @default(cuid())
+  id         String         @id @default(cuid())
   filename   String
   storedPath String
   mimeType   String
-  createdAt  DateTime @default(now())
+  entryType  StoryEntryType
+  entryId    String
+  createdAt  DateTime       @default(now())
+
+  @@index([entryType, entryId])
 }
 
 model ResumePromptTemplate {
@@ -347,7 +361,8 @@ model AppSettings {
 }
 
 // Single-user GitHub OAuth connection — the resu agent reads connected repos'
-// READMEs as additional "Stories" material for resume generation.
+// README/metadata live, per entry, when a resume including that project is
+// generated (see ExtractedNarrative for the resulting cache).
 model GithubConnection {
   id           String   @id @default(cuid())
   githubLogin  String
@@ -357,9 +372,15 @@ model GithubConnection {
 }
 
 model ConnectedRepo {
-  id        String   @id @default(cuid())
-  fullName  String   @unique // "owner/repo"
-  addedAt   DateTime @default(now())
+  id        String         @id @default(cuid())
+  fullName  String         @unique // "owner/repo"
+  // Pinned to exactly one entry (almost always a ProjectEntry) at connect
+  // time — required, same as StoryFile/ResumeFile's entryType/entryId.
+  entryType StoryEntryType
+  entryId   String
+  addedAt   DateTime       @default(now())
+
+  @@index([entryType, entryId])
 }
 
 enum GenerationSessionStatus {
@@ -374,7 +395,6 @@ enum GenerationSessionScope {
   APPLICATION
   LINKEDIN
   COMPANY
-  STORY_EXTRACTION
 }
 
 enum MessageRole {
@@ -388,33 +408,14 @@ enum MessageRole {
 // conversation so a multi-turn run (agent asks a clarifying question, user
 // answers, agent continues) can be resumed via PydanticAI's message_history.
 // scope determines which of applicationId/company (if either) is set:
-// APPLICATION      -> applicationId required, company null
-// LINKEDIN         -> both null (whole-candidate scope)
-// COMPANY          -> company required, applicationId null
-// STORY_EXTRACTION -> storyParseRunId required, applicationId/company null;
-//                     one session per uploaded document/repo, labeled by
-//                     sourceLabel (the filename or repo name) in the UI —
-//                     the agent asks clarifying questions to fill gaps/
-//                     inconsistencies before the story is considered done.
+// APPLICATION -> applicationId required, company null
+// LINKEDIN    -> both null (whole-candidate scope)
+// COMPANY     -> company required, applicationId null
 model GenerationSession {
   id            String                  @id @default(cuid())
   scope         GenerationSessionScope  @default(APPLICATION)
   applicationId String?
   company       String?
-  storyParseRunId String?
-  // Filename or repo name this session is extracting a story from — only
-  // set for STORY_EXTRACTION, used as the session's label in the UI instead
-  // of a generic timestamp.
-  sourceLabel     String?
-  // Exactly which source this one session covers — set alongside
-  // sourceLabel for STORY_EXTRACTION, so persisting this session's finished
-  // candidates (on accept) always has unambiguous provenance, independent
-  // of whether the parent StoryParseRun was a single-file upload trigger or
-  // a manual rerun covering many sources at once.
-  sourceType      StorySourceType?
-  storyFileId     String?
-  resumeFileId    String?
-  repoFullName    String?
   status        GenerationSessionStatus @default(RUNNING)
   errorMessage  String?
   // Opaque PydanticAI message-history JSON blob (from AgentRunResult.all_messages(),
@@ -428,7 +429,6 @@ model GenerationSession {
 
   @@index([applicationId])
   @@index([company])
-  @@index([storyParseRunId])
   @@index([scope])
   @@index([createdAt])
 }
@@ -482,144 +482,31 @@ enum StorySourceType {
   GITHUB_REPO
 }
 
-enum StoryStatus {
-  PROPOSED
-  CONFIRMED
-  REJECTED
-  // A previously CONFIRMED story got new candidate content from a rerun — the
-  // confirmed row is untouched; a sibling candidate in this status holds the
-  // new text awaiting a fresh confirm (see StoriesService reconciliation).
-  PROPOSED_UPDATE
-}
-
-enum ParseRunStatus {
-  PENDING
-  PARSING
-  AWAITING_REVIEW
-  DONE
-  ERROR
-}
-
-// One parse attempt — triggered by a new Stories/Resume upload or a manual
-// "Re-parse". A single batch LLM call with a reviewable result set, not a
-// chat conversation, so this stays its own lightweight model rather than
-// reusing GenerationSession's message-history machinery.
-model StoryParseRun {
-  id     String         @id @default(cuid())
-  status ParseRunStatus @default(PENDING)
-  errorMessage String?
-
-  // What triggered this run — all null means a manual rerun that
-  // re-examines every currently-uploaded file and connected repo, not just
-  // one new source.
-  triggerSourceType   StorySourceType?
-  triggerStoryFileId  String?
-  triggerResumeFileId String?
-  triggerRepoFullName String?
-
-  // The background category the user picked at upload time (Work Experience/
-  // Education/Internship/Project/Paper) — a strong hint passed to the
-  // extraction agent to narrow which entries it tries to match the document
-  // against. Null on a manual rerun (no single document to hint about) or on
-  // an upload where the user left it unset.
-  hintEntryType StoryEntryType?
-  // The specific entry (e.g. one particular WorkExperienceEntry id — "Dell")
-  // the user picked, one level more specific than hintEntryType's category.
-  // When set, the whole document is pinned to this one entry — the
-  // extraction agent is given only this entry to match against, never any
-  // other entry of the same type. Null means the user picked a category but
-  // not a specific entry (or picked neither).
-  hintEntryId String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  candidates StoryCandidate[]
-
-  @@index([status])
-  @@index([createdAt])
-}
-
-// One proposed chunk-to-entry attribution produced by a parse run. Not yet a
-// story until the user confirms it (see CandidateStory). Kept separate from
-// CandidateStory (never versioned directly into it) so a rerun's fresh
-// proposals are always reviewable side-by-side without touching already-
-// confirmed data — this is what makes "diff & re-confirm" safe.
-model StoryCandidate {
-  id         String        @id @default(cuid())
-  parseRunId String
-  parseRun   StoryParseRun @relation(fields: [parseRunId], references: [id], onDelete: Cascade)
-
+// Cached result of live-extracting one source's (one StoryFile, ResumeFile,
+// or ConnectedRepo's) raw text into a comprehensive narrative for the one
+// entry that source is pinned to. Populated lazily the first time a resume
+// generation needs it; invalidated (deleted) whenever its source file is
+// replaced/removed or the source repo's content changes meaningfully, so a
+// later generation re-extracts fresh rather than reusing stale text. Kept
+// one row per source (never combined across a given entry's multiple
+// sources) — generation concatenates every entry's cached narratives itself
+// at the point they're inlined into the prompt.
+model ExtractedNarrative {
+  id           String          @id @default(cuid())
   sourceType   StorySourceType
-  storyFileId  String?
-  resumeFileId String?
-  repoFullName String?
+  storyFileId  String?         @unique
+  resumeFileId String?         @unique
+  repoFullName String?         @unique
 
-  // App-level polymorphic reference — same entryType+entryId pattern
-  // CandidateStory uses below (see its comment for why this isn't a real
-  // Prisma relation). Null entryId + non-null newEntryLabel means the model
-  // proposed a brand-new entry rather than matching an existing one; the
-  // user confirms by creating that entry (see StoriesService.createEntryFromCandidate).
-  entryType     StoryEntryType?
-  entryId       String?
-  newEntryLabel String?
-  newEntryDates Json?
-
-  // The raw text span this candidate was derived from — lets the review UI
-  // show "here's the source text" for an audit trail.
-  sourceSpanText String
-  // The model's generated narrative for this entry, pre-edit.
-  proposedStoryText String
-  // 0-1 — values below the review UI's threshold get flagged "needs your
-  // review" and are never auto-confirmed (see StoriesService).
-  confidence Float @default(0.5)
-
-  status StoryStatus @default(PROPOSED)
-  // Set once the user accepts (possibly edited) this candidate — points at
-  // the CandidateStory row it produced.
-  resultingStoryId String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([parseRunId])
-  @@index([entryType, entryId])
-  @@index([status])
-}
-
-// The confirmed, authoritative narrative for exactly one entry — what
-// generation actually reads (see agent/resu and agent/linkedin). entryType +
-// entryId is an app-level polymorphic reference, the same pattern already
-// used by LinkedinProfile.entryBullets' JSON shape
-// ({entryType, entryId, bullets}), promoted here to a real table because we
-// need per-row status/versioning that a JSON blob can't express cleanly.
-// Prisma has no native polymorphic relation, so referential integrity
-// (entryId actually exists in the right entry table) is enforced in
-// StoriesService, not the DB — the same tradeoff LinkedinProfile already
-// accepts.
-model CandidateStory {
-  id        String         @id @default(cuid())
   entryType StoryEntryType
   entryId   String
 
-  storyText String
-  // True once the user has directly hand-edited the text (vs. accepting the
-  // model's proposal verbatim) — purely informational, shown in the UI.
-  userEdited Boolean @default(false)
+  narrativeText String
 
-  status            StoryStatus @default(CONFIRMED)
-  sourceCandidateId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  confirmedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  // DB-enforced "exactly one confirmed story per entry" — reruns must
-  // upsert, never duplicate-insert, which structurally forbids two
-  // narratives fighting over one entry.
-  @@unique([entryType, entryId])
   @@index([entryType, entryId])
-  @@index([status])
 }
 
 // LinkedIn does not offer an API for a user's own connections/messages to

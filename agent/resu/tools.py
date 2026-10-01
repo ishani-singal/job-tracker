@@ -38,18 +38,24 @@ async def fetch_candidate_profile(ctx: RunContext[ResuDeps]) -> dict:
         return resp.json()
 
 
-async def fetch_structured_stories(ctx: RunContext[ResuDeps]) -> list[dict]:
-    """Fetch every confirmed, per-entry Story — the authoritative narrative
-    content for each Work Experience/Education/Internship/Project/Paper
-    entry, already attributed to exactly one entry by the story-review
-    pipeline (uploaded Stories/Resume files + connected GitHub repos, parsed
-    and confirmed by the user on the Resumes page). Each item is
-    {entryType, entryId, storyText}. This is the primary content source for
-    entries that have one — see fetch_structured_entries' returned entries,
-    each of which carries its own Story inline once you call this.
+async def fetch_narratives_for_entry(
+    ctx: RunContext[ResuDeps], entry_type: str, entry_id: str, entry_label: str
+) -> list[str]:
+    """Fetch the live-extracted narrative(s) for one specific entry — every
+    Stories/Resume file and connected GitHub repo the user pinned to this
+    entry at upload/connect time, each turned into a comprehensive narrative
+    on demand (cached after the first call) by the extraction pipeline. This
+    is the authoritative content source for that entry specifically — never
+    use one entry's narrative when writing a different entry's bullets, even
+    if the subject matter looks similar. Returns a list (one string per
+    source tagged to this entry, not combined) — an empty list means no
+    source has been tagged to this entry yet.
     """
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{ctx.deps.api_base_url}/stories/confirmed")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.get(
+            f"{ctx.deps.api_base_url}/stories/narratives",
+            params={"entryType": entry_type, "entryId": entry_id, "entryLabel": entry_label},
+        )
         resp.raise_for_status()
         return resp.json()
 
@@ -109,25 +115,3 @@ async def fetch_company_job_descriptions(ctx: RunContext[ResuDeps], company: str
     return {"stage": "all", "jds": jds}
 
 
-async def fetch_connected_repo_readmes(ctx: RunContext[ResuDeps]) -> list[dict]:
-    """Fetch READMEs from the candidate's connected GitHub repos (configured in
-    Settings). Each entry is {repo, readme}. Project entries already carry
-    their own confirmed Story (via fetch_structured_stories) derived from
-    this same README content plus repo metadata — call this only as a
-    last-resort supplement for a project entry whose Story is marked "none
-    confirmed yet", to pull in raw detail that hasn't been reviewed/confirmed
-    into a Story. Returns an empty list if no GitHub account is connected or
-    no repos are selected — that's not an error, just means there's nothing
-    extra here.
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(f"{ctx.deps.api_base_url}/github/repos/connected")
-        resp.raise_for_status()
-        connected = resp.json()
-        if not connected:
-            return []
-
-        readme_resp = await client.get(f"{ctx.deps.api_base_url}/github/readmes")
-        if readme_resp.status_code != 200:
-            return []
-        return readme_resp.json()

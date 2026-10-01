@@ -3,7 +3,6 @@ import type {
   AnalyticsTimeseriesPoint,
   Application,
   AppSettings,
-  CandidateStory,
   CompanyResume,
   DiscoveredRole,
   EducationEntry,
@@ -18,10 +17,7 @@ import type {
   ProjectEntry,
   ResumeProfile,
   ResumeTemplate,
-  StoryCandidate,
   StoryEntryType,
-  StoryParseRun,
-  StoryStatus,
   TrackedCompany,
   WorkExperienceEntry,
 } from '@job-tracker/shared-types';
@@ -87,8 +83,14 @@ export const api = {
   getResumeTemplate: () => request<ResumeTemplate>('/resumes/template'),
   updateResumeTemplate: (data: Partial<ResumeTemplate>) =>
     request<ResumeTemplate>('/resumes/template', { method: 'PATCH', body: JSON.stringify(data) }),
-  listStories: () => request<{ id: string; filename: string }[]>('/resumes/stories'),
-  listResumeFiles: () => request<{ id: string; filename: string }[]>('/resumes/files'),
+  listStories: () =>
+    request<{ id: string; filename: string; entryType: StoryEntryType; entryId: string }[]>(
+      '/resumes/stories',
+    ),
+  listResumeFiles: () =>
+    request<{ id: string; filename: string; entryType: StoryEntryType; entryId: string }[]>(
+      '/resumes/files',
+    ),
   deleteStory: (id: string) => request<void>(`/resumes/stories/${id}`, { method: 'DELETE' }),
   deleteResumeFile: (id: string) => request<void>(`/resumes/files/${id}`, { method: 'DELETE' }),
 
@@ -100,16 +102,23 @@ export const api = {
       '/github/repos/available',
     ),
   listConnectedRepos: () =>
-    request<{ fullName: string }[]>('/github/repos/connected'),
-  connectRepo: (fullName: string) =>
+    request<{ fullName: string; entryType: StoryEntryType; entryId: string }[]>(
+      '/github/repos/connected',
+    ),
+  connectRepo: (fullName: string, entryType: StoryEntryType, entryId: string) =>
     request<{ fullName: string }>('/github/repos/connected', {
       method: 'POST',
-      body: JSON.stringify({ fullName }),
+      body: JSON.stringify({ fullName, entryType, entryId }),
     }),
   disconnectRepo: (fullName: string) =>
     request<void>(`/github/repos/connected/${encodeURIComponent(fullName)}`, {
       method: 'DELETE',
     }),
+
+  getNarrativesForEntry: (entryType: StoryEntryType, entryId: string, entryLabel: string) =>
+    request<string[]>(
+      `/stories/narratives?entryType=${entryType}&entryId=${encodeURIComponent(entryId)}&entryLabel=${encodeURIComponent(entryLabel)}`,
+    ),
 
   listWorkExperience: () => request<WorkExperienceEntry[]>('/entries/work-experience'),
   createWorkExperience: (data: Partial<WorkExperienceEntry>) =>
@@ -167,32 +176,6 @@ export const api = {
   deleteProject: (id: string) =>
     request<void>(`/entries/projects/${id}`, { method: 'DELETE' }),
 
-  triggerStoryRerun: () => request<StoryParseRun>('/stories/rerun', { method: 'POST' }),
-  listStoryParseRuns: () => request<StoryParseRun[]>('/stories/runs'),
-  listStoryCandidates: (status?: StoryStatus) =>
-    request<StoryCandidate[]>(`/stories/candidates${status ? `?status=${status}` : ''}`),
-  confirmStoryCandidate: (id: string, editedText?: string) =>
-    request<CandidateStory>(`/stories/candidates/${id}/confirm`, {
-      method: 'POST',
-      body: JSON.stringify({ editedText }),
-    }),
-  rejectStoryCandidate: (id: string) =>
-    request<StoryCandidate>(`/stories/candidates/${id}/reject`, { method: 'POST' }),
-  reassignStoryCandidate: (id: string, entryType: StoryEntryType, entryId: string) =>
-    request<StoryCandidate>(`/stories/candidates/${id}/reassign`, {
-      method: 'POST',
-      body: JSON.stringify({ entryType, entryId }),
-    }),
-  createEntryFromStoryCandidate: (
-    id: string,
-    entryType: StoryEntryType,
-    entry: Record<string, unknown>,
-  ) =>
-    request<CandidateStory>(`/stories/candidates/${id}/create-entry`, {
-      method: 'POST',
-      body: JSON.stringify({ entryType, entry }),
-    }),
-  listConfirmedStories: () => request<CandidateStory[]>('/stories/confirmed'),
 
   listSessions: () => request<GenerationSession[]>('/sessions'),
   getSession: (id: string) => request<GenerationSession>(`/sessions/${id}`),

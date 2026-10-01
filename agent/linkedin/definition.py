@@ -12,7 +12,6 @@ from __future__ import annotations
 from .tools import (
     fetch_candidate_profile,
     fetch_candidate_resume,
-    fetch_connected_repo_readmes,
     fetch_linkedin_source_material,
     fetch_structured_entries,
 )
@@ -45,19 +44,19 @@ INSTRUCTIONS = (
     "yourself from raw application data.\n\n"
     "Then call fetch_candidate_profile and fetch_structured_entries for "
     "source material. Each entry fetch_structured_entries returns carries "
-    "its own `story` field — a confirmed, per-entry narrative already "
-    "reviewed and approved by the user, so it is already correctly scoped to "
-    "that one entry and safe to use directly for that entry's bullets. "
-    "Never use one entry's `story` for a different entry's bullets, even if "
-    "the subject matter or timeframe looks adjacent or overlapping (e.g. two "
-    "civil-engineering roles, or a degree and a job in the same domain) — "
-    "each is a distinct entry with its own narrative. For an entry whose "
-    "`story` is null, no confirmed narrative exists yet: write bullets using "
-    "only facts clearly attributable to that entry's own company/title/dates "
+    "its own `story` field — a live-extracted, per-entry narrative pulled "
+    "directly from whichever Stories/Resume file or GitHub repo the user "
+    "tagged to that entry, so it is already correctly scoped to that one "
+    "entry and safe to use directly for that entry's bullets. Never use one "
+    "entry's `story` for a different entry's bullets, even if the subject "
+    "matter or timeframe looks adjacent or overlapping (e.g. two civil-"
+    "engineering roles, or a degree and a job in the same domain) — each is "
+    "a distinct entry with its own narrative. For an entry whose `story` is "
+    "null, no source has been tagged to it yet: write bullets using only "
+    "facts clearly attributable to that entry's own company/title/dates "
     "from fetch_candidate_resume (a formatting reference, used sparingly as "
-    "content here) or fetch_connected_repo_readmes (for an unconfirmed "
-    "project entry only) — never invent facts, and never borrow content from "
-    "a different entry's `story` just because this one is empty.\n\n"
+    "content here) — never invent facts, and never borrow content from a "
+    "different entry's `story` just because this one is empty.\n\n"
     "Write bullets for EVERY entry returned by fetch_structured_entries — "
     "the required flag only matters for the separate per-job resume agent, "
     "not this whole-profile draft, which should cover the candidate's full "
@@ -108,5 +107,4 @@ TOOLS = [
     fetch_candidate_profile,
     fetch_structured_entries,
     fetch_candidate_resume,
-    fetch_connected_repo_readmes,
 ]

@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
-import { Prisma } from '@prisma/client';
+import { Prisma, StoryEntryType } from '@prisma/client';
 import { extractTextFromFile } from './extract-text';
 
 const UPLOAD_DIR = join(process.cwd(), '..', '..', 'data', 'uploads');
@@ -35,14 +35,26 @@ export class ResumesService {
     return storedName;
   }
 
-  async saveStoryFile(filename: string, mimeType: string, buffer: Buffer) {
+  async saveStoryFile(
+    filename: string,
+    mimeType: string,
+    buffer: Buffer,
+    entryType: StoryEntryType,
+    entryId: string,
+  ) {
     const storedPath = await this.persistFile(filename, buffer);
-    return this.prisma.storyFile.create({ data: { filename, storedPath, mimeType } });
+    return this.prisma.storyFile.create({ data: { filename, storedPath, mimeType, entryType, entryId } });
   }
 
-  async saveResumeFile(filename: string, mimeType: string, buffer: Buffer) {
+  async saveResumeFile(
+    filename: string,
+    mimeType: string,
+    buffer: Buffer,
+    entryType: StoryEntryType,
+    entryId: string,
+  ) {
     const storedPath = await this.persistFile(filename, buffer);
-    return this.prisma.resumeFile.create({ data: { filename, storedPath, mimeType } });
+    return this.prisma.resumeFile.create({ data: { filename, storedPath, mimeType, entryType, entryId } });
   }
 
   listStoryFiles() {
@@ -51,6 +63,14 @@ export class ResumesService {
 
   listResumeFiles() {
     return this.prisma.resumeFile.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  listStoryFilesForEntry(entryType: StoryEntryType, entryId: string) {
+    return this.prisma.storyFile.findMany({ where: { entryType, entryId } });
+  }
+
+  listResumeFilesForEntry(entryType: StoryEntryType, entryId: string) {
+    return this.prisma.resumeFile.findMany({ where: { entryType, entryId } });
   }
 
   async deleteStoryFile(id: string) {
@@ -77,18 +97,6 @@ export class ResumesService {
     const file = await this.prisma.resumeFile.findUnique({ where: { id } });
     if (!file) throw new NotFoundException(`Resume file ${id} not found`);
     return extractTextFromFile(file.storedPath, file.mimeType);
-  }
-
-  /** Concatenated text of every uploaded Stories file — what the agent actually reads. */
-  async getAllStoriesText(): Promise<string> {
-    const files = await this.listStoryFiles();
-    const texts = await Promise.all(
-      files.map(async (f) => {
-        const text = await extractTextFromFile(f.storedPath, f.mimeType);
-        return `--- ${f.filename} ---\n${text}`;
-      }),
-    );
-    return texts.join('\n\n');
   }
 
   /** Concatenated text of every uploaded Resume file — formatting reference only. */

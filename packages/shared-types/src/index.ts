@@ -244,7 +244,7 @@ export type GenerationSessionStatus =
   | 'ACCEPTED'
   | 'ERROR';
 
-export type GenerationSessionScope = 'APPLICATION' | 'LINKEDIN' | 'COMPANY' | 'STORY_EXTRACTION';
+export type GenerationSessionScope = 'APPLICATION' | 'LINKEDIN' | 'COMPANY';
 
 export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
 
@@ -261,10 +261,6 @@ export interface GenerationSession {
   scope: GenerationSessionScope;
   applicationId: string | null;
   company: string | null;
-  storyParseRunId: string | null;
-  /** Filename or repo name — set only for STORY_EXTRACTION scope, used as
-   * this session's label in the UI instead of a generic timestamp. */
-  sourceLabel: string | null;
   status: GenerationSessionStatus;
   errorMessage: string | null;
   createdAt: string;
@@ -274,55 +270,6 @@ export interface GenerationSession {
 
 export type StoryEntryType = 'WORK_EXPERIENCE' | 'EDUCATION' | 'INTERNSHIP' | 'PROJECT' | 'PAPER';
 export type StorySourceType = 'STORY_FILE' | 'RESUME_FILE' | 'GITHUB_REPO';
-export type StoryStatus = 'PROPOSED' | 'CONFIRMED' | 'REJECTED' | 'PROPOSED_UPDATE';
-export type ParseRunStatus = 'PENDING' | 'PARSING' | 'AWAITING_REVIEW' | 'DONE' | 'ERROR';
-
-export interface StoryParseRun {
-  id: string;
-  status: ParseRunStatus;
-  errorMessage: string | null;
-  triggerSourceType: StorySourceType | null;
-  triggerStoryFileId: string | null;
-  triggerResumeFileId: string | null;
-  triggerRepoFullName: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface StoryCandidate {
-  id: string;
-  parseRunId: string;
-  sourceType: StorySourceType;
-  storyFileId: string | null;
-  resumeFileId: string | null;
-  repoFullName: string | null;
-  entryType: StoryEntryType | null;
-  entryId: string | null;
-  newEntryLabel: string | null;
-  newEntryDates: Record<string, unknown> | null;
-  sourceSpanText: string;
-  proposedStoryText: string;
-  confidence: number;
-  status: StoryStatus;
-  resultingStoryId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** The confirmed, authoritative narrative for exactly one entry — what
- * generation reads (see agent/resu and agent/linkedin). */
-export interface CandidateStory {
-  id: string;
-  entryType: StoryEntryType;
-  entryId: string;
-  storyText: string;
-  userEdited: boolean;
-  status: StoryStatus;
-  sourceCandidateId: string | null;
-  confirmedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface LinkedinEntryBullets {
   entry_type: string;

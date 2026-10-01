@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Delete,
+  forwardRef,
   Get,
+  Inject,
   Param,
   Post,
   Query,
@@ -10,12 +12,18 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { GithubService } from './github.service';
+import { StoriesService } from '../stories/stories.service';
+import { StoryEntryType } from '@prisma/client';
 
 const WEB_APP_URL = process.env.WEB_APP_URL ?? 'http://localhost:3100';
 
 @Controller()
 export class GithubController {
-  constructor(private readonly github: GithubService) {}
+  constructor(
+    private readonly github: GithubService,
+    @Inject(forwardRef(() => StoriesService))
+    private readonly stories: StoriesService,
+  ) {}
 
   @Get('auth/github/start')
   start(@Res() res: FastifyReply) {
@@ -58,13 +66,15 @@ export class GithubController {
   }
 
   @Post('github/repos/connected')
-  connect(@Body() body: { fullName: string }) {
-    return this.github.connectRepo(body.fullName);
+  connect(@Body() body: { fullName: string; entryType: StoryEntryType; entryId: string }) {
+    return this.github.connectRepo(body.fullName, body.entryType, body.entryId);
   }
 
   @Delete('github/repos/connected/:fullName')
-  disconnectRepo(@Param('fullName') fullName: string) {
-    return this.github.disconnectRepo(decodeURIComponent(fullName));
+  async disconnectRepo(@Param('fullName') fullName: string) {
+    const decoded = decodeURIComponent(fullName);
+    await this.github.disconnectRepo(decoded);
+    await this.stories.invalidateNarrativeForSource({ repoFullName: decoded });
   }
 
   @Get('github/readmes')

@@ -27,8 +27,6 @@ function acceptLabel(scope: GenerationSession['scope']): string {
       return 'Accept LinkedIn Draft';
     case 'COMPANY':
       return 'Accept Company Resume';
-    case 'STORY_EXTRACTION':
-      return 'Send Stories to Review';
     default:
       return 'Accept Resume for This Application';
   }
@@ -53,35 +51,6 @@ function formatLinkedinMessage(content: string): string {
       ),
     ].filter(Boolean);
     return sections.join('\n\n');
-  } catch {
-    return content;
-  }
-}
-
-function formatStoryExtractionMessage(content: string): string {
-  // A finished turn's message is JSON-encoded {candidates: [...]} (see
-  // SessionsService.runStoryExtractionTurn) — a clarifying question is plain
-  // text and won't parse as that shape, so fall back to showing it as-is.
-  try {
-    const parsed = JSON.parse(content) as {
-      candidates?: {
-        entry_type: string | null;
-        new_entry_label: string | null;
-        story_text: string;
-        confidence: number;
-      }[];
-    };
-    if (!parsed.candidates) return content;
-    if (parsed.candidates.length === 0) {
-      return 'Nothing in this document was attributable to a specific entry.';
-    }
-    return parsed.candidates
-      .map((c) => {
-        const label = c.entry_type ?? (c.new_entry_label ? `new: ${c.new_entry_label}` : 'unmatched');
-        const confidence = `${Math.round(c.confidence * 100)}% confidence`;
-        return `${label} (${confidence})\n${c.story_text}`;
-      })
-      .join('\n\n');
   } catch {
     return content;
   }
@@ -124,7 +93,6 @@ function sessionLabel(
 ): string {
   if (session.scope === 'LINKEDIN') return 'LinkedIn';
   if (session.scope === 'COMPANY') return session.company ?? 'Company';
-  if (session.scope === 'STORY_EXTRACTION') return session.sourceLabel ?? 'Story';
   // APPLICATION scope — label by "Company - Job Title" when we have the
   // application on hand, falling back to a timestamp for an application
   // that's since been deleted (or hasn't loaded yet).
@@ -253,9 +221,6 @@ function SessionChat({ session }: { session: GenerationSession }) {
       } else if (session.scope === 'COMPANY') {
         queryClient.invalidateQueries({ queryKey: ['company-resumes'] });
         queryClient.invalidateQueries({ queryKey: ['company-resume', session.company] });
-      } else if (session.scope === 'STORY_EXTRACTION') {
-        queryClient.invalidateQueries({ queryKey: ['story-candidates'] });
-        queryClient.invalidateQueries({ queryKey: ['story-parse-runs'] });
       }
     },
   });
@@ -280,9 +245,7 @@ function SessionChat({ session }: { session: GenerationSession }) {
               ? message.content
               : session.scope === 'LINKEDIN'
                 ? formatLinkedinMessage(message.content)
-                : session.scope === 'STORY_EXTRACTION'
-                  ? formatStoryExtractionMessage(message.content)
-                  : formatResumeMessage(message.content)}
+                : formatResumeMessage(message.content)}
           </div>
         ))}
         {isRunning && (
@@ -335,9 +298,7 @@ function SessionChat({ session }: { session: GenerationSession }) {
             ? 'Accepted — saved to your LinkedIn profile draft.'
             : session.scope === 'COMPANY'
               ? `Accepted — saved as the common resume for ${session.company}.`
-              : session.scope === 'STORY_EXTRACTION'
-                ? 'Sent to Story Review — confirm each proposed story on the Resumes page.'
-                : 'Accepted — saved to the application.'}
+              : 'Accepted — saved to the application.'}
         </div>
       )}
     </div>

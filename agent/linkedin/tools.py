@@ -38,37 +38,43 @@ async def fetch_structured_entries(ctx: RunContext[LinkedinDeps]) -> dict:
     internships, and projects, each with an `id` you MUST reuse as `entry_id`
     in your output so the saved bullets map back to the correct LinkedIn
     section, and each carrying its own `story` field — that entry's
-    confirmed, per-entry narrative (already reviewed and approved by the
-    user, so it is already correctly scoped to that one entry only). `story`
-    is null for an entry with no confirmed story yet; write bullets for that
-    entry using only facts clearly attributable to its own company/title/
-    dates (e.g. from fetch_candidate_resume or fetch_connected_repo_readmes),
-    never content from a different entry's story. Write bullets for EVERY
-    entry returned here, regardless of its `required` flag — that flag only
-    matters for the separate per-job resume agent, not this whole-profile
-    LinkedIn draft, which covers the full background. Before finishing,
-    verify your output's entry_bullets list has one item per id returned by
-    this call, across all four categories — a missing id means an incomplete
-    profile, not an intentional omission. Treat internships as part of work
-    experience: merge them into the same chronological history as regular
-    jobs rather than a separate section. Every project entry gets exactly 3
-    bullets: one explaining the project/problem/tech stack, then two
-    resume-style bullets each with a real quantitative impact value.
+    live-extracted, per-entry narrative (pulled directly from whichever
+    Stories/Resume file or GitHub repo the user tagged to that entry, so it
+    is already correctly scoped to that one entry only). `story` is null for
+    an entry with no source tagged to it yet; write bullets for that entry
+    using only facts clearly attributable to its own company/title/dates
+    (e.g. from fetch_candidate_resume), never content from a different
+    entry's story. Write bullets for EVERY entry returned here, regardless
+    of its `required` flag — that flag only matters for the separate
+    per-job resume agent, not this whole-profile LinkedIn draft, which
+    covers the full background. Before finishing, verify your output's
+    entry_bullets list has one item per id returned by this call, across
+    all four categories — a missing id means an incomplete profile, not an
+    intentional omission. Treat internships as part of work experience:
+    merge them into the same chronological history as regular jobs rather
+    than a separate section. Every project entry gets exactly 3 bullets:
+    one explaining the project/problem/tech stack, then two resume-style
+    bullets each with a real quantitative impact value.
     """
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{ctx.deps.api_base_url}/entries")
         resp.raise_for_status()
         entries = resp.json()
 
-        stories_resp = await client.get(f"{ctx.deps.api_base_url}/stories/confirmed")
-        stories_resp.raise_for_status()
-        stories_by_entry = {
-            (s["entryType"], s["entryId"]): s["storyText"] for s in stories_resp.json()
-        }
+        async def fetch_narrative(prisma_type: str, entry: dict, label: str) -> str | None:
+            narrative_resp = await client.get(
+                f"{ctx.deps.api_base_url}/stories/narratives",
+                params={"entryType": prisma_type, "entryId": entry["id"], "entryLabel": label},
+                timeout=180.0,
+            )
+            narrative_resp.raise_for_status()
+            narratives = narrative_resp.json()
+            return "\n\n".join(narratives) if narratives else None
 
-    for key, prisma_type in _ENTRY_TYPE_MAP.items():
-        for entry in entries.get(key, []):
-            entry["story"] = stories_by_entry.get((prisma_type, entry["id"]))
+        for key, prisma_type in _ENTRY_TYPE_MAP.items():
+            for entry in entries.get(key, []):
+                label = entry.get("company") or entry.get("school") or entry.get("name") or entry["id"]
+                entry["story"] = await fetch_narrative(prisma_type, entry, label)
 
     return entries
 
@@ -81,23 +87,6 @@ async def fetch_candidate_resume(ctx: RunContext[LinkedinDeps]) -> str:
         resp = await client.get(f"{ctx.deps.api_base_url}/resumes/files/text")
         resp.raise_for_status()
         return resp.json().get("text", "")
-
-
-async def fetch_connected_repo_readmes(ctx: RunContext[LinkedinDeps]) -> list[dict]:
-    """Fetch READMEs from the candidate's connected GitHub repos. Each entry is
-    {repo, readme}. Supplementary material for project bullets. Empty list
-    means no repos connected — not an error.
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(f"{ctx.deps.api_base_url}/github/repos/connected")
-        resp.raise_for_status()
-        connected = resp.json()
-        if not connected:
-            return []
-        readme_resp = await client.get(f"{ctx.deps.api_base_url}/github/readmes")
-        if readme_resp.status_code != 200:
-            return []
-        return readme_resp.json()
 
 
 async def fetch_linkedin_source_material(ctx: RunContext[LinkedinDeps]) -> dict:

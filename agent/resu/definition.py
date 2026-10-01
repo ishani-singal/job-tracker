@@ -16,10 +16,9 @@ from .tools import (
     fetch_candidate_profile,
     fetch_candidate_resume,
     fetch_company_job_descriptions,
-    fetch_connected_repo_readmes,
     fetch_job_description,
+    fetch_narratives_for_entry,
     fetch_structured_entries,
-    fetch_structured_stories,
 )
 
 SOUL = (
@@ -30,11 +29,12 @@ SOUL = (
 
 IDENTITY = (
     "You are the user's resume tailoring specialist. Given a job description and "
-    "the candidate's structured background entries — each carrying its own "
-    "confirmed Story (a per-entry narrative already reviewed and approved by the "
-    "user, so it's already correctly scoped to that one entry) — and existing "
-    "Resume (formatting reference only), you produce one fully tailored, "
-    "ATS-optimized resume for that specific role."
+    "the candidate's structured background entries — each carrying its own live-"
+    "extracted Story (a per-entry narrative pulled directly from whichever "
+    "Stories/Resume file or GitHub repo the user tagged to that entry, so it's "
+    "already correctly scoped to that one entry) — and existing Resume "
+    "(formatting reference only), you produce one fully tailored, ATS-optimized "
+    "resume for that specific role."
 )
 
 INSTRUCTIONS = (
@@ -44,22 +44,22 @@ INSTRUCTIONS = (
     "call fetch_company_job_descriptions for that company instead — do not call "
     "both in the same run, only the one matching the task you were actually "
     "given. Your profile facts, process template, structured entries, and each "
-    "entry's own confirmed Story are already provided below — you do not need to "
-    "fetch them yourself.\n\n"
+    "entry's own Story are already provided below — you do not need to fetch "
+    "them yourself.\n\n"
     "Before writing anything: check the JD against the candidate's disqualifier "
     "keywords and max-years-experience cutoff from the profile facts below. If the "
     "JD clearly fails either, say so plainly and stop rather than generating a "
     "resume anyway.\n\n"
     "Follow the process template below exactly, in order. Each entry below "
-    "carries its own confirmed Story directly inline — treat that Story as the "
-    "primary, authoritative source for that entry specifically, and never pull "
-    "content from one entry's Story into a different entry's bullets. An entry "
-    "marked 'Story: [none confirmed yet]' has no reviewed narrative yet — for "
-    "that entry only, you may fall back to fetch_candidate_resume (formatting "
-    "reference, used sparingly as content here) or fetch_connected_repo_readmes "
-    "(for an unconfirmed project entry only), but only pull content you can "
-    "clearly attribute to that specific entry's company/title/dates — never "
-    "invent facts not grounded in that entry's own Story or fallback material."
+    "carries its own Story directly inline — treat that Story as the primary, "
+    "authoritative source for that entry specifically, and never pull content "
+    "from one entry's Story into a different entry's bullets. An entry marked "
+    "'Story: [none yet]' has no Stories/Resume file or GitHub repo tagged to it "
+    "yet — for that entry only, you may fall back to fetch_candidate_resume "
+    "(formatting reference, used sparingly as content here), or call "
+    "fetch_narratives_for_entry yourself if you suspect a source was tagged "
+    "after this prompt was built, but never invent facts not grounded in that "
+    "entry's own Story or fallback material."
 )
 
 
@@ -67,16 +67,18 @@ def build_profile_context(
     profile: dict, entries: dict | None = None, stories: list[dict] | None = None
 ) -> str:
     """Renders the candidate's profile facts + structured entries (each
-    carrying its own confirmed Story inline) + process template as a prompt
-    fragment. Called fresh on every agent run (see agent.py's system_prompt
-    hook) so edits in Settings apply immediately with no restart.
+    carrying its own live-extracted Story inline) + process template as a
+    prompt fragment. Called fresh on every agent run (see agent.py's
+    system_prompt hook) so edits in Settings apply immediately with no
+    restart.
 
-    `stories` is the list returned by GET /stories/confirmed — each item
-    {entryType, entryId, storyText}. Keying each entry's rendered line by its
-    own (entryType, entryId) is the actual structural fix for the "model
-    mixes content between entries" problem: each entry's block in the prompt
-    carries only that entry's own story text, so there is no shared blob in
-    context for the model to misattribute across entries.
+    `stories` is built by agent.py's _fetch_all_narratives, one GET
+    /stories/narratives call per entry — each item {entryType, entryId,
+    storyText}. Keying each entry's rendered line by its own (entryType,
+    entryId) is the actual structural fix for the "model mixes content
+    between entries" problem: each entry's block in the prompt carries only
+    that entry's own story text, so there is no shared blob in context for
+    the model to misattribute across entries.
     """
     location = ", ".join(
         part
@@ -153,8 +155,8 @@ def _format_date_range(e: dict) -> str:
 def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str]) -> str:
     """Renders work experience/education/internships/projects, split into
     required (must appear) vs optional (include only if relevant to the JD).
-    Each entry's own line carries its own confirmed Story directly beneath it
-    (or a "none confirmed yet" marker) — see build_profile_context's
+    Each entry's own line carries its own live-extracted Story directly
+    beneath it (or a "none yet" marker) — see build_profile_context's
     docstring for why this is the actual fix for cross-entry content mixing.
     """
 
@@ -162,7 +164,7 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
         story = stories_by_entry.get((entry_type, e["id"]))
         if story:
             return f"\n  Story: {story}"
-        return "\n  Story: [none confirmed yet]"
+        return "\n  Story: [none yet]"
 
     def render_group(label: str, entry_type: str, items: list[dict], line_fn) -> str:
         if not items:
@@ -234,9 +236,8 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
 TOOLS = [
     fetch_candidate_profile,
     fetch_structured_entries,
-    fetch_structured_stories,
+    fetch_narratives_for_entry,
     fetch_job_description,
     fetch_company_job_descriptions,
     fetch_candidate_resume,
-    fetch_connected_repo_readmes,
 ]
