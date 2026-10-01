@@ -240,8 +240,23 @@ async def _check_for_clarification(
         f"## Current document (may be empty)\n{existing_document_html or '[empty]'}\n\n"
         f"## Raw source material tagged to this entry\n{combined_source[:_CHUNK_SIZE_CHARS]}"
     )
-    async with LLM_CONCURRENCY:
-        result = await retry_on_rate_limit(lambda: clarify_agent.run(prompt))
+    try:
+        # This check is optional — skipping it just means generation
+        # proceeds without asking anything, which is always a safe
+        # fallback. It deliberately does NOT go through
+        # retry_on_rate_limit's up-to-90s backoff: that budget is worth
+        # spending on the write-up itself (generate_document, below), not
+        # doubled here on a nice-to-have pre-check. A single quick attempt
+        # (no retry) keeps this call's worst case small, so a rate-limited
+        # Azure deployment degrades to "no question asked" rather than
+        # compounding both calls' retry budgets into one very slow or
+        # outright-timed-out turn (this is what caused 300s+ turns that
+        # tripped the Node fetch timeout after this feature moved to a
+        # two-call session flow).
+        async with LLM_CONCURRENCY:
+            result = await clarify_agent.run(prompt)
+    except Exception:
+        return None
     output = result.output
     return output.question if output.has_question and output.question.strip() else None
 

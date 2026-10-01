@@ -259,10 +259,16 @@ export class SessionsService {
         await this.runApplicationTurn(session.id, session.applicationId!, priorHistoryJson, userReply);
       }
     } catch (err) {
-      this.logger.error(`Session ${session.id} turn failed: ${err}`);
+      // Node's fetch wraps the real underlying failure (a timeout, a
+      // connection reset, etc.) in `.cause` and raises a generic
+      // "TypeError: fetch failed" at the top level — logging err alone
+      // (or String(err)) discards that cause and makes every fetch
+      // failure look identical and undiagnosable. Surface it explicitly.
+      const cause = err instanceof Error && err.cause ? ` (cause: ${err.cause})` : '';
+      this.logger.error(`Session ${session.id} turn failed: ${err}${cause}`);
       await this.prisma.generationSession.update({
         where: { id: session.id },
-        data: { status: 'ERROR', errorMessage: String(err) },
+        data: { status: 'ERROR', errorMessage: `${err}${cause}` },
       });
     }
   }
