@@ -25,6 +25,7 @@ from pydantic_ai.providers.azure import AzureProvider
 
 from .deps import ResuDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS, build_profile_context
+from .rate_limit import LLM_CONCURRENCY
 
 _model = OpenAIChatModel(
     os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
@@ -134,13 +135,18 @@ async def _fetch_all_narratives(api_base_url: str, entries: dict) -> list[dict]:
         jobs.append(("PROJECT", e["id"], e["name"]))
 
     async def fetch_one(entry_type: str, entry_id: str, label: str) -> dict | None:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            resp = await client.get(
-                f"{api_base_url}/stories/narratives",
-                params={"entryType": entry_type, "entryId": entry_id, "entryLabel": label},
-            )
-            resp.raise_for_status()
-            narratives = resp.json()
+        # Each call here may itself be a cache-miss that fans out one LLM
+        # call per chunk inside /stories/narratives (same process) — bound
+        # by the shared LLM_CONCURRENCY semaphore so N entries firing at
+        # once can't multiply into a burst that trips Azure's rate limit.
+        async with LLM_CONCURRENCY:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.get(
+                    f"{api_base_url}/stories/narratives",
+                    params={"entryType": entry_type, "entryId": entry_id, "entryLabel": label},
+                )
+                resp.raise_for_status()
+                narratives = resp.json()
         if not narratives:
             return None
         return {"entryType": entry_type, "entryId": entry_id, "storyText": "\n\n".join(narratives)}
