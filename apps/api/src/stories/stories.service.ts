@@ -45,6 +45,14 @@ const HINT_ENTRY_TYPE_TO_MATCH_KEY: Record<StoryEntryType, string> = {
   PAPER: 'paper',
 };
 
+const HINT_ENTRY_TYPE_LABEL: Record<StoryEntryType, string> = {
+  WORK_EXPERIENCE: 'Work Experience',
+  EDUCATION: 'Education',
+  INTERNSHIP: 'Internship',
+  PROJECT: 'Project',
+  PAPER: 'Paper',
+};
+
 @Injectable()
 export class StoriesService {
   private readonly logger = new Logger(StoriesService.name);
@@ -124,12 +132,18 @@ export class StoriesService {
         ? this.narrowEntriesToHint(entriesForMatching, trigger.hintEntryType, trigger.hintEntryId)
         : entriesForMatching;
 
+      const backgroundSuffix = this.describeBackgroundHint(
+        narrowedEntries,
+        trigger.hintEntryType,
+        trigger.hintEntryId,
+      );
+
       const sourcesWithText = sources.filter((s) => s.text.trim());
       for (const source of sourcesWithText) {
         await this.sessions.startStoryExtraction(runId, {
           rawText: source.text,
           sourceType: source.sourceType,
-          sourceLabel: source.label,
+          sourceLabel: backgroundSuffix ? `${source.label} (${backgroundSuffix})` : source.label,
           storyFileId: source.storyFileId,
           resumeFileId: source.resumeFileId,
           repoFullName: source.repoFullName,
@@ -179,6 +193,33 @@ export class StoriesService {
       ? categoryEntries.filter((e) => e.id === entryId)
       : categoryEntries;
     return narrowed;
+  }
+
+  /** Builds a human-readable "(Work Experience: Dell)" / "(Work
+   * Experience)" suffix from the user's upload-time background pick, so the
+   * Chat panel's session list shows what was picked, not just the filename.
+   * Reads the display name straight out of the already-narrowed entries
+   * dict rather than hitting the DB again. */
+  private describeBackgroundHint(
+    narrowedEntries: Record<string, unknown[]>,
+    hintEntryType?: StoryEntryType,
+    hintEntryId?: string,
+  ): string | null {
+    if (!hintEntryType) return null;
+    const categoryLabel = HINT_ENTRY_TYPE_LABEL[hintEntryType];
+    if (!hintEntryId) return categoryLabel;
+
+    const key = HINT_ENTRY_TYPE_TO_MATCH_KEY[hintEntryType];
+    const sourceKey = key === 'internship' ? 'internships' : key === 'project' ? 'projects' : key;
+    const entry = (narrowedEntries[sourceKey] ?? [])[0] as Record<string, unknown> | undefined;
+    if (!entry) return categoryLabel;
+
+    const entryName =
+      (entry.company as string | undefined) ??
+      (entry.school as string | undefined) ??
+      (entry.name as string | undefined) ??
+      (entry.title as string | undefined);
+    return entryName ? `${categoryLabel}: ${entryName}` : categoryLabel;
   }
 
   /**

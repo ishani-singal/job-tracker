@@ -40,6 +40,15 @@ export function StoryReviewSection() {
     queryFn: () => api.listStoryCandidates(),
   });
 
+  // Candidates only carry the raw storyFileId/resumeFileId — resolve those
+  // to filenames here (already fetched/cached elsewhere under the same
+  // query keys) so the card can show "resume.docx" instead of a bare id.
+  const { data: storyFiles } = useQuery({ queryKey: ['stories'], queryFn: api.listStories });
+  const { data: resumeFiles } = useQuery({ queryKey: ['resume-files'], queryFn: api.listResumeFiles });
+  const fileNamesById = new Map<string, string>();
+  for (const f of storyFiles ?? []) fileNamesById.set(f.id, f.filename);
+  for (const f of resumeFiles ?? []) fileNamesById.set(f.id, f.filename);
+
   const rerun = useMutation({
     mutationFn: api.triggerStoryRerun,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['story-parse-runs'] }),
@@ -102,7 +111,7 @@ export function StoryReviewSection() {
             {key === 'NEW' ? 'New Entry Proposals' : ENTRY_TYPE_LABEL[key as StoryEntryType]}
           </h3>
           {items.map((candidate) => (
-            <CandidateCard key={candidate.id} candidate={candidate} />
+            <CandidateCard key={candidate.id} candidate={candidate} fileNamesById={fileNamesById} />
           ))}
         </div>
       ))}
@@ -110,7 +119,13 @@ export function StoryReviewSection() {
   );
 }
 
-function CandidateCard({ candidate }: { candidate: StoryCandidate }) {
+function CandidateCard({
+  candidate,
+  fileNamesById,
+}: {
+  candidate: StoryCandidate;
+  fileNamesById: Map<string, string>;
+}) {
   const queryClient = useQueryClient();
   const [text, setText] = useState(candidate.proposedStoryText);
   const [newEntryName, setNewEntryName] = useState(candidate.newEntryLabel ?? '');
@@ -149,6 +164,11 @@ function CandidateCard({ candidate }: { candidate: StoryCandidate }) {
   const isLowConfidence = candidate.confidence < LOW_CONFIDENCE_THRESHOLD;
   const isUpdate = candidate.status === 'PROPOSED_UPDATE';
   const needsEntry = !candidate.entryId;
+  const sourceLabel =
+    (candidate.storyFileId && fileNamesById.get(candidate.storyFileId)) ??
+    (candidate.resumeFileId && fileNamesById.get(candidate.resumeFileId)) ??
+    candidate.repoFullName ??
+    'unknown source';
 
   return (
     <div
@@ -158,7 +178,7 @@ function CandidateCard({ candidate }: { candidate: StoryCandidate }) {
     >
       <div className="flex items-center justify-between text-xs opacity-70">
         <span>
-          Source: {candidate.storyFileId ?? candidate.resumeFileId ?? candidate.repoFullName ?? 'unknown'}
+          Source: {sourceLabel}
           {isUpdate && ' · Update available'}
         </span>
         <span className={isLowConfidence ? 'text-amber-600 dark:text-amber-400 font-medium' : ''}>
