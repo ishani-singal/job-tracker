@@ -36,12 +36,17 @@ ALTER TABLE "GenerationSession" DROP COLUMN IF EXISTS "repoFullName";
 DROP INDEX IF EXISTS "GenerationSession_storyParseRunId_idx";
 
 -- Postgres has no DROP VALUE for enums — recreate GenerationSessionScope
--- without STORY_EXTRACTION now that nothing references it.
+-- without STORY_EXTRACTION now that nothing references it. The column's
+-- default (an enum literal) has to be dropped before the type swap —
+-- Postgres can't auto-cast a DEFAULT expression the way it can casts of
+-- existing row data via USING — and re-added afterward against the new type.
+ALTER TABLE "GenerationSession" ALTER COLUMN "scope" DROP DEFAULT;
 ALTER TYPE "GenerationSessionScope" RENAME TO "GenerationSessionScope_old";
 CREATE TYPE "GenerationSessionScope" AS ENUM ('APPLICATION', 'LINKEDIN', 'COMPANY');
 ALTER TABLE "GenerationSession"
   ALTER COLUMN "scope" TYPE "GenerationSessionScope"
   USING ("scope"::text::"GenerationSessionScope");
+ALTER TABLE "GenerationSession" ALTER COLUMN "scope" SET DEFAULT 'APPLICATION'::"GenerationSessionScope";
 DROP TYPE "GenerationSessionScope_old";
 
 -- Existing uploads/connections have no recoverable entry association —
