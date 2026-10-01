@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import { PrismaService } from '../prisma/prisma.service';
 import { GenerationSessionScope, MessageRole, Prisma, StoryEntryType } from '@prisma/client';
 import type { StructuredResume } from '@job-tracker/shared-types';
@@ -7,14 +8,23 @@ import { StoriesService, sanitizeDocumentHtml } from '../stories/stories.service
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
-// Node's undici fetch falls back to an internal ~300s headers timeout with
-// no explicit one set, surfacing as an opaque "TypeError: fetch failed"
-// that gives no hint it was a timeout. An explicit, longer-than-that
-// timeout here means a run that's genuinely still working (retrying
-// through Azure rate limits, chunked narrative extraction, etc.) isn't cut
-// off right as it might have succeeded, while still failing eventually with
-// a clear AbortError rather than hanging forever.
+// Node's fetch (built on undici) enforces its OWN internal headersTimeout
+// (~300s default) independently of any AbortSignal passed to the call —
+// an AbortSignal.timeout() longer than this does NOT raise it, so a call
+// that's still legitimately working (retrying through Azure rate limits,
+// chunked generation, etc.) past 300s is killed anyway by undici itself,
+// surfacing as "TypeError: fetch failed (cause: HeadersTimeoutError)".
+// Raising headersTimeout (and bodyTimeout, which has the same default and
+// the same failure mode once headers DO arrive) on a dedicated dispatcher,
+// passed explicitly to every agent-service fetch, is what actually extends
+// the ceiling — AbortSignal remains the mechanism for a clean, intentional
+// cutoff (via agentCallSignal below), now comfortably inside this larger
+// window instead of racing against a shorter, invisible one.
 const AGENT_FETCH_TIMEOUT_MS = 8 * 60 * 1000;
+const agentDispatcher = new UndiciAgent({
+  headersTimeout: AGENT_FETCH_TIMEOUT_MS,
+  bodyTimeout: AGENT_FETCH_TIMEOUT_MS,
+});
 
 interface RunTurnResponse {
   done: boolean;
@@ -279,7 +289,7 @@ export class SessionsService {
     priorHistoryJson: string | null,
     userReply: string | null,
   ) {
-    const response = await fetch(`${AGENT_SERVICE_URL}/sessions/run-turn`, {
+    const response = await undiciFetch(`${AGENT_SERVICE_URL}/sessions/run-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -288,6 +298,7 @@ export class SessionsService {
         user_reply: userReply,
       }),
       signal: this.agentCallSignal(),
+      dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent run-turn failed: ${response.status}`);
     const result = (await response.json()) as RunTurnResponse;
@@ -314,7 +325,7 @@ export class SessionsService {
     priorHistoryJson: string | null,
     userReply: string | null,
   ) {
-    const response = await fetch(`${AGENT_SERVICE_URL}/sessions/run-company-turn`, {
+    const response = await undiciFetch(`${AGENT_SERVICE_URL}/sessions/run-company-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -323,6 +334,7 @@ export class SessionsService {
         user_reply: userReply,
       }),
       signal: this.agentCallSignal(),
+      dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent run-company-turn failed: ${response.status}`);
     const result = (await response.json()) as RunTurnResponse;
@@ -375,7 +387,7 @@ export class SessionsService {
       };
     }
 
-    const response = await fetch(`${AGENT_SERVICE_URL}/stories/run-turn`, {
+    const response = await undiciFetch(`${AGENT_SERVICE_URL}/stories/run-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -386,6 +398,7 @@ export class SessionsService {
         already_asked: state.alreadyAsked,
       }),
       signal: this.agentCallSignal(),
+      dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent /stories/run-turn failed: ${response.status}`);
     const result = (await response.json()) as EntryDocumentRunTurnResponse;
@@ -413,7 +426,7 @@ export class SessionsService {
     priorHistoryJson: string | null,
     userReply: string | null,
   ) {
-    const response = await fetch(`${AGENT_SERVICE_URL}/linkedin/run-turn`, {
+    const response = await undiciFetch(`${AGENT_SERVICE_URL}/linkedin/run-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -421,6 +434,7 @@ export class SessionsService {
         user_reply: userReply,
       }),
       signal: this.agentCallSignal(),
+      dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent linkedin run-turn failed: ${response.status}`);
     const result = (await response.json()) as LinkedinRunTurnResponse;

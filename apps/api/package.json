@@ -34,7 +34,8 @@
     "playwright": "1.62.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sanitize-html": "^2.18.0"
+    "sanitize-html": "^2.18.0",
+    "undici": "^8.11.2"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",

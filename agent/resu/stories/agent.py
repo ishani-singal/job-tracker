@@ -30,17 +30,25 @@ the current document and the raw sources, instructed to preserve existing
 content/phrasing except where new source material supersedes it — never a
 blind from-scratch overwrite.
 
-Write-up IS chunked for long sources: raw source text is split into ~12k-char
-chunks. With no existing document, each chunk can be written up independently
-and in parallel (own full output budget each), then concatenated in order —
-same reasoning as before: one call asked to write up dozens of pages at once
-shares one output budget across everything it produces, no matter how the
-prompt is worded. With an existing document, chunks are instead applied as a
-SEQUENTIAL FOLD (chunk N's call revises the document chunk N-1 produced) —
-independent parallel chunk calls can't compose cleanly against one shared
-existing document (each would try to revise the same base, producing
-conflicting edits), so merge correctness is prioritized over chunk
-parallelism in that case.
+Processed per SOURCE (one Story/Resume file or GitHub repo = one source),
+not per arbitrary character-chunk of a combined blob — at most
+LLM_CONCURRENCY (2, same process-wide cap used everywhere else in this
+module) sources are drafted concurrently at any time, so a Generate click
+against an entry with many tagged sources never fires more than 2
+simultaneous write-up calls for that entry. Each source's own text is
+still internally chunked if long (same ~12k-char chunking as before, now
+scoped to one source instead of the whole combined blob) — a source's
+multi-chunk write-up still runs its chunks SEQUENTIALLY against each other
+(chunk N revises what chunk N-1 produced), since independent parallel chunk
+calls can't compose cleanly against one shared base document.
+
+Sources themselves are drafted independently and in parallel (bounded to 2
+at once) against the ORIGINAL existing document — not against each other's
+in-progress output, which would hit the same multiple-simultaneous-edits-to-
+one-base problem chunking already avoids — then folded into the document
+ONE SOURCE AT A TIME, in the order their drafts complete, so the final merge
+is still a single coherent edit stream even though the drafting work ran
+concurrently.
 """
 from __future__ import annotations
 
@@ -176,8 +184,15 @@ async def generate_document(
     for the prompt; the entry's identity has already been pinned by
     whoever called this. `clarification` is the user's answer to a question
     _check_for_clarification asked earlier this session, if any — folded in
-    as an extra source so the model can use it to resolve the gap it asked
-    about. Returns the full document HTML.
+    as its own source ahead of the rest. Returns the full document HTML.
+
+    Processes one SOURCE at a time against the running document (never two
+    sources revising the same base simultaneously — see module docstring for
+    why), but bounds how many sources' write-up calls can be in flight
+    PREPARING their contribution at once via LLM_CONCURRENCY (2) — in
+    practice this means an entry with many tagged sources never fires more
+    than 2 simultaneous LLM calls for its generation, matching the same cap
+    already applied process-wide to every other call in this module.
     """
     sources = list(raw_sources)
     if clarification and clarification.strip():
@@ -186,38 +201,71 @@ async def generate_document(
             f"this entry's source material): {clarification}",
             *sources,
         ]
-
-    combined_source = "\n\n---\n\n".join(s for s in sources if s.strip())
-    if not combined_source.strip():
+    sources = [s for s in sources if s.strip()]
+    if not sources:
         # Nothing new to fold in — leave the existing document (if any) as-is
         # rather than asking the model to revise against empty source text.
         return existing_document_html
 
-    if len(combined_source) <= _CHUNK_SIZE_CHARS:
-        return await _generate_or_revise_chunk(existing_document_html, combined_source, 0, 1, entry_label)
+    if len(sources) == 1:
+        return await _draft_from_source(existing_document_html, sources[0], entry_label)
 
-    chunks = _chunk_text(combined_source)
+    # Multiple sources: draft each source's contribution INDEPENDENTLY and IN
+    # PARALLEL (each against the original existing_document_html, not
+    # against each other's in-progress output) — bounded to 2 concurrent
+    # drafts at once by LLM_CONCURRENCY, so an entry with many sources still
+    # only ever has 2 simultaneous LLM calls in flight. Drafting in parallel
+    # like this means each draft doesn't yet reflect the other sources, so a
+    # final sequential merge pass folds all N drafts into one coherent
+    # document, one at a time, in order — this merge step is the ONLY part
+    # that must stay sequential, since merging two drafts into the same
+    # base at once has the same conflicting-simultaneous-edit problem
+    # today's single-source sequential fold already avoids.
+    drafts = await asyncio.gather(
+        *(_draft_from_source(existing_document_html, source, entry_label) for source in sources)
+    )
 
-    if not existing_document_html.strip():
-        # No existing document to merge against — chunks are independent,
-        # so write them up in parallel and concatenate, same as the old
-        # narrative-extraction flow.
-        htmls = await asyncio.gather(
-            *(
-                _generate_or_revise_chunk("", chunk, i, len(chunks), entry_label)
-                for i, chunk in enumerate(chunks)
-            )
-        )
-        return "\n".join(h for h in htmls if h.strip())
-
-    # Existing document to merge against — sequential fold, not parallel:
-    # each chunk's call revises the document the PREVIOUS chunk's call
-    # produced, so the final result is one coherent edit stream applied in
-    # order rather than N independent simultaneous edits to the same base.
     current_html = existing_document_html
+    for draft in drafts:
+        current_html = await _merge_draft(current_html, draft, entry_label)
+    return current_html
+
+
+async def _draft_from_source(existing_html: str, source_text: str, entry_label: str) -> str:
+    """Produces one source's standalone draft of the document — still
+    chunked internally (sequential fold) if that one source's text alone is
+    long, same shape as before (now scoped per-source rather than
+    per-combined-blob). When there's only one source overall, this IS the
+    final document; with multiple sources, each one's draft is merged
+    afterward (see _merge_draft) rather than compared against siblings.
+    """
+    if len(source_text) <= _CHUNK_SIZE_CHARS:
+        return await _generate_or_revise_chunk(existing_html, source_text, 0, 1, entry_label)
+
+    chunks = _chunk_text(source_text)
+    current_html = existing_html
     for i, chunk in enumerate(chunks):
         current_html = await _generate_or_revise_chunk(current_html, chunk, i, len(chunks), entry_label)
     return current_html
+
+
+async def _merge_draft(current_html: str, draft_html: str, entry_label: str) -> str:
+    """Folds one source's standalone draft into the running multi-source
+    document — the model is given both the running document and a draft
+    that already incorporates one source's material (not raw source text),
+    and asked to combine them the same way it merges a new source in
+    directly (preserve both, resolve only genuine overlaps/contradictions).
+    """
+    prompt = (
+        f"Entry: {entry_label}\n\n"
+        f"## Current document (combines sources processed so far — preserve "
+        f"everything in it not contradicted/extended by the draft below)\n"
+        f"{current_html or '[empty]'}\n\n"
+        f"## Draft incorporating one additional source, to merge in\n{draft_html}"
+    )
+    async with LLM_CONCURRENCY:
+        result = await retry_on_rate_limit(lambda: document_agent.run(prompt))
+    return result.output.content_html
 
 
 async def _check_for_clarification(

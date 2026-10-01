@@ -62,6 +62,24 @@ export function EntryDocumentEditor({
     queryFn: () => api.getDocumentForEntry(entryType, entryId),
   });
 
+  // Reuses the ['sessions'] cache the sessions panel already polls — lets
+  // Generate stay disabled for the whole lifetime of an in-flight session
+  // for this entry (not just the instant POST /sessions call), so clicking
+  // again before the first session finishes can't start a second,
+  // redundant generation running concurrently against the same entry.
+  const { data: sessions } = useQuery({
+    queryKey: ['sessions'],
+    queryFn: api.listSessions,
+    refetchInterval: 2000,
+  });
+  const hasActiveSession = (sessions ?? []).some(
+    (s) =>
+      s.scope === 'ENTRY_DOCUMENT' &&
+      s.entryType === entryType &&
+      s.entryId === entryId &&
+      (s.status === 'RUNNING' || s.status === 'WAITING_FOR_INPUT' || s.status === 'DONE'),
+  );
+
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [expanded, setExpanded] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,10 +144,20 @@ export function EntryDocumentEditor({
         <button
           className="opacity-70 hover:opacity-100 underline disabled:opacity-40"
           onClick={() => generateMutation.mutate()}
-          disabled={generateMutation.isPending || sourceCount === 0}
-          title={sourceCount === 0 ? 'Tag a source to this entry first' : undefined}
+          disabled={generateMutation.isPending || hasActiveSession || sourceCount === 0}
+          title={
+            sourceCount === 0
+              ? 'Tag a source to this entry first'
+              : hasActiveSession
+                ? 'A generation session for this entry is already in progress — check the sessions panel'
+                : undefined
+          }
         >
-          {generateMutation.isPending ? 'Starting…' : doc?.contentHtml ? 'Regenerate' : 'Generate'}
+          {generateMutation.isPending || hasActiveSession
+            ? 'Generating…'
+            : doc?.contentHtml
+              ? 'Regenerate'
+              : 'Generate'}
         </button>
       </div>
       {doc?.contentHtml ? (
