@@ -144,9 +144,13 @@ export default function ResumesPage() {
 
   async function uploadStory(file: File) {
     const form = new FormData();
-    form.append('file', file);
+    // entryType/entryId must come before the file part — the server reads
+    // them off req.file().fields, which @fastify/multipart only populates
+    // from parts it has already seen by the time the file part resolves;
+    // fields appended after the file are not guaranteed to be there yet.
     form.append('entryType', storyBackground.entryType);
     form.append('entryId', storyBackground.entryId);
+    form.append('file', file);
     const res = await fetch(`${API_BASE}/resumes/stories/upload`, { method: 'POST', body: form });
     if (!res.ok) {
       alert(`Upload failed: ${res.status} ${await res.text()}`);
@@ -158,9 +162,9 @@ export default function ResumesPage() {
 
   async function uploadResume(file: File) {
     const form = new FormData();
-    form.append('file', file);
     form.append('entryType', resumeBackground.entryType);
     form.append('entryId', resumeBackground.entryId);
+    form.append('file', file);
     const res = await fetch(`${API_BASE}/resumes/resume/upload`, { method: 'POST', body: form });
     if (!res.ok) {
       alert(`Upload failed: ${res.status} ${await res.text()}`);
