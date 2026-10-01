@@ -45,10 +45,14 @@ calls can't compose cleanly against one shared base document.
 Sources themselves are drafted independently and in parallel (bounded to 2
 at once) against the ORIGINAL existing document — not against each other's
 in-progress output, which would hit the same multiple-simultaneous-edits-to-
-one-base problem chunking already avoids — then folded into the document
-ONE SOURCE AT A TIME, in the order their drafts complete, so the final merge
-is still a single coherent edit stream even though the drafting work ran
-concurrently.
+one-base problem chunking already avoids. The resulting N drafts are then
+combined via a PAIRWISE TOURNAMENT merge (see _tournament_merge): round 1
+merges disjoint pairs of drafts in parallel (again bounded to 2 at once),
+halving the document count each round, until one document remains. Still
+never merges two documents into the same shared base simultaneously (each
+merge combines two independent, complete documents), but needs only
+O(log N) sequential rounds instead of O(N) sequential one-at-a-time merges
+— meaningfully faster for entries with several sources tagged to them.
 """
 from __future__ import annotations
 
@@ -186,13 +190,12 @@ async def generate_document(
     _check_for_clarification asked earlier this session, if any — folded in
     as its own source ahead of the rest. Returns the full document HTML.
 
-    Processes one SOURCE at a time against the running document (never two
-    sources revising the same base simultaneously — see module docstring for
-    why), but bounds how many sources' write-up calls can be in flight
-    PREPARING their contribution at once via LLM_CONCURRENCY (2) — in
-    practice this means an entry with many tagged sources never fires more
-    than 2 simultaneous LLM calls for its generation, matching the same cap
-    already applied process-wide to every other call in this module.
+    Drafts each source independently (bounded to 2 concurrent drafts by
+    LLM_CONCURRENCY), then combines the drafts via a pairwise tournament
+    merge (see module docstring and _tournament_merge) — never two merges
+    racing to update the same shared document, but only O(log N) sequential
+    rounds rather than O(N) sequential merges for an entry with many
+    sources.
     """
     sources = list(raw_sources)
     if clarification and clarification.strip():
@@ -214,21 +217,42 @@ async def generate_document(
     # PARALLEL (each against the original existing_document_html, not
     # against each other's in-progress output) — bounded to 2 concurrent
     # drafts at once by LLM_CONCURRENCY, so an entry with many sources still
-    # only ever has 2 simultaneous LLM calls in flight. Drafting in parallel
-    # like this means each draft doesn't yet reflect the other sources, so a
-    # final sequential merge pass folds all N drafts into one coherent
-    # document, one at a time, in order — this merge step is the ONLY part
-    # that must stay sequential, since merging two drafts into the same
-    # base at once has the same conflicting-simultaneous-edit problem
-    # today's single-source sequential fold already avoids.
+    # only ever has 2 simultaneous LLM calls in flight.
     drafts = await asyncio.gather(
         *(_draft_from_source(existing_document_html, source, entry_label) for source in sources)
     )
 
-    current_html = existing_document_html
-    for draft in drafts:
-        current_html = await _merge_draft(current_html, draft, entry_label)
-    return current_html
+    # Combine the N independent drafts via a pairwise TOURNAMENT merge
+    # rather than N sequential one-at-a-time merges: round 1 merges drafts
+    # in disjoint pairs (bounded to 2 pairs/merges in flight at once by
+    # LLM_CONCURRENCY, same as drafting), halving the document count; round
+    # 2 merges the survivors' pairs, and so on until one document remains.
+    # This still never merges two documents into the SAME base
+    # simultaneously (each merge combines two independent, already-complete
+    # documents — never two merges racing to update one shared running
+    # document), so it keeps the same conflict-avoidance guarantee as a
+    # fully sequential chain, but with O(log N) sequential rounds instead
+    # of O(N) sequential merge calls — for a 4-source entry, 2 rounds
+    # instead of 4 sequential merges, roughly halving wall-clock time on
+    # the merge phase for source-heavy entries.
+    return await _tournament_merge(drafts, entry_label)
+
+
+async def _tournament_merge(documents: list[str], entry_label: str) -> str:
+    current_round = documents
+    while len(current_round) > 1:
+        pairs = [current_round[i : i + 2] for i in range(0, len(current_round), 2)]
+        current_round = await asyncio.gather(
+            *(
+                _merge_documents(pair[0], pair[1], entry_label) if len(pair) == 2 else _identity(pair[0])
+                for pair in pairs
+            )
+        )
+    return current_round[0]
+
+
+async def _identity(value: str) -> str:
+    return value
 
 
 async def _draft_from_source(existing_html: str, source_text: str, entry_label: str) -> str:
@@ -237,7 +261,7 @@ async def _draft_from_source(existing_html: str, source_text: str, entry_label: 
     long, same shape as before (now scoped per-source rather than
     per-combined-blob). When there's only one source overall, this IS the
     final document; with multiple sources, each one's draft is merged
-    afterward (see _merge_draft) rather than compared against siblings.
+    afterward (see _tournament_merge) rather than compared against siblings.
     """
     if len(source_text) <= _CHUNK_SIZE_CHARS:
         return await _generate_or_revise_chunk(existing_html, source_text, 0, 1, entry_label)
@@ -249,19 +273,25 @@ async def _draft_from_source(existing_html: str, source_text: str, entry_label: 
     return current_html
 
 
-async def _merge_draft(current_html: str, draft_html: str, entry_label: str) -> str:
-    """Folds one source's standalone draft into the running multi-source
-    document — the model is given both the running document and a draft
-    that already incorporates one source's material (not raw source text),
-    and asked to combine them the same way it merges a new source in
-    directly (preserve both, resolve only genuine overlaps/contradictions).
+async def _merge_documents(document_a: str, document_b: str, entry_label: str) -> str:
+    """Combines two independent, already-complete documents (each already
+    incorporating one or more sources) into one — symmetric, not "current +
+    new draft": used both for merging two single-source drafts and for
+    merging two already-merged multi-source documents in a later tournament
+    round, so the same function composes at every level of the merge tree.
     """
     prompt = (
         f"Entry: {entry_label}\n\n"
-        f"## Current document (combines sources processed so far — preserve "
-        f"everything in it not contradicted/extended by the draft below)\n"
-        f"{current_html or '[empty]'}\n\n"
-        f"## Draft incorporating one additional source, to merge in\n{draft_html}"
+        f"## Document A (preserve everything in it not contradicted/"
+        f"extended by Document B)\n{document_a or '[empty]'}\n\n"
+        f"## Document B (preserve everything in it not contradicted/"
+        f"extended by Document A)\n{document_b or '[empty]'}\n\n"
+        f"Combine these into ONE document covering everything both contain. "
+        f"They describe the same entry from different sources, so treat "
+        f"overlapping material as confirming the same facts (merge into one "
+        f"statement, don't duplicate) and only resolve a genuine "
+        f"contradiction between them — never drop unique material from "
+        f"either side."
     )
     async with LLM_CONCURRENCY:
         result = await retry_on_rate_limit(lambda: document_agent.run(prompt))
