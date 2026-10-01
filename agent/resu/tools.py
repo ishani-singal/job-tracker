@@ -6,6 +6,8 @@ shared data-access helpers rather than touching the DB directly).
 """
 from __future__ import annotations
 
+from typing import Literal
+
 import httpx
 from pydantic_ai import RunContext
 
@@ -36,6 +38,30 @@ _ENTRY_TYPE_TO_PRISMA = {
     "PAPER": "PAPER",
 }
 
+# A Literal param (rather than a plain str) makes PydanticAI emit a JSON
+# schema `enum` for this argument, so the model is structurally restricted
+# to these exact values and can't send something like "work" (a plausible
+# guess that isn't in _ENTRY_TYPE_TO_PRISMA above and would otherwise reach
+# the API as an invalid entryType, 400, and crash the whole turn as an
+# unhandled exception). Belt-and-suspenders with the dict above, which still
+# runs for defense in depth and because the strict schema can't retroactively
+# fix any call already in flight when this was added.
+EntryTypeArg = Literal[
+    "workExperience",
+    "education",
+    "internship",
+    "internships",
+    "project",
+    "projects",
+    "paper",
+    "papers",
+    "WORK_EXPERIENCE",
+    "EDUCATION",
+    "INTERNSHIP",
+    "PROJECT",
+    "PAPER",
+]
+
 
 async def fetch_job_description(ctx: RunContext[ResuDeps], application_id: str) -> str:
     """Fetch the job description text for a given application.
@@ -64,7 +90,7 @@ async def fetch_candidate_profile(ctx: RunContext[ResuDeps]) -> dict:
 
 
 async def fetch_narratives_for_entry(
-    ctx: RunContext[ResuDeps], entry_type: str, entry_id: str, entry_label: str
+    ctx: RunContext[ResuDeps], entry_type: EntryTypeArg, entry_id: str, entry_label: str
 ) -> list[str]:
     """Fetch the live-extracted narrative(s) for one specific entry — every
     Stories/Resume file and connected GitHub repo the user pinned to this
@@ -75,8 +101,18 @@ async def fetch_narratives_for_entry(
     if the subject matter looks similar. Returns a list (one string per
     source tagged to this entry, not combined) — an empty list means no
     source has been tagged to this entry yet.
+
+    entry_type must be exactly one of the group keys fetch_structured_entries
+    returns (workExperience, education, internships, projects, papers) or the
+    equivalent SCREAMING_SNAKE_CASE form — not an abbreviation like "work".
     """
-    prisma_entry_type = _ENTRY_TYPE_TO_PRISMA.get(entry_type, entry_type)
+    prisma_entry_type = _ENTRY_TYPE_TO_PRISMA.get(entry_type)
+    if prisma_entry_type is None:
+        # Defense in depth for a value the Literal schema should already
+        # have blocked (e.g. an older cached tool schema) — fail soft rather
+        # than letting an invalid entryType reach the API as a 400 that
+        # crashes the whole turn over one unresolved entry.
+        return []
     # Bounded by the same process-wide semaphore as the eager prefetch in
     # agent.py's _fetch_all_narratives — this tool can also be called
     # directly by the model mid-conversation, and on a cache miss triggers
