@@ -215,4 +215,81 @@ export class GithubService {
 
     return results.filter((r): r is { repo: string; readme: string } => r !== null);
   }
+
+  /**
+   * Fetches a richer per-repo profile (description/topics/languages/root file
+   * listing + README) for every connected repo — fed into the story-extraction
+   * pipeline so each repo can be characterized as one candidate ProjectEntry
+   * story, not just a README dump. A shallow (non-recursive) root listing is
+   * enough to infer "this is a Next.js app" / "this is a CLI tool" without a
+   * deep recursive crawl.
+   */
+  async fetchConnectedRepoDetails(): Promise<GithubRepoDetails[]> {
+    const token = await this.requireToken();
+    const connected = await this.listConnectedRepos();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+    };
+
+    const results = await Promise.all(
+      connected.map(async ({ fullName }): Promise<GithubRepoDetails | null> => {
+        try {
+          const [repoRes, languagesRes, contentsRes, readmeRes] = await Promise.all([
+            fetch(`${GITHUB_API_BASE}/repos/${fullName}`, { headers }),
+            fetch(`${GITHUB_API_BASE}/repos/${fullName}/languages`, { headers }),
+            fetch(`${GITHUB_API_BASE}/repos/${fullName}/contents`, { headers }),
+            fetch(`${GITHUB_API_BASE}/repos/${fullName}/readme`, {
+              headers: { ...headers, Accept: 'application/vnd.github.raw+json' },
+            }),
+          ]);
+
+          if (!repoRes.ok) {
+            this.logger.warn(`Repo details fetch failed for ${fullName}: ${repoRes.status}`);
+            return null;
+          }
+          const repo = (await repoRes.json()) as {
+            description: string | null;
+            topics?: string[];
+            html_url: string;
+          };
+
+          const languages = languagesRes.ok
+            ? Object.keys((await languagesRes.json()) as Record<string, number>)
+            : [];
+
+          const rootFiles = contentsRes.ok
+            ? ((await contentsRes.json()) as { name: string }[]).map((f) => f.name)
+            : [];
+
+          const readme = readmeRes.ok ? await readmeRes.text() : '';
+
+          return {
+            repo: fullName,
+            url: repo.html_url,
+            description: repo.description,
+            topics: repo.topics ?? [],
+            languages,
+            rootFiles,
+            readme,
+          };
+        } catch (err) {
+          this.logger.warn(`Repo details fetch error for ${fullName}: ${err}`);
+          return null;
+        }
+      }),
+    );
+
+    return results.filter((r): r is GithubRepoDetails => r !== null);
+  }
+}
+
+export interface GithubRepoDetails {
+  repo: string;
+  url: string;
+  description: string | null;
+  topics: string[];
+  languages: string[];
+  rootFiles: string[];
+  readme: string;
 }

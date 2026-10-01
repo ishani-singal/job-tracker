@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import type { ResumeProfile } from '@job-tracker/shared-types';
 import { GithubConnectSection } from '@/components/github-connect-section';
 import { EntriesSection } from '@/components/entries-section';
+import { StoryReviewSection } from '@/components/story-review-section';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 
@@ -101,6 +102,8 @@ export default function ResumesPage() {
       <GithubConnectSection />
 
       {profile && <ProfileForm profile={profile} />}
+
+      <StoryReviewSection />
 
       <EntriesSection />
 

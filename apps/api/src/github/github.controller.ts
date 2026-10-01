@@ -71,4 +71,9 @@ export class GithubController {
   fetchReadmes() {
     return this.github.fetchConnectedReadmes();
   }
+
+  @Get('github/repo-details')
+  fetchRepoDetails() {
+    return this.github.fetchConnectedRepoDetails();
+  }
 }

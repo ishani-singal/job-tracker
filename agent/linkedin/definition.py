@@ -12,7 +12,6 @@ from __future__ import annotations
 from .tools import (
     fetch_candidate_profile,
     fetch_candidate_resume,
-    fetch_candidate_stories,
     fetch_connected_repo_readmes,
     fetch_linkedin_source_material,
     fetch_structured_entries,
@@ -44,22 +43,21 @@ INSTRUCTIONS = (
     "only JDs, or applied+callback-reinforced) and gives you the exact "
     "pre-selected material for that stage. Do not try to re-derive the stage "
     "yourself from raw application data.\n\n"
-    "Then call fetch_candidate_profile, fetch_structured_entries, "
-    "fetch_candidate_stories, fetch_candidate_resume, and "
-    "fetch_connected_repo_readmes for source material — Stories is the primary "
-    "source of truth for content, the uploaded Resume is a structure reference "
-    "only, GitHub READMEs are supplementary project material.\n\n"
-    "Stories is one undifferentiated block of text covering the candidate's "
-    "whole history — before using any fact, achievement, or anecdote from it "
-    "in an entry's bullets, confirm which specific entry it actually "
-    "belongs to (match on company/school name, role/degree title, and the "
-    "entry's own date range) and attribute it there ONLY. Two entries can "
-    "cover the same broad field (e.g. two civil-engineering roles, or a "
-    "degree and a job in the same domain) without describing the same "
-    "events — never move a fact to a different entry just because the "
-    "subject matter or timeframe is adjacent or overlapping. If a story "
-    "doesn't clearly name or imply which entry it's from, leave it out of "
-    "that entry's bullets rather than guessing.\n\n"
+    "Then call fetch_candidate_profile and fetch_structured_entries for "
+    "source material. Each entry fetch_structured_entries returns carries "
+    "its own `story` field — a confirmed, per-entry narrative already "
+    "reviewed and approved by the user, so it is already correctly scoped to "
+    "that one entry and safe to use directly for that entry's bullets. "
+    "Never use one entry's `story` for a different entry's bullets, even if "
+    "the subject matter or timeframe looks adjacent or overlapping (e.g. two "
+    "civil-engineering roles, or a degree and a job in the same domain) — "
+    "each is a distinct entry with its own narrative. For an entry whose "
+    "`story` is null, no confirmed narrative exists yet: write bullets using "
+    "only facts clearly attributable to that entry's own company/title/dates "
+    "from fetch_candidate_resume (a formatting reference, used sparingly as "
+    "content here) or fetch_connected_repo_readmes (for an unconfirmed "
+    "project entry only) — never invent facts, and never borrow content from "
+    "a different entry's `story` just because this one is empty.\n\n"
     "Write bullets for EVERY entry returned by fetch_structured_entries — "
     "the required flag only matters for the separate per-job resume agent, "
     "not this whole-profile draft, which should cover the candidate's full "
@@ -79,8 +77,9 @@ INSTRUCTIONS = (
     "one-month consulting sprint. Roughly, 1 bullet for roles under ~3 "
     "months, 2-3 for roles in the ~3 month-2 year range, and 4+ for roles "
     "beyond 2 years — use the entry's start/end dates to judge duration, "
-    "and let the depth of real source material (Stories, resume, JDs) pull "
-    "that number up or down rather than treating it as a hard rule. This "
+    "and let the depth of real source material (that entry's story, resume, "
+    "JDs) pull that number up or down rather than treating it as a hard "
+    "rule. This "
     "duration scaling does not apply to project entries — see the fixed "
     "3-bullet project rule below.\n\n"
     "For every project entry, always write exactly 3 bullets, in this "
@@ -108,7 +107,6 @@ TOOLS = [
     fetch_linkedin_source_material,
     fetch_candidate_profile,
     fetch_structured_entries,
-    fetch_candidate_stories,
     fetch_candidate_resume,
     fetch_connected_repo_readmes,
 ]

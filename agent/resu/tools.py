@@ -38,6 +38,22 @@ async def fetch_candidate_profile(ctx: RunContext[ResuDeps]) -> dict:
         return resp.json()
 
 
+async def fetch_structured_stories(ctx: RunContext[ResuDeps]) -> list[dict]:
+    """Fetch every confirmed, per-entry Story — the authoritative narrative
+    content for each Work Experience/Education/Internship/Project/Paper
+    entry, already attributed to exactly one entry by the story-review
+    pipeline (uploaded Stories/Resume files + connected GitHub repos, parsed
+    and confirmed by the user on the Resumes page). Each item is
+    {entryType, entryId, storyText}. This is the primary content source for
+    entries that have one — see fetch_structured_entries' returned entries,
+    each of which carries its own Story inline once you call this.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{ctx.deps.api_base_url}/stories/confirmed")
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def fetch_structured_entries(ctx: RunContext[ResuDeps]) -> dict:
     """Fetch the candidate's curated background: work experience, education,
     internships, and projects, each entry flagged `required` (True) or not.
@@ -52,20 +68,6 @@ async def fetch_structured_entries(ctx: RunContext[ResuDeps]) -> dict:
         resp = await client.get(f"{ctx.deps.api_base_url}/entries")
         resp.raise_for_status()
         return resp.json()
-
-
-async def fetch_candidate_stories(ctx: RunContext[ResuDeps]) -> str:
-    """Fetch the full extracted text of every uploaded Stories file (detailed
-    work-experience narratives) — the primary source of truth for resume
-    content. Returns the actual document text (docx/pdf/plain text all
-    supported), concatenated with a "--- filename ---" header per file, not
-    just filenames — read it directly, do not ask the user to paste it again.
-    Empty string means no Stories files have been uploaded yet.
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(f"{ctx.deps.api_base_url}/resumes/stories/text")
-        resp.raise_for_status()
-        return resp.json().get("text", "")
 
 
 async def fetch_candidate_resume(ctx: RunContext[ResuDeps]) -> str:
@@ -109,12 +111,14 @@ async def fetch_company_job_descriptions(ctx: RunContext[ResuDeps], company: str
 
 async def fetch_connected_repo_readmes(ctx: RunContext[ResuDeps]) -> list[dict]:
     """Fetch READMEs from the candidate's connected GitHub repos (configured in
-    Settings). Each entry is {repo, readme}. Treat this as supplementary Stories
-    material — real project descriptions, tech stack, and scope straight from
-    the source — useful for filling in project/internship bullets when the
-    uploaded Stories file doesn't cover a specific project in enough depth.
-    Returns an empty list if no GitHub account is connected or no repos are
-    selected — that's not an error, just means there's nothing extra here.
+    Settings). Each entry is {repo, readme}. Project entries already carry
+    their own confirmed Story (via fetch_structured_stories) derived from
+    this same README content plus repo metadata — call this only as a
+    last-resort supplement for a project entry whose Story is marked "none
+    confirmed yet", to pull in raw detail that hasn't been reviewed/confirmed
+    into a Story. Returns an empty list if no GitHub account is connected or
+    no repos are selected — that's not an error, just means there's nothing
+    extra here.
     """
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(f"{ctx.deps.api_base_url}/github/repos/connected")

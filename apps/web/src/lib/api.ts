@@ -3,6 +3,7 @@ import type {
   AnalyticsTimeseriesPoint,
   Application,
   AppSettings,
+  CandidateStory,
   CompanyResume,
   DiscoveredRole,
   EducationEntry,
@@ -17,6 +18,10 @@ import type {
   ProjectEntry,
   ResumeProfile,
   ResumeTemplate,
+  StoryCandidate,
+  StoryEntryType,
+  StoryParseRun,
+  StoryStatus,
   TrackedCompany,
   WorkExperienceEntry,
 } from '@job-tracker/shared-types';
@@ -161,6 +166,33 @@ export const api = {
     }),
   deleteProject: (id: string) =>
     request<void>(`/entries/projects/${id}`, { method: 'DELETE' }),
+
+  triggerStoryRerun: () => request<StoryParseRun>('/stories/rerun', { method: 'POST' }),
+  listStoryParseRuns: () => request<StoryParseRun[]>('/stories/runs'),
+  listStoryCandidates: (status?: StoryStatus) =>
+    request<StoryCandidate[]>(`/stories/candidates${status ? `?status=${status}` : ''}`),
+  confirmStoryCandidate: (id: string, editedText?: string) =>
+    request<CandidateStory>(`/stories/candidates/${id}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ editedText }),
+    }),
+  rejectStoryCandidate: (id: string) =>
+    request<StoryCandidate>(`/stories/candidates/${id}/reject`, { method: 'POST' }),
+  reassignStoryCandidate: (id: string, entryType: StoryEntryType, entryId: string) =>
+    request<StoryCandidate>(`/stories/candidates/${id}/reassign`, {
+      method: 'POST',
+      body: JSON.stringify({ entryType, entryId }),
+    }),
+  createEntryFromStoryCandidate: (
+    id: string,
+    entryType: StoryEntryType,
+    entry: Record<string, unknown>,
+  ) =>
+    request<CandidateStory>(`/stories/candidates/${id}/create-entry`, {
+      method: 'POST',
+      body: JSON.stringify({ entryType, entry }),
+    }),
+  listConfirmedStories: () => request<CandidateStory[]>('/stories/confirmed'),
 
   listSessions: () => request<GenerationSession[]>('/sessions'),
   getSession: (id: string) => request<GenerationSession>(`/sessions/${id}`),

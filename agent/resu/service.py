@@ -121,8 +121,12 @@ async def prompt_preview() -> PromptPreviewResponse:
         entries_resp.raise_for_status()
         entries = entries_resp.json()
 
+        stories_resp = await client.get(f"{API_BASE_URL}/stories/confirmed")
+        stories_resp.raise_for_status()
+        stories = stories_resp.json()
+
     template_body = profile.get("templateBody", "")
-    profile_context = build_profile_context(profile, entries)
+    profile_context = build_profile_context(profile, entries, stories)
     prefix = f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}\n\n{profile_context}"
     # build_profile_context ends with "## Process template\n{templateBody}" —
     # strip the template body back off so `prefix` is everything before it.

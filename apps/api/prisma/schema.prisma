@@ -440,6 +440,146 @@ model CompanyResume {
   updatedAt     DateTime @updatedAt
 }
 
+enum StoryEntryType {
+  WORK_EXPERIENCE
+  EDUCATION
+  INTERNSHIP
+  PROJECT
+  PAPER
+}
+
+enum StorySourceType {
+  STORY_FILE
+  RESUME_FILE
+  GITHUB_REPO
+}
+
+enum StoryStatus {
+  PROPOSED
+  CONFIRMED
+  REJECTED
+  // A previously CONFIRMED story got new candidate content from a rerun — the
+  // confirmed row is untouched; a sibling candidate in this status holds the
+  // new text awaiting a fresh confirm (see StoriesService reconciliation).
+  PROPOSED_UPDATE
+}
+
+enum ParseRunStatus {
+  PENDING
+  PARSING
+  AWAITING_REVIEW
+  DONE
+  ERROR
+}
+
+// One parse attempt — triggered by a new Stories/Resume upload or a manual
+// "Re-parse". A single batch LLM call with a reviewable result set, not a
+// chat conversation, so this stays its own lightweight model rather than
+// reusing GenerationSession's message-history machinery.
+model StoryParseRun {
+  id     String         @id @default(cuid())
+  status ParseRunStatus @default(PENDING)
+  errorMessage String?
+
+  // What triggered this run — all null means a manual rerun that
+  // re-examines every currently-uploaded file and connected repo, not just
+  // one new source.
+  triggerSourceType   StorySourceType?
+  triggerStoryFileId  String?
+  triggerResumeFileId String?
+  triggerRepoFullName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  candidates StoryCandidate[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// One proposed chunk-to-entry attribution produced by a parse run. Not yet a
+// story until the user confirms it (see CandidateStory). Kept separate from
+// CandidateStory (never versioned directly into it) so a rerun's fresh
+// proposals are always reviewable side-by-side without touching already-
+// confirmed data — this is what makes "diff & re-confirm" safe.
+model StoryCandidate {
+  id         String        @id @default(cuid())
+  parseRunId String
+  parseRun   StoryParseRun @relation(fields: [parseRunId], references: [id], onDelete: Cascade)
+
+  sourceType   StorySourceType
+  storyFileId  String?
+  resumeFileId String?
+  repoFullName String?
+
+  // App-level polymorphic reference — same entryType+entryId pattern
+  // CandidateStory uses below (see its comment for why this isn't a real
+  // Prisma relation). Null entryId + non-null newEntryLabel means the model
+  // proposed a brand-new entry rather than matching an existing one; the
+  // user confirms by creating that entry (see StoriesService.createEntryFromCandidate).
+  entryType     StoryEntryType?
+  entryId       String?
+  newEntryLabel String?
+  newEntryDates Json?
+
+  // The raw text span this candidate was derived from — lets the review UI
+  // show "here's the source text" for an audit trail.
+  sourceSpanText String
+  // The model's generated narrative for this entry, pre-edit.
+  proposedStoryText String
+  // 0-1 — values below the review UI's threshold get flagged "needs your
+  // review" and are never auto-confirmed (see StoriesService).
+  confidence Float @default(0.5)
+
+  status StoryStatus @default(PROPOSED)
+  // Set once the user accepts (possibly edited) this candidate — points at
+  // the CandidateStory row it produced.
+  resultingStoryId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parseRunId])
+  @@index([entryType, entryId])
+  @@index([status])
+}
+
+// The confirmed, authoritative narrative for exactly one entry — what
+// generation actually reads (see agent/resu and agent/linkedin). entryType +
+// entryId is an app-level polymorphic reference, the same pattern already
+// used by LinkedinProfile.entryBullets' JSON shape
+// ({entryType, entryId, bullets}), promoted here to a real table because we
+// need per-row status/versioning that a JSON blob can't express cleanly.
+// Prisma has no native polymorphic relation, so referential integrity
+// (entryId actually exists in the right entry table) is enforced in
+// StoriesService, not the DB — the same tradeoff LinkedinProfile already
+// accepts.
+model CandidateStory {
+  id        String         @id @default(cuid())
+  entryType StoryEntryType
+  entryId   String
+
+  storyText String
+  // True once the user has directly hand-edited the text (vs. accepting the
+  // model's proposal verbatim) — purely informational, shown in the UI.
+  userEdited Boolean @default(false)
+
+  status            StoryStatus @default(CONFIRMED)
+  sourceCandidateId String?
+
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // DB-enforced "exactly one confirmed story per entry" — reruns must
+  // upsert, never duplicate-insert, which structurally forbids two
+  // narratives fighting over one entry.
+  @@unique([entryType, entryId])
+  @@index([entryType, entryId])
+  @@index([status])
+}
+
 // LinkedIn does not offer an API for a user's own connections/messages to
 // third-party apps (deliberately restricted since ~2018) — this is manually
 // imported from LinkedIn's own data-export ZIP (Settings > Get a copy of

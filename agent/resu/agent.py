@@ -128,7 +128,11 @@ async def _inject_profile(ctx: RunContext[ResuDeps]) -> str:
         entries_resp.raise_for_status()
         entries = entries_resp.json()
 
-    return build_profile_context(profile, entries)
+        stories_resp = await client.get(f"{ctx.deps.api_base_url}/stories/confirmed")
+        stories_resp.raise_for_status()
+        stories = stories_resp.json()
+
+    return build_profile_context(profile, entries, stories)
 
 
 async def run_turn(

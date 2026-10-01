@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type {
+  CandidateStory,
   EducationEntry,
   InternshipEntry,
   ProjectEntry,
@@ -17,6 +18,17 @@ import {
   formatEntryDateRange,
 } from './date-range-fields';
 
+/** entryId -> confirmed story, for the given entryType — consumed by each
+ * List component so its EntryRows can show a "Story:" block inline. */
+type StoryMap = Map<string, CandidateStory>;
+
+function useStoryMap(): StoryMap {
+  const { data } = useQuery({ queryKey: ['confirmed-stories'], queryFn: api.listConfirmedStories });
+  const map: StoryMap = new Map();
+  for (const s of data ?? []) map.set(s.entryId, s);
+  return map;
+}
+
 export function EntriesSection() {
   return (
     <section className="flex flex-col gap-6">
@@ -26,7 +38,9 @@ export function EntriesSection() {
           Curate your work experience, education, internships, and projects once. Mark an
           entry &quot;Required&quot; to have it always included in generated resumes;
           unchecked entries are included only when they&apos;re relevant to the specific job
-          being tailored for.
+          being tailored for. Each entry&apos;s confirmed Story (from the Stories review
+          panel above) shows inline below it — that text, and only that text, is what the
+          resume agent uses for this entry.
         </p>
       </div>
       <WorkExperienceList />
@@ -72,6 +86,7 @@ function workExperienceToForm(e: WorkExperienceEntry): WorkExperienceForm {
 function WorkExperienceList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['work-experience'], queryFn: api.listWorkExperience });
+  const storyMap = useStoryMap();
   const [form, setForm] = useState<WorkExperienceForm>(EMPTY_WORK_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -134,6 +149,7 @@ function WorkExperienceList() {
             setForm(workExperienceToForm(entry));
           }}
           onDelete={() => remove(entry.id)}
+          story={storyMap.get(entry.id)}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
@@ -215,6 +231,7 @@ function educationToForm(e: EducationEntry): EducationForm {
 function EducationList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['education'], queryFn: api.listEducation });
+  const storyMap = useStoryMap();
   const [form, setForm] = useState<EducationForm>(EMPTY_EDUCATION_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -271,6 +288,7 @@ function EducationList() {
             setForm(educationToForm(entry));
           }}
           onDelete={() => remove(entry.id)}
+          story={storyMap.get(entry.id)}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
@@ -353,6 +371,7 @@ function internshipToForm(e: InternshipEntry): InternshipForm {
 function InternshipList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['internships'], queryFn: api.listInternships });
+  const storyMap = useStoryMap();
   const [form, setForm] = useState<InternshipForm>(EMPTY_INTERNSHIP_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -418,6 +437,7 @@ function InternshipList() {
             setForm(internshipToForm(entry));
           }}
           onDelete={() => remove(entry.id)}
+          story={storyMap.get(entry.id)}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
@@ -507,6 +527,7 @@ function projectToForm(e: ProjectEntry): ProjectForm {
 function ProjectList() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
+  const storyMap = useStoryMap();
   const { data: connectedRepos } = useQuery({
     queryKey: ['github-connected-repos'],
     queryFn: api.listConnectedRepos,
@@ -571,6 +592,7 @@ function ProjectList() {
             setForm(projectToForm(entry));
           }}
           onDelete={() => remove(entry.id)}
+          story={storyMap.get(entry.id)}
         />
       ))}
       <div className="grid grid-cols-4 gap-2">
@@ -668,6 +690,7 @@ function EntryRow({
   onToggleRequired,
   onEdit,
   onDelete,
+  story,
 }: {
   label: string;
   sublabel: string;
@@ -675,25 +698,39 @@ function EntryRow({
   onToggleRequired: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  story?: CandidateStory;
 }) {
   return (
-    <div className="flex items-center justify-between border rounded px-3 py-2 text-sm">
-      <div className="flex flex-col">
-        <span>{label}</span>
-        {sublabel && <span className="text-xs opacity-60">{sublabel}</span>}
+    <div className="flex flex-col border rounded px-3 py-2 text-sm gap-1">
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col">
+          <span>{label}</span>
+          {sublabel && <span className="text-xs opacity-60">{sublabel}</span>}
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1 text-xs cursor-pointer">
+            <input type="checkbox" checked={required} onChange={onToggleRequired} />
+            Required
+          </label>
+          <button className="text-xs opacity-70 hover:opacity-100" onClick={onEdit}>
+            Edit
+          </button>
+          <button className="text-xs text-red-600 dark:text-red-400" onClick={onDelete}>
+            Delete
+          </button>
+        </div>
       </div>
-      <div className="flex items-center gap-3">
-        <label className="flex items-center gap-1 text-xs cursor-pointer">
-          <input type="checkbox" checked={required} onChange={onToggleRequired} />
-          Required
-        </label>
-        <button className="text-xs opacity-70 hover:opacity-100" onClick={onEdit}>
-          Edit
-        </button>
-        <button className="text-xs text-red-600 dark:text-red-400" onClick={onDelete}>
-          Delete
-        </button>
-      </div>
+      {story ? (
+        <p className="text-xs opacity-70 border-t pt-1">
+          <span className="font-medium opacity-90">Story: </span>
+          {story.storyText}
+        </p>
+      ) : (
+        <p className="text-xs opacity-50 italic border-t pt-1">
+          No confirmed story yet — upload a Stories/Resume file or connect a GitHub repo and
+          confirm a proposed story above to give this entry content for generation.
+        </p>
+      )}
     </div>
   );
 }

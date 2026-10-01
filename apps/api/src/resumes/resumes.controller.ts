@@ -1,19 +1,27 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, forwardRef, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { ProfileFieldsInput, ResumeTemplateInput, ResumesService } from './resumes.service';
+import { StoriesService } from '../stories/stories.service';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
 @Controller('resumes')
 export class ResumesController {
-  constructor(private readonly resumes: ResumesService) {}
+  constructor(
+    private readonly resumes: ResumesService,
+    @Inject(forwardRef(() => StoriesService))
+    private readonly stories: StoriesService,
+  ) {}
 
   @Post('stories/upload')
   async uploadStory(@Req() req: FastifyRequest) {
     const file = await req.file();
     if (!file) return { error: 'no file provided' };
     const buffer = await file.toBuffer();
-    return this.resumes.saveStoryFile(file.filename, file.mimetype, buffer);
+    const saved = await this.resumes.saveStoryFile(file.filename, file.mimetype, buffer);
+    // Auto-rerun parsing on every new upload — see StoriesService.
+    this.stories.createParseRunForUpload({ sourceType: 'STORY_FILE', storyFileId: saved.id });
+    return saved;
   }
 
   @Post('resume/upload')
@@ -21,7 +29,9 @@ export class ResumesController {
     const file = await req.file();
     if (!file) return { error: 'no file provided' };
     const buffer = await file.toBuffer();
-    return this.resumes.saveResumeFile(file.filename, file.mimetype, buffer);
+    const saved = await this.resumes.saveResumeFile(file.filename, file.mimetype, buffer);
+    this.stories.createParseRunForUpload({ sourceType: 'RESUME_FILE', resumeFileId: saved.id });
+    return saved;
   }
 
   @Get('stories')
