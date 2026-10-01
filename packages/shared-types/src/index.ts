@@ -269,7 +269,6 @@ export interface GenerationSession {
 }
 
 export type StoryEntryType = 'WORK_EXPERIENCE' | 'EDUCATION' | 'INTERNSHIP' | 'PROJECT' | 'PAPER';
-export type StorySourceType = 'STORY_FILE' | 'RESUME_FILE' | 'GITHUB_REPO';
 
 export interface LinkedinEntryBullets {
   entry_type: string;

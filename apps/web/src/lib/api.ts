@@ -115,10 +115,20 @@ export const api = {
       method: 'DELETE',
     }),
 
-  getNarrativesForEntry: (entryType: StoryEntryType, entryId: string, entryLabel: string) =>
-    request<string[]>(
-      `/stories/narratives?entryType=${entryType}&entryId=${encodeURIComponent(entryId)}&entryLabel=${encodeURIComponent(entryLabel)}`,
+  getDocumentForEntry: (entryType: StoryEntryType, entryId: string) =>
+    request<{ contentHtml: string } | null>(
+      `/stories/document?entryType=${entryType}&entryId=${encodeURIComponent(entryId)}`,
     ),
+  generateDocumentForEntry: (entryType: StoryEntryType, entryId: string, entryLabel: string) =>
+    request<{ contentHtml: string }>('/stories/document/generate', {
+      method: 'POST',
+      body: JSON.stringify({ entryType, entryId, entryLabel }),
+    }),
+  saveDocumentForEntry: (entryType: StoryEntryType, entryId: string, contentHtml: string) =>
+    request<{ contentHtml: string }>('/stories/document', {
+      method: 'PUT',
+      body: JSON.stringify({ entryType, entryId, contentHtml }),
+    }),
 
   listWorkExperience: () => request<WorkExperienceEntry[]>('/entries/work-experience'),
   createWorkExperience: (data: Partial<WorkExperienceEntry>) =>

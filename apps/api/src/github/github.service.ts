@@ -293,9 +293,9 @@ export class GithubService {
   }
 
   /** Same shape as fetchConnectedRepoDetails but for exactly one repo — used
-   * by the live-extraction path (StoriesService.getNarrativesForEntry),
-   * which only ever needs one entry's own connected repos, not every
-   * connected repo in the account. */
+   * by document generation (StoriesService.generateDocumentForEntry), which
+   * only ever needs one entry's own connected repos, not every connected
+   * repo in the account. */
   async fetchRepoDetail(fullName: string): Promise<GithubRepoDetails | null> {
     const token = await this.requireToken();
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' };

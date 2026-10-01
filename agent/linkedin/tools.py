@@ -7,10 +7,27 @@ neither does this.
 """
 from __future__ import annotations
 
+import re
+
 import httpx
 from pydantic_ai import RunContext
 
 from .deps import LinkedinDeps
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _html_to_text(html: str) -> str:
+    """Strips the small, fixed tag vocabulary the document-generation agent
+    emits down to plain text — this prompt writes LinkedIn bullets, not an
+    edited document, so HTML markup adds token cost and no signal here. A
+    regex strip is enough given the constrained, LLM-controlled tag set, not
+    a full HTML parser (duplicated from agent/resu/html_text.py per this
+    file's own copy-paste-not-import convention, see module docstring).
+    """
+    text = _HTML_TAG_RE.sub("\n", html)
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
 
 
 async def fetch_candidate_profile(ctx: RunContext[LinkedinDeps]) -> dict:
@@ -38,16 +55,16 @@ async def fetch_structured_entries(ctx: RunContext[LinkedinDeps]) -> dict:
     internships, and projects, each with an `id` you MUST reuse as `entry_id`
     in your output so the saved bullets map back to the correct LinkedIn
     section, and each carrying its own `story` field — that entry's
-    live-extracted, per-entry narrative (pulled directly from whichever
-    Stories/Resume file or GitHub repo the user tagged to that entry, so it
-    is already correctly scoped to that one entry only). `story` is null for
-    an entry with no source tagged to it yet; write bullets for that entry
-    using only facts clearly attributable to its own company/title/dates
-    (e.g. from fetch_candidate_resume), never content from a different
-    entry's story. Write bullets for EVERY entry returned here, regardless
-    of its `required` flag — that flag only matters for the separate
-    per-job resume agent, not this whole-profile LinkedIn draft, which
-    covers the full background. Before finishing, verify your output's
+    detailed document (a document the user generated and can hand-edit,
+    covering whichever Stories/Resume file or GitHub repo they tagged to
+    that entry, so it is already correctly scoped to that one entry only).
+    `story` is null for an entry with no document generated yet; write
+    bullets for that entry using only facts clearly attributable to its own
+    company/title/dates (e.g. from fetch_candidate_resume), never content
+    from a different entry's story. Write bullets for EVERY entry returned
+    here, regardless of its `required` flag — that flag only matters for the
+    separate per-job resume agent, not this whole-profile LinkedIn draft,
+    which covers the full background. Before finishing, verify your output's
     entry_bullets list has one item per id returned by this call, across
     all four categories — a missing id means an incomplete profile, not an
     intentional omission. Treat internships as part of work experience:
@@ -61,20 +78,21 @@ async def fetch_structured_entries(ctx: RunContext[LinkedinDeps]) -> dict:
         resp.raise_for_status()
         entries = resp.json()
 
-        async def fetch_narrative(prisma_type: str, entry: dict, label: str) -> str | None:
-            narrative_resp = await client.get(
-                f"{ctx.deps.api_base_url}/stories/narratives",
-                params={"entryType": prisma_type, "entryId": entry["id"], "entryLabel": label},
-                timeout=180.0,
+        async def fetch_document(prisma_type: str, entry: dict) -> str | None:
+            # Plain cache read, no LLM call behind it — document generation
+            # only happens when the user explicitly clicks Generate.
+            doc_resp = await client.get(
+                f"{ctx.deps.api_base_url}/stories/document",
+                params={"entryType": prisma_type, "entryId": entry["id"]},
+                timeout=30.0,
             )
-            narrative_resp.raise_for_status()
-            narratives = narrative_resp.json()
-            return "\n\n".join(narratives) if narratives else None
+            doc_resp.raise_for_status()
+            doc = doc_resp.json()
+            return _html_to_text(doc["contentHtml"]) if doc else None
 
         for key, prisma_type in _ENTRY_TYPE_MAP.items():
             for entry in entries.get(key, []):
-                label = entry.get("company") or entry.get("school") or entry.get("name") or entry["id"]
-                entry["story"] = await fetch_narrative(prisma_type, entry, label)
+                entry["story"] = await fetch_document(prisma_type, entry)
 
     return entries
 

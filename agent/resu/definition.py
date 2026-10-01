@@ -16,8 +16,8 @@ from .tools import (
     fetch_candidate_profile,
     fetch_candidate_resume,
     fetch_company_job_descriptions,
+    fetch_document_for_entry,
     fetch_job_description,
-    fetch_narratives_for_entry,
     fetch_structured_entries,
 )
 
@@ -29,10 +29,10 @@ SOUL = (
 
 IDENTITY = (
     "You are the user's resume tailoring specialist. Given a job description and "
-    "the candidate's structured background entries — each carrying its own live-"
-    "extracted Story (a per-entry narrative pulled directly from whichever "
-    "Stories/Resume file or GitHub repo the user tagged to that entry, so it's "
-    "already correctly scoped to that one entry) — and existing Resume "
+    "the candidate's structured background entries — each carrying its own Story "
+    "(a detailed document the user generated and can hand-edit, covering "
+    "whichever Stories/Resume file or GitHub repo they tagged to that entry, so "
+    "it's already correctly scoped to that one entry) — and existing Resume "
     "(formatting reference only), you produce one fully tailored, ATS-optimized "
     "resume for that specific role."
 )
@@ -54,12 +54,12 @@ INSTRUCTIONS = (
     "carries its own Story directly inline — treat that Story as the primary, "
     "authoritative source for that entry specifically, and never pull content "
     "from one entry's Story into a different entry's bullets. An entry marked "
-    "'Story: [none yet]' has no Stories/Resume file or GitHub repo tagged to it "
-    "yet — for that entry only, you may fall back to fetch_candidate_resume "
-    "(formatting reference, used sparingly as content here), or call "
-    "fetch_narratives_for_entry yourself if you suspect a source was tagged "
-    "after this prompt was built, but never invent facts not grounded in that "
-    "entry's own Story or fallback material."
+    "'Story: [none yet]' has no detailed document generated for it yet — for "
+    "that entry only, you may fall back to fetch_candidate_resume (formatting "
+    "reference, used sparingly as content here), or call fetch_document_for_entry "
+    "yourself if you suspect a document was generated after this prompt was "
+    "built, but never invent facts not grounded in that entry's own Story or "
+    "fallback material."
 )
 
 
@@ -72,8 +72,8 @@ def build_profile_context(
     system_prompt hook) so edits in Settings apply immediately with no
     restart.
 
-    `stories` is built by agent.py's _fetch_all_narratives, one GET
-    /stories/narratives call per entry — each item {entryType, entryId,
+    `stories` is built by agent.py's _fetch_all_documents, one GET
+    /stories/document call per entry — each item {entryType, entryId,
     storyText}. Keying each entry's rendered line by its own (entryType,
     entryId) is the actual structural fix for the "model mixes content
     between entries" problem: each entry's block in the prompt carries only
@@ -236,7 +236,7 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
 TOOLS = [
     fetch_candidate_profile,
     fetch_structured_entries,
-    fetch_narratives_for_entry,
+    fetch_document_for_entry,
     fetch_job_description,
     fetch_company_job_descriptions,
     fetch_candidate_resume,

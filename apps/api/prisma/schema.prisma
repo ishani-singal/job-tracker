@@ -476,37 +476,23 @@ enum StoryEntryType {
   PAPER
 }
 
-enum StorySourceType {
-  STORY_FILE
-  RESUME_FILE
-  GITHUB_REPO
-}
-
-// Cached result of live-extracting one source's (one StoryFile, ResumeFile,
-// or ConnectedRepo's) raw text into a comprehensive narrative for the one
-// entry that source is pinned to. Populated lazily the first time a resume
-// generation needs it; invalidated (deleted) whenever its source file is
-// replaced/removed or the source repo's content changes meaningfully, so a
-// later generation re-extracts fresh rather than reusing stale text. Kept
-// one row per source (never combined across a given entry's multiple
-// sources) — generation concatenates every entry's cached narratives itself
-// at the point they're inlined into the prompt.
-model ExtractedNarrative {
-  id           String          @id @default(cuid())
-  sourceType   StorySourceType
-  storyFileId  String?         @unique
-  resumeFileId String?         @unique
-  repoFullName String?         @unique
-
+// One generated-and-editable detailed document per entry — the sole content
+// source fed into resume/LinkedIn/company-resume generation. Replaces
+// ExtractedNarrative (per-source, invisible, cache-only) with one
+// user-visible, user-editable artifact per entry. Content is Tiptap's
+// native HTML output, sanitized on write — stored and round-tripped as-is,
+// fed to/from the LLM as plain HTML, no separate structured representation.
+model EntryDocument {
+  id        String         @id @default(cuid())
   entryType StoryEntryType
   entryId   String
 
-  narrativeText String
+  contentHtml String @default("")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([entryType, entryId])
+  @@unique([entryType, entryId])
 }
 
 // LinkedIn does not offer an API for a user's own connections/messages to

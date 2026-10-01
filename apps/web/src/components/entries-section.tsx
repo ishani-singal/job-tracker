@@ -17,11 +17,12 @@ import {
   dateRangeToPayload,
   formatEntryDateRange,
 } from './date-range-fields';
+import { EntryDocumentEditor } from './entry-document-editor';
 
 /** entryId -> number of sources (Stories/Resume files + connected repos)
- * tagged to it — cheap to compute (no LLM call), unlike the actual
- * narrative text, which is only extracted live at generation/preview time
- * (see SourceCountBadge's "Preview" button). */
+ * tagged to it — cheap to compute (no LLM call), unlike the entry's
+ * detailed document, which is only generated on explicit user action (see
+ * EntryDocumentEditor's "Generate" button). */
 type SourceCountMap = Map<string, number>;
 
 function useSourceCountMap(entryType: StoryEntryType): SourceCountMap {
@@ -47,9 +48,9 @@ export function EntriesSection() {
           entry &quot;Required&quot; to have it always included in generated resumes;
           unchecked entries are included only when they&apos;re relevant to the specific job
           being tailored for. Tag a Stories/Resume file or connected GitHub repo to an entry
-          (when uploading/connecting) to give it content — resume generation reads that
-          source&apos;s raw text live, extracted fresh the first time it&apos;s needed and
-          cached after that.
+          (when uploading/connecting), then click &quot;Generate&quot; to write a detailed,
+          editable document for that entry — resume/LinkedIn/company-resume generation reads
+          that document as its sole content source for the entry.
         </p>
       </div>
       <WorkExperienceList />
@@ -747,69 +748,12 @@ function EntryRow({
           </button>
         </div>
       </div>
-      <NarrativePreview entryType={entryType} entryId={entryId} entryLabel={entryLabel} sourceCount={sourceCount} />
-    </div>
-  );
-}
-
-/** Shows how many sources (Stories/Resume files + connected repos) are
- * tagged to this entry, with a button to extract/preview the actual
- * narrative on demand — this is a real LLM call (cached after the first
- * time), so it's never fetched eagerly for every entry on page load. */
-function NarrativePreview({
-  entryType,
-  entryLabel,
-  sourceCount,
-  entryId,
-}: {
-  entryType: StoryEntryType;
-  entryId: string;
-  entryLabel: string;
-  sourceCount: number;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const { data, isFetching, refetch } = useQuery({
-    queryKey: ['narratives', entryType, entryId],
-    queryFn: () => api.getNarrativesForEntry(entryType, entryId, entryLabel),
-    enabled: false,
-  });
-
-  if (sourceCount === 0) {
-    return (
-      <p className="text-xs opacity-50 italic border-t pt-1">
-        No Stories/Resume file or GitHub repo tagged to this entry yet — tag one when
-        uploading/connecting to give it content for generation.
-      </p>
-    );
-  }
-
-  return (
-    <div className="text-xs border-t pt-1">
-      <div className="flex items-center justify-between">
-        <span className="opacity-70">
-          {sourceCount} source{sourceCount === 1 ? '' : 's'} tagged
-        </span>
-        <button
-          className="opacity-70 hover:opacity-100 underline"
-          onClick={() => {
-            setExpanded(true);
-            refetch();
-          }}
-          disabled={isFetching}
-        >
-          {isFetching ? 'Extracting...' : expanded ? 'Re-extract' : 'Preview'}
-        </button>
-      </div>
-      {expanded && data && (
-        <div className="mt-1 flex flex-col gap-1">
-          {data.length === 0 && <p className="opacity-50 italic">No content extracted.</p>}
-          {data.map((narrative, i) => (
-            <p key={i} className="opacity-70 whitespace-pre-wrap">
-              {narrative}
-            </p>
-          ))}
-        </div>
-      )}
+      <EntryDocumentEditor
+        entryType={entryType}
+        entryId={entryId}
+        entryLabel={entryLabel}
+        sourceCount={sourceCount}
+      />
     </div>
   );
 }

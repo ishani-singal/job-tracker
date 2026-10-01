@@ -12,13 +12,13 @@ import httpx
 from pydantic_ai import RunContext
 
 from .deps import ResuDeps
-from .rate_limit import LLM_CONCURRENCY
+from .html_text import html_to_text
 
 # fetch_structured_entries returns camelCase group keys (workExperience,
 # internships, projects, ...) and the model naturally echoes that casing
-# back when it calls fetch_narratives_for_entry itself — but the NestJS
-# /stories/narratives endpoint's entryType param is the Prisma enum
-# (WORK_EXPERIENCE, etc.), same as agent.py's _fetch_all_narratives already
+# back when it calls fetch_document_for_entry itself — but the NestJS
+# /stories/document endpoint's entryType param is the Prisma enum
+# (WORK_EXPERIENCE, etc.), same as agent.py's _fetch_all_documents already
 # sends. Normalize here instead of relying on the model to use the right
 # casing, since a plain string param gives it no structural guardrail.
 _ENTRY_TYPE_TO_PRISMA = {
@@ -28,14 +28,11 @@ _ENTRY_TYPE_TO_PRISMA = {
     "internships": "INTERNSHIP",
     "project": "PROJECT",
     "projects": "PROJECT",
-    "paper": "PAPER",
-    "papers": "PAPER",
     # Already-correct Prisma enum values pass through unchanged.
     "WORK_EXPERIENCE": "WORK_EXPERIENCE",
     "EDUCATION": "EDUCATION",
     "INTERNSHIP": "INTERNSHIP",
     "PROJECT": "PROJECT",
-    "PAPER": "PAPER",
 }
 
 # A Literal param (rather than a plain str) makes PydanticAI emit a JSON
@@ -53,13 +50,10 @@ EntryTypeArg = Literal[
     "internships",
     "project",
     "projects",
-    "paper",
-    "papers",
     "WORK_EXPERIENCE",
     "EDUCATION",
     "INTERNSHIP",
     "PROJECT",
-    "PAPER",
 ]
 
 
@@ -89,21 +83,21 @@ async def fetch_candidate_profile(ctx: RunContext[ResuDeps]) -> dict:
         return resp.json()
 
 
-async def fetch_narratives_for_entry(
-    ctx: RunContext[ResuDeps], entry_type: EntryTypeArg, entry_id: str, entry_label: str
-) -> list[str]:
-    """Fetch the live-extracted narrative(s) for one specific entry — every
-    Stories/Resume file and connected GitHub repo the user pinned to this
-    entry at upload/connect time, each turned into a comprehensive narrative
-    on demand (cached after the first call) by the extraction pipeline. This
-    is the authoritative content source for that entry specifically — never
-    use one entry's narrative when writing a different entry's bullets, even
-    if the subject matter looks similar. Returns a list (one string per
-    source tagged to this entry, not combined) — an empty list means no
-    source has been tagged to this entry yet.
+async def fetch_document_for_entry(
+    ctx: RunContext[ResuDeps], entry_type: EntryTypeArg, entry_id: str
+) -> str | None:
+    """Fetch the single detailed document for one specific entry — the
+    user-generated, user-editable document covering every Stories/Resume
+    file and connected GitHub repo pinned to this entry (see
+    entry-document-editor.tsx). This is the authoritative content source for
+    that entry specifically — never use one entry's document when writing a
+    different entry's bullets, even if the subject matter looks similar.
+    Returns None if the user hasn't generated a document for this entry yet
+    (fall back to fetch_candidate_resume as a formatting reference only in
+    that case, never invent content).
 
     entry_type must be exactly one of the group keys fetch_structured_entries
-    returns (workExperience, education, internships, projects, papers) or the
+    returns (workExperience, education, internships, projects) or the
     equivalent SCREAMING_SNAKE_CASE form — not an abbreviation like "work".
     """
     prisma_entry_type = _ENTRY_TYPE_TO_PRISMA.get(entry_type)
@@ -112,20 +106,19 @@ async def fetch_narratives_for_entry(
         # have blocked (e.g. an older cached tool schema) — fail soft rather
         # than letting an invalid entryType reach the API as a 400 that
         # crashes the whole turn over one unresolved entry.
-        return []
-    # Bounded by the same process-wide semaphore as the eager prefetch in
-    # agent.py's _fetch_all_narratives — this tool can also be called
-    # directly by the model mid-conversation, and on a cache miss triggers
-    # its own fan-out of LLM calls inside /stories/narratives, so it draws
-    # from the same Azure rate-limit budget.
-    async with LLM_CONCURRENCY:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.get(
-                f"{ctx.deps.api_base_url}/stories/narratives",
-                params={"entryType": prisma_entry_type, "entryId": entry_id, "entryLabel": entry_label},
-            )
-            resp.raise_for_status()
-            return resp.json()
+        return None
+    # Plain cache read, no LLM call behind it — document generation only
+    # happens when the user explicitly clicks Generate, never implicitly
+    # here, so no LLM_CONCURRENCY/long timeout needed (unlike the old
+    # narrative-fetch version of this tool).
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{ctx.deps.api_base_url}/stories/document",
+            params={"entryType": prisma_entry_type, "entryId": entry_id},
+        )
+        resp.raise_for_status()
+        doc = resp.json()
+        return html_to_text(doc["contentHtml"]) if doc else None
 
 
 async def fetch_structured_entries(ctx: RunContext[ResuDeps]) -> dict:

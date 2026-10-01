@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import sanitizeHtml from 'sanitize-html';
 import { PrismaService } from '../prisma/prisma.service';
 import { ResumesService } from '../resumes/resumes.service';
 import { GithubService } from '../github/github.service';
@@ -6,73 +7,109 @@ import { StoryEntryType } from '@prisma/client';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
-interface ExtractNarrativeResponse {
-  narrative_text: string;
+interface GenerateDocumentResponse {
+  content_html: string;
+}
+
+// Matches the tag vocabulary the document-generation agent is instructed to
+// use (agent/resu/stories/definition.py) and Tiptap StarterKit's schema —
+// kept in sync with both so a sanitize pass never strips content the editor
+// or the model actually produced.
+const ALLOWED_TAGS = ['h1', 'h2', 'h3', 'p', 'ul', 'ol', 'li', 'strong', 'em', 'br'];
+
+function sanitizeDocumentHtml(html: string): string {
+  return sanitizeHtml(html, { allowedTags: ALLOWED_TAGS, allowedAttributes: {} });
 }
 
 /**
- * Live, per-generation narrative extraction. Every uploaded Stories/Resume
- * file and every connected GitHub repo is pinned to exactly one entry at
- * upload/connect time (see resumes.controller.ts / github.controller.ts) —
- * no separate confirmation chat. The first time a resume generation needs a
- * given entry's narrative from a given source, this calls the agent's
- * chunked write-up pipeline live and caches the result (ExtractedNarrative);
- * later generations reuse the cache until that source changes.
+ * Per-entry detailed documents — one user-visible, user-editable HTML
+ * document per entry (WorkExperience/Education/Internship/Project/Paper),
+ * generated on explicit user request from that entry's tagged raw sources
+ * (Stories/Resume files, connected GitHub repo) and editable afterward in
+ * the browser (see entry-document-editor.tsx). This document is the sole
+ * content source fed into resume/LinkedIn/company-resume generation —
+ * replaces the old per-source, invisible ExtractedNarrative cache, which
+ * triggered an LLM call implicitly on every generation; here the LLM call
+ * only happens when the user clicks Generate.
  */
 @Injectable()
 export class StoriesService {
-  private readonly logger = new Logger(StoriesService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly resumes: ResumesService,
     private readonly github: GithubService,
   ) {}
 
+  async getDocumentForEntry(entryType: StoryEntryType, entryId: string): Promise<{ contentHtml: string } | null> {
+    const doc = await this.prisma.entryDocument.findUnique({
+      where: { entryType_entryId: { entryType, entryId } },
+    });
+    return doc ? { contentHtml: doc.contentHtml } : null;
+  }
+
+  async saveDocumentForEntry(
+    entryType: StoryEntryType,
+    entryId: string,
+    contentHtml: string,
+  ): Promise<{ contentHtml: string }> {
+    const sanitized = sanitizeDocumentHtml(contentHtml);
+    const doc = await this.prisma.entryDocument.upsert({
+      where: { entryType_entryId: { entryType, entryId } },
+      create: { entryType, entryId, contentHtml: sanitized },
+      update: { contentHtml: sanitized },
+    });
+    return { contentHtml: doc.contentHtml };
+  }
+
   /**
-   * Returns every narrative associated with one entry — one string per
-   * source tagged to it (a Stories file, a Resume file, and/or a connected
-   * repo), not combined into one. The caller (agent/resu) concatenates them
-   * itself when inlining into the generation prompt.
+   * Generates (or revises) the entry's document: feeds the agent the
+   * current document content (empty string if none yet) plus every raw
+   * source tagged to the entry, and persists whatever comes back. A
+   * revision, not a blind overwrite — the agent is instructed to preserve
+   * existing content/edits except where new source material supersedes it.
    */
-  async getNarrativesForEntry(entryType: StoryEntryType, entryId: string, entryLabel: string): Promise<string[]> {
+  async generateDocumentForEntry(
+    entryType: StoryEntryType,
+    entryId: string,
+    entryLabel: string,
+  ): Promise<{ contentHtml: string }> {
+    const existing = await this.getDocumentForEntry(entryType, entryId);
+    const rawSources = await this.getRawSourcesForEntry(entryType, entryId);
+
+    const response = await fetch(`${AGENT_SERVICE_URL}/stories/generate-document`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        existing_document_html: existing?.contentHtml ?? '',
+        raw_sources: rawSources,
+        entry_label: entryLabel,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Agent /stories/generate-document failed: ${response.status}`);
+    }
+    const result = (await response.json()) as GenerateDocumentResponse;
+
+    return this.saveDocumentForEntry(entryType, entryId, result.content_html);
+  }
+
+  /** Every raw source's text tagged to one entry — a Stories file, a Resume
+   * file, and/or a connected GitHub repo — not combined, not LLM-processed;
+   * the document-generation agent does its own reading/combining. */
+  private async getRawSourcesForEntry(entryType: StoryEntryType, entryId: string): Promise<string[]> {
     const [storyFiles, resumeFiles, repos] = await Promise.all([
       this.resumes.listStoryFilesForEntry(entryType, entryId),
       this.resumes.listResumeFilesForEntry(entryType, entryId),
       this.github.listConnectedReposForEntry(entryType, entryId).catch(() => []),
     ]);
 
-    const narratives = await Promise.all([
-      ...storyFiles.map((f) =>
-        this.getOrExtractNarrative(
-          { storyFileId: f.id },
-          entryType,
-          entryId,
-          () => this.resumes.getStoryFileText(f.id),
-          entryLabel,
-        ),
-      ),
-      ...resumeFiles.map((f) =>
-        this.getOrExtractNarrative(
-          { resumeFileId: f.id },
-          entryType,
-          entryId,
-          () => this.resumes.getResumeFileText(f.id),
-          entryLabel,
-        ),
-      ),
-      ...repos.map((r) =>
-        this.getOrExtractNarrative(
-          { repoFullName: r.fullName },
-          entryType,
-          entryId,
-          () => this.getRepoRawText(r.fullName),
-          entryLabel,
-        ),
-      ),
+    const texts = await Promise.all([
+      ...storyFiles.map((f) => this.resumes.getStoryFileText(f.id)),
+      ...resumeFiles.map((f) => this.resumes.getResumeFileText(f.id)),
+      ...repos.map((r) => this.getRepoRawText(r.fullName)),
     ]);
 
-    return narratives.filter((n): n is string => !!n && n.trim().length > 0);
+    return texts.filter((t) => t.trim().length > 0);
   }
 
   private async getRepoRawText(fullName: string): Promise<string> {
@@ -88,64 +125,5 @@ export class StoriesService {
     ]
       .filter(Boolean)
       .join('\n');
-  }
-
-  /**
-   * Checks ExtractedNarrative for this exact source first; only calls the
-   * agent (and writes the cache) on a miss. A source reference is exactly
-   * one of storyFileId/resumeFileId/repoFullName, matching ExtractedNarrative's
-   * three nullable-but-individually-unique columns.
-   */
-  private async getOrExtractNarrative(
-    source: { storyFileId?: string; resumeFileId?: string; repoFullName?: string },
-    entryType: StoryEntryType,
-    entryId: string,
-    getRawText: () => Promise<string>,
-    entryLabel: string,
-  ): Promise<string | null> {
-    const cached = await this.prisma.extractedNarrative.findFirst({ where: source });
-    if (cached) return cached.narrativeText;
-
-    const rawText = await getRawText();
-    if (!rawText.trim()) return null;
-
-    const narrativeText = await this.callExtractNarrative(rawText, entryLabel);
-
-    const sourceType = source.storyFileId
-      ? 'STORY_FILE'
-      : source.resumeFileId
-        ? 'RESUME_FILE'
-        : 'GITHUB_REPO';
-
-    await this.prisma.extractedNarrative.create({
-      data: { sourceType, entryType, entryId, narrativeText, ...source },
-    });
-
-    return narrativeText;
-  }
-
-  private async callExtractNarrative(rawText: string, entryLabel: string): Promise<string> {
-    const response = await fetch(`${AGENT_SERVICE_URL}/stories/extract-narrative`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ raw_text: rawText, entry_label: entryLabel }),
-    });
-    if (!response.ok) {
-      throw new Error(`Agent /stories/extract-narrative failed: ${response.status}`);
-    }
-    const result = (await response.json()) as ExtractNarrativeResponse;
-    return result.narrative_text;
-  }
-
-  /** Called whenever a file/repo is deleted/disconnected — its cached
-   * narrative is now for content that no longer exists. */
-  async invalidateNarrativeForSource(source: {
-    storyFileId?: string;
-    resumeFileId?: string;
-    repoFullName?: string;
-  }) {
-    await this.prisma.extractedNarrative.deleteMany({ where: source }).catch((err) => {
-      this.logger.warn(`Failed to invalidate narrative cache for ${JSON.stringify(source)}: ${err}`);
-    });
   }
 }

@@ -1,31 +1,31 @@
-"""FastAPI router for live narrative extraction — mounted onto the same app
-instance as agent/resu/service.py (see main.py). Called by NestJS's
-StoriesService the first time a resume generation needs a given entry's
-narrative from a given source; the result is cached by the caller
-(ExtractedNarrative), so this endpoint only actually runs the LLM again
-when that source's raw text changes. Stateless, one-shot — no chat, no
-message history, unlike the old /stories/run-turn.
+"""FastAPI router for per-entry detailed document generation — mounted onto
+the same app instance as agent/resu/service.py (see main.py). Called by
+NestJS's StoriesService only when the user explicitly clicks "Generate" on
+an entry — not implicitly during resume generation. Stateless, one-shot; the
+document itself (not this endpoint) is what's cached/persisted, in
+Postgres's EntryDocument table on the NestJS side.
 """
 from __future__ import annotations
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from .agent import extract_narrative
+from .agent import generate_document
 
 router = APIRouter(prefix="/stories", tags=["stories"])
 
 
-class ExtractNarrativeRequest(BaseModel):
-    raw_text: str
+class GenerateDocumentRequest(BaseModel):
+    existing_document_html: str
+    raw_sources: list[str]
     entry_label: str
 
 
-class ExtractNarrativeResponse(BaseModel):
-    narrative_text: str
+class GenerateDocumentResponse(BaseModel):
+    content_html: str
 
 
-@router.post("/extract-narrative", response_model=ExtractNarrativeResponse)
-async def extract_narrative_endpoint(body: ExtractNarrativeRequest) -> ExtractNarrativeResponse:
-    narrative_text = await extract_narrative(body.raw_text, body.entry_label)
-    return ExtractNarrativeResponse(narrative_text=narrative_text)
+@router.post("/generate-document", response_model=GenerateDocumentResponse)
+async def generate_document_endpoint(body: GenerateDocumentRequest) -> GenerateDocumentResponse:
+    content_html = await generate_document(body.existing_document_html, body.raw_sources, body.entry_label)
+    return GenerateDocumentResponse(content_html=content_html)

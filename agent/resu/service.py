@@ -18,7 +18,7 @@ from pydantic_ai.messages import ModelMessage
 
 import httpx
 
-from .agent import ResuTurnOutput, StructuredResume, _fetch_all_narratives, run_company_turn, run_turn
+from .agent import ResuTurnOutput, StructuredResume, _fetch_all_documents, run_company_turn, run_turn
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, build_profile_context
 
 app = FastAPI(title="resu-agent")
@@ -121,10 +121,9 @@ async def prompt_preview() -> PromptPreviewResponse:
         entries_resp.raise_for_status()
         entries = entries_resp.json()
 
-    # Same cache-first narrative lookup real generation uses (see agent.py) —
-    # the first preview of a newly-tagged entry triggers one real extraction
-    # call, every view after that is instant from the cache.
-    stories = await _fetch_all_narratives(API_BASE_URL, entries)
+    # Same plain document lookup real generation uses (see agent.py) — a
+    # cache read only, no LLM call triggered by viewing the preview.
+    stories = await _fetch_all_documents(API_BASE_URL, entries)
 
     template_body = profile.get("templateBody", "")
     profile_context = build_profile_context(profile, entries, stories)

@@ -3,9 +3,7 @@ import {
   Body,
   Controller,
   Delete,
-  forwardRef,
   Get,
-  Inject,
   Param,
   Patch,
   Post,
@@ -14,16 +12,15 @@ import {
 import { FastifyRequest } from 'fastify';
 import { MultipartValue } from '@fastify/multipart';
 import { ProfileFieldsInput, ResumeTemplateInput, ResumesService } from './resumes.service';
-import { StoriesService } from '../stories/stories.service';
 import { StoryEntryType } from '@prisma/client';
 
 /** Reads the required "entryType"/"entryId" fields the upload form sends
  * alongside the file — the two-step dropdown the user picks (category, then
  * the specific entry e.g. "Dell" under Work Experience) before uploading.
  * Required: every Stories/Resume file must be pinned to exactly one entry
- * so resume generation knows which entry's narrative to extract it into
- * (see StoriesService.getNarrativesForEntry) — there is no more separate
- * confirmation step to resolve an untagged upload later. */
+ * so that entry's "Generate Detailed Document" button knows which raw
+ * sources to read (see StoriesService.generateDocumentForEntry) — there is
+ * no separate confirmation step to resolve an untagged upload later. */
 function readMultipartField(
   file: { fields: Record<string, unknown> },
   name: string,
@@ -49,11 +46,7 @@ const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
 @Controller('resumes')
 export class ResumesController {
-  constructor(
-    private readonly resumes: ResumesService,
-    @Inject(forwardRef(() => StoriesService))
-    private readonly stories: StoriesService,
-  ) {}
+  constructor(private readonly resumes: ResumesService) {}
 
   @Post('stories/upload')
   async uploadStory(@Req() req: FastifyRequest) {
@@ -88,13 +81,11 @@ export class ResumesController {
   @Delete('stories/:id')
   async deleteStory(@Param('id') id: string) {
     await this.resumes.deleteStoryFile(id);
-    await this.stories.invalidateNarrativeForSource({ storyFileId: id });
   }
 
   @Delete('files/:id')
   async deleteResumeFile(@Param('id') id: string) {
     await this.resumes.deleteResumeFile(id);
-    await this.stories.invalidateNarrativeForSource({ resumeFileId: id });
   }
 
   @Get('files/text')

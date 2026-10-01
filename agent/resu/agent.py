@@ -25,7 +25,8 @@ from pydantic_ai.providers.azure import AzureProvider
 
 from .deps import ResuDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS, build_profile_context
-from .rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
+from .html_text import html_to_text
+from .rate_limit import retry_on_rate_limit
 
 _model = OpenAIChatModel(
     os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
@@ -115,41 +116,37 @@ resu_agent = Agent(
 )
 
 
-async def _fetch_all_narratives(api_base_url: str, entries: dict) -> list[dict]:
-    """Fetches every entry's live-extracted narrative(s) up front, in
-    parallel, so build_profile_context can inline each one directly rather
-    than the model having to call a per-entry tool itself. Each source
-    tagged to an entry is its own narrative string (see
-    StoriesService.getNarrativesForEntry) — multiple sources for the same
-    entry are joined here into one combined narrative for that entry's
-    prompt line, since the model only needs one Story per entry, not a list.
+async def _fetch_all_documents(api_base_url: str, entries: dict) -> list[dict]:
+    """Fetches every entry's single detailed document up front, in parallel,
+    so build_profile_context can inline each one directly rather than the
+    model having to call a per-entry tool itself. Plain cache reads — no LLM
+    call happens here at all; generation never triggers document generation,
+    the user must have clicked "Generate" on that entry beforehand (see
+    entry-document-editor.tsx). That's why this needs neither
+    LLM_CONCURRENCY nor a long timeout, unlike the old narrative-fetch
+    version of this function.
     """
-    jobs: list[tuple[str, str, str]] = []  # (prisma_entry_type, entry_id, label)
+    jobs: list[tuple[str, str]] = []  # (prisma_entry_type, entry_id)
     for e in entries.get("workExperience", []):
-        jobs.append(("WORK_EXPERIENCE", e["id"], f"{e['company']} — {e.get('title') or 'Work Experience'}"))
+        jobs.append(("WORK_EXPERIENCE", e["id"]))
     for e in entries.get("education", []):
-        jobs.append(("EDUCATION", e["id"], f"{e['school']} — {e.get('degree') or 'Education'}"))
+        jobs.append(("EDUCATION", e["id"]))
     for e in entries.get("internships", []):
-        jobs.append(("INTERNSHIP", e["id"], f"{e['company']} — {e.get('title') or 'Internship'}"))
+        jobs.append(("INTERNSHIP", e["id"]))
     for e in entries.get("projects", []):
-        jobs.append(("PROJECT", e["id"], e["name"]))
+        jobs.append(("PROJECT", e["id"]))
 
-    async def fetch_one(entry_type: str, entry_id: str, label: str) -> dict | None:
-        # Each call here may itself be a cache-miss that fans out one LLM
-        # call per chunk inside /stories/narratives (same process) — bound
-        # by the shared LLM_CONCURRENCY semaphore so N entries firing at
-        # once can't multiply into a burst that trips Azure's rate limit.
-        async with LLM_CONCURRENCY:
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                resp = await client.get(
-                    f"{api_base_url}/stories/narratives",
-                    params={"entryType": entry_type, "entryId": entry_id, "entryLabel": label},
-                )
-                resp.raise_for_status()
-                narratives = resp.json()
-        if not narratives:
+    async def fetch_one(entry_type: str, entry_id: str) -> dict | None:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{api_base_url}/stories/document",
+                params={"entryType": entry_type, "entryId": entry_id},
+            )
+            resp.raise_for_status()
+            doc = resp.json()
+        if not doc or not doc.get("contentHtml"):
             return None
-        return {"entryType": entry_type, "entryId": entry_id, "storyText": "\n\n".join(narratives)}
+        return {"entryType": entry_type, "entryId": entry_id, "storyText": html_to_text(doc["contentHtml"])}
 
     results = await asyncio.gather(*(fetch_one(*job) for job in jobs))
     return [r for r in results if r]
@@ -170,7 +167,7 @@ async def _inject_profile(ctx: RunContext[ResuDeps]) -> str:
         entries_resp.raise_for_status()
         entries = entries_resp.json()
 
-    stories = await _fetch_all_narratives(ctx.deps.api_base_url, entries)
+    stories = await _fetch_all_documents(ctx.deps.api_base_url, entries)
 
     return build_profile_context(profile, entries, stories)
 
