@@ -257,7 +257,9 @@ async def generate_document(
     if len(sources) == 1:
         source = sources[0]
         await _report_progress(api_base_url, session_id, f"Evaluating {source.label}...")
-        result = await _draft_from_source(existing_document_html, source.text, entry_label)
+        result = await _draft_from_source(
+            existing_document_html, source.text, entry_label, source.label, api_base_url, session_id,
+        )
         await _report_progress(api_base_url, session_id, f"{source.label} done")
         return result
 
@@ -277,7 +279,9 @@ async def generate_document(
     async def draft_one(source: RawSource) -> str:
         async with _SOURCE_CONCURRENCY:
             await _report_progress(api_base_url, session_id, f"Evaluating {source.label}...")
-            result = await _draft_from_source(existing_document_html, source.text, entry_label)
+            result = await _draft_from_source(
+                existing_document_html, source.text, entry_label, source.label, api_base_url, session_id,
+            )
         await _report_progress(api_base_url, session_id, f"{source.label} done")
         return result
 
@@ -324,13 +328,27 @@ async def _tournament_merge(
     return current_round[0]
 
 
-async def _draft_from_source(existing_html: str, source_text: str, entry_label: str) -> str:
+async def _draft_from_source(
+    existing_html: str,
+    source_text: str,
+    entry_label: str,
+    source_label: str,
+    api_base_url: str,
+    session_id: str,
+) -> str:
     """Produces one source's standalone draft of the document — still
     chunked internally (sequential fold) if that one source's text alone is
     long, same shape as before (now scoped per-source rather than
     per-combined-blob). When there's only one source overall, this IS the
     final document; with multiple sources, each one's draft is merged
     afterward (see _tournament_merge) rather than compared against siblings.
+
+    A large source (e.g. a multi-tab/multi-section document extracting to
+    hundreds of thousands of characters) can need dozens of chunks, each its
+    own sequential LLM call — with only a per-source "Evaluating..." line,
+    that looked identical to a genuine hang for 15-20+ minutes on a real
+    35-chunk file. Reports "X (chunk N of M)..." progress per chunk so a
+    large file's processing stays visibly incremental instead of silent.
     """
     if len(source_text) <= _CHUNK_SIZE_CHARS:
         return await _generate_or_revise_chunk(existing_html, source_text, 0, 1, entry_label)
@@ -338,6 +356,10 @@ async def _draft_from_source(existing_html: str, source_text: str, entry_label: 
     chunks = _chunk_text(source_text)
     current_html = existing_html
     for i, chunk in enumerate(chunks):
+        if len(chunks) > 1:
+            await _report_progress(
+                api_base_url, session_id, f"{source_label} (chunk {i + 1} of {len(chunks)})..."
+            )
         current_html = await _generate_or_revise_chunk(current_html, chunk, i, len(chunks), entry_label)
     return current_html
 
