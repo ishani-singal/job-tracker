@@ -52,4 +52,9 @@ export class CompanyRolesController {
   rescoreRole(@Param('id') id: string) {
     return this.companyRoles.rescoreRole(id);
   }
+
+  @Post('discovered-roles/:id/discard')
+  discardRole(@Param('id') id: string) {
+    return this.companyRoles.discardRole(id);
+  }
 }

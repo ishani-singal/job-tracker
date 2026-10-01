@@ -1374,6 +1374,18 @@ export class CompanyRolesService implements OnModuleDestroy {
     return { unselected: true };
   }
 
+  /** Forces a role's atsScore to 0 (treated by the UI as "Conditions not
+   * valid") without running the LLM — used to manually discard a role the
+   * candidate doesn't want to see again, at no LLM cost. */
+  async discardRole(roleId: string) {
+    const role = await this.prisma.discoveredRole.findUnique({ where: { id: roleId } });
+    if (!role) throw new NotFoundException(`Role ${roleId} not found`);
+    return this.prisma.discoveredRole.update({
+      where: { id: roleId },
+      data: { atsScore: 0, atsScoreComputedAt: new Date() },
+    });
+  }
+
   /** Resolves the candidate profile's stored country/state codes (from the
    * dropdowns) to display names, so they compare cleanly against a JD's
    * free-form extracted location in computeLocationMismatch(). */

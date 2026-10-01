@@ -233,6 +233,11 @@ export default function ApplicationsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['discovered-roles'] }),
   });
 
+  const discardRole = useMutation({
+    mutationFn: (id: string) => api.discardRole(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['discovered-roles'] }),
+  });
+
   // Applications added directly (via AddApplicationDialog) have no backing
   // DiscoveredRole to detach — "unselect" for these just removes them from
   // Selected the same way Delete does.
@@ -340,6 +345,8 @@ export default function ApplicationsPage() {
                 selecting={selectRole.isPending}
                 onScore={() => rescoreRole.mutate(role.id)}
                 scoring={rescoreRole.isPending && rescoreRole.variables === role.id}
+                onDiscard={() => discardRole.mutate(role.id)}
+                discarding={discardRole.isPending && discardRole.variables === role.id}
               />
             ))}
             {unselectedRoles?.length === 0 && (
@@ -405,6 +412,8 @@ function DiscoveredRoleRow({
   selecting,
   onScore,
   scoring,
+  onDiscard,
+  discarding,
 }: {
   role: DiscoveredRole;
   profile: ResumeProfile | undefined;
@@ -412,6 +421,8 @@ function DiscoveredRoleRow({
   selecting: boolean;
   onScore: () => void;
   scoring: boolean;
+  onDiscard: () => void;
+  discarding: boolean;
 }) {
   return (
     <div className="border rounded px-4 py-3 text-sm flex items-center justify-between gap-3">
@@ -447,6 +458,13 @@ function DiscoveredRoleRow({
           disabled={selecting}
         >
           {selecting ? 'Selecting...' : 'Select to Apply'}
+        </button>
+        <button
+          className="px-2 py-1 text-xs rounded border border-red-600 text-red-600 dark:text-red-400 dark:border-red-400"
+          onClick={onDiscard}
+          disabled={discarding}
+        >
+          {discarding ? 'Discarding...' : 'Discard'}
         </button>
       </div>
     </div>
