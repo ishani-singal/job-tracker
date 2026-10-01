@@ -31,28 +31,29 @@ content/phrasing except where new source material supersedes it — never a
 blind from-scratch overwrite.
 
 Processed per SOURCE (one Story/Resume file or GitHub repo = one source),
-not per arbitrary character-chunk of a combined blob — at most
-LLM_CONCURRENCY (2, same process-wide cap used everywhere else in this
-module) sources are drafted concurrently at any time, so a Generate click
-against an entry with many tagged sources never fires more than 2
-simultaneous write-up calls for that entry. Each source's own text is
-still internally chunked if long (same ~12k-char chunking as before, now
-scoped to one source instead of the whole combined blob) — a source's
-multi-chunk write-up still runs its chunks SEQUENTIALLY against each other
-(chunk N revises what chunk N-1 produced), since independent parallel chunk
-calls can't compose cleanly against one shared base document.
+not per arbitrary character-chunk of a combined blob. Sources are
+evaluated ONE AT A TIME by default (_SOURCE_CONCURRENCY=1) — a Generate
+click against an entry with many tagged sources runs them strictly in
+sequence, never two sources' write-ups in flight at once. (This was
+previously 2-at-a-time; reverted to 1 after repeated rate-limit/stalled-
+connection issues against this Azure deployment made the parallelism more
+trouble than it was worth — see SOURCE_MAX_CONCURRENCY in agent.py and
+AZURE_HTTP_TIMEOUT in rate_limit.py for the actual incident fixes.) Each
+source's own text is still internally chunked if long (same ~12k-char
+chunking as before, now scoped to one source instead of the whole combined
+blob) — a source's multi-chunk write-up runs its chunks SEQUENTIALLY
+against each other (chunk N revises what chunk N-1 produced), since
+independent parallel chunk calls can't compose cleanly against one shared
+base document.
 
-Sources themselves are drafted independently and in parallel (bounded to 2
-at once) against the ORIGINAL existing document — not against each other's
-in-progress output, which would hit the same multiple-simultaneous-edits-to-
-one-base problem chunking already avoids. The resulting N drafts are then
-combined via a PAIRWISE TOURNAMENT merge (see _tournament_merge): round 1
-merges disjoint pairs of drafts in parallel (again bounded to 2 at once),
-halving the document count each round, until one document remains. Still
-never merges two documents into the same shared base simultaneously (each
-merge combines two independent, complete documents), but needs only
-O(log N) sequential rounds instead of O(N) sequential one-at-a-time merges
-— meaningfully faster for entries with several sources tagged to them.
+Each source is drafted against the ORIGINAL existing document (not against
+a prior source's in-progress output), then all N drafts are combined via a
+PAIRWISE TOURNAMENT merge (see _tournament_merge): round 1 merges disjoint
+pairs of drafts, halving the document count each round, until one document
+remains. With _SOURCE_CONCURRENCY=1 this merge phase also runs one pair at
+a time rather than truly in parallel, but the O(log N) round structure
+still means fewer total merge calls than a fully flat one-at-a-time chain
+for entries with several sources.
 """
 from __future__ import annotations
 
@@ -73,13 +74,18 @@ from pydantic_ai import Agent
 from .definition import CLARIFY_INSTRUCTIONS, CLARIFY_SOUL, DOCUMENT_INSTRUCTIONS, DOCUMENT_SOUL
 from ..rate_limit import AZURE_HTTP_TIMEOUT, LLM_CONCURRENCY, retry_on_rate_limit
 
-# Gates how many sources (not LLM calls) can be drafting at once — same
-# limit as LLM_CONCURRENCY but a SEPARATE semaphore object, since a
-# multi-chunk source's draft holds this one for its whole lifetime while
-# also acquiring/releasing LLM_CONCURRENCY per chunk internally; sharing one
-# semaphore for both would self-deadlock (a source already holding its only
-# slot can never acquire a second one for its own first chunk call).
-_SOURCE_CONCURRENCY = asyncio.Semaphore(int(os.environ.get("LLM_MAX_CONCURRENCY", "2")))
+# Gates how many sources (not LLM calls) can be drafting at once — a
+# SEPARATE semaphore from LLM_CONCURRENCY (not just the same limit reused),
+# since a multi-chunk source's draft holds this one for its whole lifetime
+# while also acquiring/releasing LLM_CONCURRENCY per chunk internally;
+# sharing one semaphore for both would self-deadlock (a source already
+# holding its only slot can never acquire a second one for its own first
+# chunk call). Defaults to 1 (strictly one source evaluated at a time) —
+# repeated rate-limit/stall issues against this Azure deployment made
+# source-level parallelism more trouble than it was worth; override via env
+# if the deployment's quota is later raised enough to make 2+ worthwhile
+# again.
+_SOURCE_CONCURRENCY = asyncio.Semaphore(int(os.environ.get("SOURCE_MAX_CONCURRENCY", "1")))
 
 
 class RawSource(BaseModel):
@@ -255,18 +261,19 @@ async def generate_document(
         await _report_progress(api_base_url, session_id, f"{source.label} done")
         return result
 
-    # Multiple sources: draft each source's contribution INDEPENDENTLY and IN
-    # PARALLEL (each against the original existing_document_html, not
-    # against each other's in-progress output) — bounded to 2 concurrent
-    # drafts at once by _SOURCE_CONCURRENCY (same limit as LLM_CONCURRENCY,
-    # but a separate semaphore: _draft_from_source's own chunk calls acquire
-    # LLM_CONCURRENCY internally, so reusing the same semaphore here would
-    # self-deadlock a multi-chunk source holding its own slot while trying
-    # to acquire a second one for its first chunk). The "Evaluating..."
-    # announcement happens AFTER acquiring a slot (not before), so the chat
-    # reflects what's actually running right now — e.g. with 4 sources and
-    # a limit of 2, only 2 "Evaluating..." lines appear at once, not all 4
-    # up front while 2 of them are really just queued.
+    # Multiple sources: draft each source's contribution against the
+    # original existing_document_html (not against another source's
+    # in-progress output), gated by _SOURCE_CONCURRENCY — a separate
+    # semaphore from LLM_CONCURRENCY (_draft_from_source's own chunk calls
+    # acquire LLM_CONCURRENCY internally, so reusing the same semaphore here
+    # would self-deadlock a multi-chunk source holding its own slot while
+    # trying to acquire a second one for its first chunk). Defaults to 1, so
+    # in practice this runs strictly one source at a time; asyncio.gather is
+    # still used so this scales back up cleanly if the limit is ever raised
+    # via SOURCE_MAX_CONCURRENCY. The "Evaluating..." announcement happens
+    # AFTER acquiring a slot (not before), so the chat reflects what's
+    # actually running right now rather than every source announcing at
+    # once while most are really just queued.
     async def draft_one(source: RawSource) -> str:
         async with _SOURCE_CONCURRENCY:
             await _report_progress(api_base_url, session_id, f"Evaluating {source.label}...")
@@ -277,18 +284,15 @@ async def generate_document(
     drafts = await asyncio.gather(*(draft_one(source) for source in sources))
 
     # Combine the N independent drafts via a pairwise TOURNAMENT merge
-    # rather than N sequential one-at-a-time merges: round 1 merges drafts
-    # in disjoint pairs (bounded to 2 pairs/merges in flight at once by
-    # LLM_CONCURRENCY, same as drafting), halving the document count; round
-    # 2 merges the survivors' pairs, and so on until one document remains.
-    # This still never merges two documents into the SAME base
-    # simultaneously (each merge combines two independent, already-complete
-    # documents — never two merges racing to update one shared running
-    # document), so it keeps the same conflict-avoidance guarantee as a
-    # fully sequential chain, but with O(log N) sequential rounds instead
-    # of O(N) sequential merge calls — for a 4-source entry, 2 rounds
-    # instead of 4 sequential merges, roughly halving wall-clock time on
-    # the merge phase for source-heavy entries.
+    # rather than one long chain: round 1 merges drafts in disjoint pairs
+    # (still gated by _SOURCE_CONCURRENCY, so one pair/merge at a time by
+    # default), halving the document count; round 2 merges the survivors'
+    # pairs, and so on until one document remains. Never merges two
+    # documents into the SAME base simultaneously (each merge combines two
+    # independent, already-complete documents — never two merges racing to
+    # update one shared running document), and needs only O(log N)
+    # sequential rounds instead of O(N) sequential merge calls even at
+    # concurrency 1 — for a 4-source entry, 2 merge rounds instead of 4.
     labels = [s.label for s in sources]
     return await _tournament_merge(drafts, labels, entry_label, api_base_url, session_id)
 
