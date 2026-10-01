@@ -73,6 +73,14 @@ from pydantic_ai import Agent
 from .definition import CLARIFY_INSTRUCTIONS, CLARIFY_SOUL, DOCUMENT_INSTRUCTIONS, DOCUMENT_SOUL
 from ..rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
 
+# Gates how many sources (not LLM calls) can be drafting at once — same
+# limit as LLM_CONCURRENCY but a SEPARATE semaphore object, since a
+# multi-chunk source's draft holds this one for its whole lifetime while
+# also acquiring/releasing LLM_CONCURRENCY per chunk internally; sharing one
+# semaphore for both would self-deadlock (a source already holding its only
+# slot can never acquire a second one for its own first chunk call).
+_SOURCE_CONCURRENCY = asyncio.Semaphore(int(os.environ.get("LLM_MAX_CONCURRENCY", "2")))
+
 
 class RawSource(BaseModel):
     """One source's text paired with a short label (filename or repo name)
@@ -249,11 +257,19 @@ async def generate_document(
     # Multiple sources: draft each source's contribution INDEPENDENTLY and IN
     # PARALLEL (each against the original existing_document_html, not
     # against each other's in-progress output) — bounded to 2 concurrent
-    # drafts at once by LLM_CONCURRENCY, so an entry with many sources still
-    # only ever has 2 simultaneous LLM calls in flight.
+    # drafts at once by _SOURCE_CONCURRENCY (same limit as LLM_CONCURRENCY,
+    # but a separate semaphore: _draft_from_source's own chunk calls acquire
+    # LLM_CONCURRENCY internally, so reusing the same semaphore here would
+    # self-deadlock a multi-chunk source holding its own slot while trying
+    # to acquire a second one for its first chunk). The "Evaluating..."
+    # announcement happens AFTER acquiring a slot (not before), so the chat
+    # reflects what's actually running right now — e.g. with 4 sources and
+    # a limit of 2, only 2 "Evaluating..." lines appear at once, not all 4
+    # up front while 2 of them are really just queued.
     async def draft_one(source: RawSource) -> str:
-        await _report_progress(api_base_url, session_id, f"Evaluating {source.label}...")
-        result = await _draft_from_source(existing_document_html, source.text, entry_label)
+        async with _SOURCE_CONCURRENCY:
+            await _report_progress(api_base_url, session_id, f"Evaluating {source.label}...")
+            result = await _draft_from_source(existing_document_html, source.text, entry_label)
         await _report_progress(api_base_url, session_id, f"{source.label} done")
         return result
 
@@ -289,8 +305,9 @@ async def _tournament_merge(
             if len(pair) == 1:
                 return pair[0], label_pair[0]
             merged_label = " + ".join(label_pair)
-            await _report_progress(api_base_url, session_id, f"Merging {merged_label}...")
-            result = await _merge_documents(pair[0], pair[1], entry_label)
+            async with _SOURCE_CONCURRENCY:
+                await _report_progress(api_base_url, session_id, f"Merging {merged_label}...")
+                result = await _merge_documents(pair[0], pair[1], entry_label)
             await _report_progress(api_base_url, session_id, f"Merge of {merged_label} done")
             return result, merged_label
 
