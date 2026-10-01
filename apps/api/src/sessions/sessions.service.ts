@@ -57,6 +57,7 @@ export interface StoryExtractionStartContext {
   repoFullName?: string;
   entries: Record<string, unknown>;
   hintEntryType: string | null;
+  hintEntryId: string | null;
 }
 
 @Injectable()
@@ -274,6 +275,7 @@ export class SessionsService {
           source_label: startContext?.sourceLabel,
           entries: startContext?.entries,
           hint_entry_type: startContext?.hintEntryType,
+          hint_entry_id: startContext?.hintEntryId,
           message_history_json: priorHistoryJson,
           user_reply: userReply,
         }),

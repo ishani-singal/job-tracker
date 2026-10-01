@@ -31,6 +31,10 @@ export interface RerunTrigger {
   /** The background category the user picked at upload time — a strong hint
    * for the extraction agent. Only meaningful for a single-file trigger. */
   hintEntryType?: StoryEntryType;
+  /** The specific entry (e.g. one particular Work Experience row) the user
+   * picked, one level more specific than hintEntryType — when set, the
+   * document is pinned to exactly this entry, not just its category. */
+  hintEntryId?: string;
 }
 
 const HINT_ENTRY_TYPE_TO_MATCH_KEY: Record<StoryEntryType, string> = {
@@ -79,6 +83,7 @@ export class StoriesService {
         triggerResumeFileId: trigger.resumeFileId,
         triggerRepoFullName: trigger.repoFullName,
         hintEntryType: trigger.hintEntryType,
+        hintEntryId: trigger.hintEntryId,
       },
     });
     this.startSessionsInBackground(run.id, trigger);
@@ -112,9 +117,11 @@ export class StoriesService {
       // extraction agent even considers for this document, rather than just
       // being advisory — this is the "ask the user to pick a background"
       // step: it removes the chance of a document tagged "Education" ever
-      // getting matched against a Work Experience entry.
+      // getting matched against a Work Experience entry. Picking a specific
+      // entry (e.g. "Dell" under Work Experience) narrows it one level
+      // further, to that one entry only — the document is pinned to it.
       const narrowedEntries = trigger.hintEntryType
-        ? this.narrowEntriesToHint(entriesForMatching, trigger.hintEntryType)
+        ? this.narrowEntriesToHint(entriesForMatching, trigger.hintEntryType, trigger.hintEntryId)
         : entriesForMatching;
 
       const sourcesWithText = sources.filter((s) => s.text.trim());
@@ -130,6 +137,7 @@ export class StoriesService {
           hintEntryType: trigger.hintEntryType
             ? HINT_ENTRY_TYPE_TO_MATCH_KEY[trigger.hintEntryType]
             : null,
+          hintEntryId: trigger.hintEntryId ?? null,
         });
       }
 
@@ -149,10 +157,13 @@ export class StoriesService {
   /** Restricts the entries dict to only the hinted category — e.g. a
    * document tagged "Education" is matched only against EducationEntry rows,
    * so the model can never attribute it to a Work Experience/Project/etc.
-   * entry even if it mentions one in passing. */
+   * entry even if it mentions one in passing. When a specific entryId is
+   * also given (e.g. "Dell" under Work Experience), narrows further to just
+   * that one entry — the document is pinned to it, not merely its category. */
   private narrowEntriesToHint(
     entries: Record<string, unknown[]>,
     hint: StoryEntryType,
+    entryId?: string,
   ): Record<string, unknown[]> {
     const key = HINT_ENTRY_TYPE_TO_MATCH_KEY[hint];
     const narrowed: Record<string, unknown[]> = {
@@ -163,7 +174,10 @@ export class StoriesService {
       papers: [],
     };
     const sourceKey = key === 'internship' ? 'internships' : key === 'project' ? 'projects' : key;
-    narrowed[sourceKey] = entries[sourceKey] ?? [];
+    const categoryEntries = (entries[sourceKey] ?? []) as { id: string }[];
+    narrowed[sourceKey] = entryId
+      ? categoryEntries.filter((e) => e.id === entryId)
+      : categoryEntries;
     return narrowed;
   }
 
@@ -190,7 +204,13 @@ export class StoriesService {
       resumeFileId: session.resumeFileId ?? undefined,
       repoFullName: session.repoFullName ?? undefined,
     };
-    await this.reconcileCandidates(parseRunId, source, candidates, run?.hintEntryType ?? undefined);
+    await this.reconcileCandidates(
+      parseRunId,
+      source,
+      candidates,
+      run?.hintEntryType ?? undefined,
+      run?.hintEntryId ?? undefined,
+    );
   }
 
   /**
@@ -278,6 +298,7 @@ export class StoriesService {
     },
     candidates: ExtractCandidate[],
     hintEntryType?: StoryEntryType,
+    hintEntryId?: string,
   ): Promise<number> {
     let created = 0;
     for (const c of candidates) {
@@ -285,11 +306,16 @@ export class StoriesService {
       // candidate it produces belongs to that category by construction (the
       // entries dict was narrowed to only that category) — fall back to the
       // hint if the agent didn't echo entry_type for a new-entry proposal.
+      // Likewise, if the document was pinned to one specific entry, fall
+      // back to that exact entry id when the agent omits entry_id — the
+      // entries dict only ever contained that one entry, so there's nothing
+      // else it could have matched.
       const entryType = c.entry_type ? ENTRY_TYPE_TO_PRISMA[c.entry_type] : (hintEntryType ?? null);
+      const entryId = c.entry_id ?? (hintEntryId && entryType === hintEntryType ? hintEntryId : null);
 
-      if (entryType && c.entry_id) {
+      if (entryType && entryId) {
         const existing = await this.prisma.candidateStory.findUnique({
-          where: { entryType_entryId: { entryType, entryId: c.entry_id } },
+          where: { entryType_entryId: { entryType, entryId } },
         });
         if (existing && existing.status === 'CONFIRMED' && existing.storyText.trim() === c.story_text.trim()) {
           continue; // no-op: nothing changed, don't pester the user
@@ -302,7 +328,7 @@ export class StoriesService {
             resumeFileId: source.resumeFileId,
             repoFullName: source.repoFullName,
             entryType,
-            entryId: c.entry_id,
+            entryId,
             sourceSpanText: c.source_span,
             proposedStoryText: c.story_text,
             confidence: c.confidence,

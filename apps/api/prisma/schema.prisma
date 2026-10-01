@@ -516,6 +516,13 @@ model StoryParseRun {
   // against. Null on a manual rerun (no single document to hint about) or on
   // an upload where the user left it unset.
   hintEntryType StoryEntryType?
+  // The specific entry (e.g. one particular WorkExperienceEntry id — "Dell")
+  // the user picked, one level more specific than hintEntryType's category.
+  // When set, the whole document is pinned to this one entry — the
+  // extraction agent is given only this entry to match against, never any
+  // other entry of the same type. Null means the user picked a category but
+  // not a specific entry (or picked neither).
+  hintEntryId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

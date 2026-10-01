@@ -20,6 +20,96 @@ const BACKGROUND_TYPE_OPTIONS: { value: StoryEntryType; label: string }[] = [
   { value: 'PAPER', label: 'Paper' },
 ];
 
+interface BackgroundSelection {
+  entryType: StoryEntryType | '';
+  entryId: string;
+}
+
+const EMPTY_BACKGROUND_SELECTION: BackgroundSelection = { entryType: '', entryId: '' };
+
+/** Two-step picker shown before an upload: first the category (Work
+ * Experience/Education/...), then — once picked — the specific entry
+ * within it (e.g. "Dell" under Work Experience). Picking a specific entry
+ * pins the whole document to it; picking only the category narrows the
+ * extraction chat to that category without pinning one entry; leaving both
+ * blank asks the chat to figure out attribution per section. */
+function BackgroundPicker({
+  value,
+  onChange,
+}: {
+  value: BackgroundSelection;
+  onChange: (next: BackgroundSelection) => void;
+}) {
+  const { data: workExperience } = useQuery({
+    queryKey: ['work-experience'],
+    queryFn: api.listWorkExperience,
+    enabled: value.entryType === 'WORK_EXPERIENCE',
+  });
+  const { data: education } = useQuery({
+    queryKey: ['education'],
+    queryFn: api.listEducation,
+    enabled: value.entryType === 'EDUCATION',
+  });
+  const { data: internships } = useQuery({
+    queryKey: ['internships'],
+    queryFn: api.listInternships,
+    enabled: value.entryType === 'INTERNSHIP',
+  });
+  const { data: projects } = useQuery({
+    queryKey: ['projects'],
+    queryFn: api.listProjects,
+    enabled: value.entryType === 'PROJECT',
+  });
+
+  const entryOptions: { id: string; label: string }[] =
+    value.entryType === 'WORK_EXPERIENCE'
+      ? (workExperience ?? []).map((e) => ({
+          id: e.id,
+          label: `${e.company}${e.title ? ` — ${e.title}` : ''}`,
+        }))
+      : value.entryType === 'EDUCATION'
+        ? (education ?? []).map((e) => ({ id: e.id, label: e.school }))
+        : value.entryType === 'INTERNSHIP'
+          ? (internships ?? []).map((e) => ({
+              id: e.id,
+              label: `${e.company}${e.title ? ` — ${e.title}` : ''}`,
+            }))
+          : value.entryType === 'PROJECT'
+            ? (projects ?? []).map((e) => ({ id: e.id, label: e.name }))
+            : [];
+
+  return (
+    <div className="flex gap-2 items-center">
+      <select
+        className="border rounded px-2 py-1 text-sm bg-transparent"
+        value={value.entryType}
+        onChange={(e) => onChange({ entryType: e.target.value as StoryEntryType | '', entryId: '' })}
+      >
+        <option value="">Mixed / not sure — ask per section</option>
+        {BACKGROUND_TYPE_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {value.entryType && value.entryType !== 'PAPER' && (
+        <select
+          className="border rounded px-2 py-1 text-sm bg-transparent"
+          value={value.entryId}
+          onChange={(e) => onChange({ ...value, entryId: e.target.value })}
+        >
+          <option value="">Which one? (whole category)</option>
+          {entryOptions.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
 export default function ResumesPage() {
   const queryClient = useQueryClient();
   const { openPanel } = useSessionsPanel();
@@ -29,19 +119,20 @@ export default function ResumesPage() {
     queryKey: ['resume-files'],
     queryFn: api.listResumeFiles,
   });
-  const [storyBackgroundType, setStoryBackgroundType] = useState<StoryEntryType | ''>('');
-  const [resumeBackgroundType, setResumeBackgroundType] = useState<StoryEntryType | ''>('');
+  const [storyBackground, setStoryBackground] = useState<BackgroundSelection>(EMPTY_BACKGROUND_SELECTION);
+  const [resumeBackground, setResumeBackground] = useState<BackgroundSelection>(EMPTY_BACKGROUND_SELECTION);
 
   async function uploadStory(file: File) {
     const form = new FormData();
     form.append('file', file);
-    if (storyBackgroundType) form.append('backgroundType', storyBackgroundType);
+    if (storyBackground.entryType) form.append('backgroundType', storyBackground.entryType);
+    if (storyBackground.entryId) form.append('backgroundEntryId', storyBackground.entryId);
     const res = await fetch(`${API_BASE}/resumes/stories/upload`, { method: 'POST', body: form });
     if (!res.ok) {
       alert(`Upload failed: ${res.status} ${await res.text()}`);
       return;
     }
-    setStoryBackgroundType('');
+    setStoryBackground(EMPTY_BACKGROUND_SELECTION);
     queryClient.invalidateQueries({ queryKey: ['stories'] });
     queryClient.invalidateQueries({ queryKey: ['story-parse-runs'] });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -54,13 +145,14 @@ export default function ResumesPage() {
   async function uploadResume(file: File) {
     const form = new FormData();
     form.append('file', file);
-    if (resumeBackgroundType) form.append('backgroundType', resumeBackgroundType);
+    if (resumeBackground.entryType) form.append('backgroundType', resumeBackground.entryType);
+    if (resumeBackground.entryId) form.append('backgroundEntryId', resumeBackground.entryId);
     const res = await fetch(`${API_BASE}/resumes/resume/upload`, { method: 'POST', body: form });
     if (!res.ok) {
       alert(`Upload failed: ${res.status} ${await res.text()}`);
       return;
     }
-    setResumeBackgroundType('');
+    setResumeBackground(EMPTY_BACKGROUND_SELECTION);
     queryClient.invalidateQueries({ queryKey: ['resume-files'] });
     queryClient.invalidateQueries({ queryKey: ['story-parse-runs'] });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -86,25 +178,15 @@ export default function ResumesPage() {
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium">Stories (primary source)</h2>
         <p className="text-xs opacity-60">
-          Pick which background this document is about before uploading — Work Experience,
-          Education, Internship, Project, or Paper. This scopes the extraction chat to only
-          that category&apos;s entries, so it can never attribute content to the wrong kind
-          of entry. If the document covers more than one (e.g. a full resume), leave it
+          Pick which background this document is about before uploading — a category (Work
+          Experience, Education, Internship, Project, Paper), then the specific entry within
+          it (e.g. &quot;Dell&quot; under Work Experience). Picking a specific entry pins the
+          whole document to it; picking just the category still narrows the chat to that
+          category. If the document covers more than one (e.g. a full resume), leave both
           unset and the chat will ask you to confirm per section instead.
         </p>
         <div className="flex gap-2 items-center">
-          <select
-            className="border rounded px-2 py-1 text-sm bg-transparent"
-            value={storyBackgroundType}
-            onChange={(e) => setStoryBackgroundType(e.target.value as StoryEntryType | '')}
-          >
-            <option value="">Mixed / not sure — ask per section</option>
-            {BACKGROUND_TYPE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <BackgroundPicker value={storyBackground} onChange={setStoryBackground} />
           <input
             type="file"
             onChange={(e) => e.target.files?.[0] && uploadStory(e.target.files[0])}
@@ -128,18 +210,7 @@ export default function ResumesPage() {
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium">Resume (formatting reference)</h2>
         <div className="flex gap-2 items-center">
-          <select
-            className="border rounded px-2 py-1 text-sm bg-transparent"
-            value={resumeBackgroundType}
-            onChange={(e) => setResumeBackgroundType(e.target.value as StoryEntryType | '')}
-          >
-            <option value="">Mixed / not sure — ask per section</option>
-            {BACKGROUND_TYPE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <BackgroundPicker value={resumeBackground} onChange={setResumeBackground} />
           <input
             type="file"
             onChange={(e) => e.target.files?.[0] && uploadResume(e.target.files[0])}

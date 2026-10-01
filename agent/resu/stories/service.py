@@ -36,6 +36,11 @@ class RunTurnRequest(BaseModel):
     # instructions can tell the model the scoping is a hard boundary already
     # enforced, not something left to the model to re-derive.
     hint_entry_type: Literal["workExperience", "education", "internship", "project", "paper"] | None = None
+    # Set when the user picked one specific entry (e.g. one particular Work
+    # Experience row, not just the category) for this document at upload
+    # time — the entries dict has already been narrowed to just that one
+    # entry, so the whole document is pinned to it.
+    hint_entry_id: str | None = None
     # JSON-encoded prior message history (from a previous turn's response),
     # or None to start a fresh session.
     message_history_json: str | None = None
@@ -64,6 +69,7 @@ async def run_turn_endpoint(body: RunTurnRequest) -> RunTurnResponse:
         entries=body.entries or {},
         api_base_url=API_BASE_URL,
         hint_entry_type=body.hint_entry_type,
+        hint_entry_id=body.hint_entry_id,
         message_history=history,
         user_reply=body.user_reply,
     )

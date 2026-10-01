@@ -5,14 +5,26 @@ import { ProfileFieldsInput, ResumeTemplateInput, ResumesService } from './resum
 import { StoriesService } from '../stories/stories.service';
 import { StoryEntryType } from '@prisma/client';
 
-/** Reads the optional "backgroundType" field the upload form sends alongside
- * the file — the dropdown the user picks (Work Experience/Education/
- * Internship/Project/Paper) before uploading, so the extraction agent knows
- * which category of entries this whole document is about up front. */
+/** Reads the optional "backgroundType"/"backgroundEntryId" fields the upload
+ * form sends alongside the file — the two-step dropdown the user picks
+ * (category, then the specific entry e.g. "Dell" under Work Experience)
+ * before uploading, so the extraction agent knows which entry this whole
+ * document is about up front, not just its category. */
+function readMultipartField(
+  file: { fields: Record<string, unknown> },
+  name: string,
+): string | undefined {
+  const field = file.fields?.[name] as MultipartValue<string> | undefined;
+  return field?.value || undefined;
+}
+
 function readBackgroundTypeField(file: { fields: Record<string, unknown> }): StoryEntryType | undefined {
-  const field = file.fields?.backgroundType as MultipartValue<string> | undefined;
-  const value = field?.value;
+  const value = readMultipartField(file, 'backgroundType');
   return value && value in StoryEntryType ? (value as StoryEntryType) : undefined;
+}
+
+function readBackgroundEntryIdField(file: { fields: Record<string, unknown> }): string | undefined {
+  return readMultipartField(file, 'backgroundEntryId');
 }
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
@@ -36,6 +48,7 @@ export class ResumesController {
       sourceType: 'STORY_FILE',
       storyFileId: saved.id,
       hintEntryType: readBackgroundTypeField(file),
+      hintEntryId: readBackgroundEntryIdField(file),
     });
     return saved;
   }
@@ -50,6 +63,7 @@ export class ResumesController {
       sourceType: 'RESUME_FILE',
       resumeFileId: saved.id,
       hintEntryType: readBackgroundTypeField(file),
+      hintEntryId: readBackgroundEntryIdField(file),
     });
     return saved;
   }

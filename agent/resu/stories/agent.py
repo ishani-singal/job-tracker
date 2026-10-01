@@ -139,9 +139,20 @@ def _render_entries_for_matching(entries: dict) -> str:
     return "\n".join(lines) if lines else "(no structured entries yet)"
 
 
-def _render_hint_line(hint_entry_type: str | None) -> str:
+def _render_hint_line(hint_entry_type: str | None, hint_entry_id: str | None) -> str:
     if not hint_entry_type:
         return ""
+    if hint_entry_id:
+        return (
+            f"Background hint: the user pinned this entire document to one "
+            f"specific \"{hint_entry_type}\" entry (id={hint_entry_id}) at "
+            "upload time — the entries list above has already been narrowed "
+            "to just that one entry. Every candidate you return must use "
+            "this exact entry_type and entry_id; do not propose a new entry "
+            "or match against anything else, even if the text seems to "
+            "describe something slightly different — ask a clarifying "
+            "question instead if it genuinely doesn't fit.\n\n"
+        )
     return (
         f"Background hint: the user tagged this entire document as "
         f"\"{hint_entry_type}\" at upload time, and the entries list above "
@@ -158,6 +169,7 @@ async def run_turn(
     entries: dict,
     api_base_url: str,
     hint_entry_type: str | None,
+    hint_entry_id: str | None,
     message_history: list[ModelMessage] | None,
     user_reply: str | None,
 ) -> tuple[StoriesTurnOutput, list[ModelMessage]]:
@@ -174,7 +186,7 @@ async def run_turn(
         prompt = user_reply or ""
     else:
         entries_block = _render_entries_for_matching(entries)
-        hint_line = _render_hint_line(hint_entry_type)
+        hint_line = _render_hint_line(hint_entry_type, hint_entry_id)
         prompt = (
             f"Source type: {source_type}\n"
             f"Source label: {source_label}\n\n"
