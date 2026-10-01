@@ -20,7 +20,16 @@ const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 // the ceiling — AbortSignal remains the mechanism for a clean, intentional
 // cutoff (via agentCallSignal below), now comfortably inside this larger
 // window instead of racing against a shorter, invisible one.
-const AGENT_FETCH_TIMEOUT_MS = 8 * 60 * 1000;
+//
+// 15 minutes (not 8): an entry with several tagged sources still needs
+// O(log N) sequential LLM-call rounds even after the per-source-parallel +
+// tournament-merge redesign (see agent/resu/stories/agent.py), and each
+// round can itself retry for up to 90s on an Azure 429 — a real 4-source
+// entry hit the 8-minute ceiling in production (Azure's rate limit here is
+// persistently tight), so the ceiling needs real headroom above the
+// structurally-reduced-but-still-nonzero worst case, not just above the
+// common case.
+const AGENT_FETCH_TIMEOUT_MS = 15 * 60 * 1000;
 const agentDispatcher = new UndiciAgent({
   headersTimeout: AGENT_FETCH_TIMEOUT_MS,
   bodyTimeout: AGENT_FETCH_TIMEOUT_MS,
@@ -58,7 +67,7 @@ interface EntryDocumentSessionState {
   entryId: string;
   entryLabel: string;
   existingDocumentHtml: string;
-  rawSources: string[];
+  rawSources: { label: string; text: string }[];
   alreadyAsked: boolean;
 }
 
@@ -143,6 +152,20 @@ export class SessionsService {
 
     this.runTurnInBackground(session, session.messageHistoryJson, userReply);
     return this.get(sessionId);
+  }
+
+  /**
+   * Appends a one-line, in-progress status update to the session's chat —
+   * called by the Python agent mid-run (see agent/resu/stories/agent.py)
+   * so the chat shows live "evaluating file X... done" / "merging..." lines
+   * while a long generation is still in flight, not just the final result.
+   * Stored as a TOOL-role message so the chat panel can render it as a
+   * compact status line rather than a full chat bubble.
+   */
+  async progress(sessionId: string, message: string) {
+    await this.prisma.sessionMessage.create({
+      data: { sessionId, role: MessageRole.TOOL, content: message },
+    });
   }
 
   /**
@@ -391,6 +414,7 @@ export class SessionsService {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        session_id: sessionId,
         existing_document_html: state.existingDocumentHtml,
         raw_sources: state.rawSources,
         entry_label: state.entryLabel,

@@ -63,6 +63,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import httpx
 from pydantic import BaseModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
@@ -71,6 +72,28 @@ from pydantic_ai import Agent
 
 from .definition import CLARIFY_INSTRUCTIONS, CLARIFY_SOUL, DOCUMENT_INSTRUCTIONS, DOCUMENT_SOUL
 from ..rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
+
+
+class RawSource(BaseModel):
+    """One source's text paired with a short label (filename or repo name)
+    — the label is only used for progress reporting (see _report_progress);
+    generation itself only ever reads `text`.
+    """
+    label: str
+    text: str
+
+
+async def _report_progress(api_base_url: str, session_id: str, message: str) -> None:
+    """Posts a one-line, in-progress status update into the session's chat
+    (NestJS's POST /sessions/:id/progress — see sessions.service.ts). Best-
+    effort: a progress line is a nice-to-have, never worth failing or
+    retrying the actual generation over, so any error here is swallowed.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(f"{api_base_url}/sessions/{session_id}/progress", json={"message": message})
+    except Exception:
+        pass
 
 _model = OpenAIChatModel(
     os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
@@ -177,8 +200,10 @@ async def _generate_or_revise_chunk(
 
 
 async def generate_document(
+    session_id: str,
+    api_base_url: str,
     existing_document_html: str,
-    raw_sources: list[str],
+    raw_sources: list[RawSource],
     entry_label: str,
     clarification: str | None = None,
 ) -> str:
@@ -195,32 +220,44 @@ async def generate_document(
     merge (see module docstring and _tournament_merge) — never two merges
     racing to update the same shared document, but only O(log N) sequential
     rounds rather than O(N) sequential merges for an entry with many
-    sources.
+    sources. Reports one-line progress updates into the session's chat
+    (session_id/api_base_url) as each source starts/finishes and as each
+    merge round starts/finishes.
     """
     sources = list(raw_sources)
     if clarification and clarification.strip():
         sources = [
-            f"User-provided clarification (answers a question asked about "
-            f"this entry's source material): {clarification}",
+            RawSource(label="your answer", text=(
+                f"User-provided clarification (answers a question asked about "
+                f"this entry's source material): {clarification}"
+            )),
             *sources,
         ]
-    sources = [s for s in sources if s.strip()]
+    sources = [s for s in sources if s.text.strip()]
     if not sources:
         # Nothing new to fold in — leave the existing document (if any) as-is
         # rather than asking the model to revise against empty source text.
         return existing_document_html
 
     if len(sources) == 1:
-        return await _draft_from_source(existing_document_html, sources[0], entry_label)
+        source = sources[0]
+        await _report_progress(api_base_url, session_id, f"Evaluating {source.label}...")
+        result = await _draft_from_source(existing_document_html, source.text, entry_label)
+        await _report_progress(api_base_url, session_id, f"{source.label} done")
+        return result
 
     # Multiple sources: draft each source's contribution INDEPENDENTLY and IN
     # PARALLEL (each against the original existing_document_html, not
     # against each other's in-progress output) — bounded to 2 concurrent
     # drafts at once by LLM_CONCURRENCY, so an entry with many sources still
     # only ever has 2 simultaneous LLM calls in flight.
-    drafts = await asyncio.gather(
-        *(_draft_from_source(existing_document_html, source, entry_label) for source in sources)
-    )
+    async def draft_one(source: RawSource) -> str:
+        await _report_progress(api_base_url, session_id, f"Evaluating {source.label}...")
+        result = await _draft_from_source(existing_document_html, source.text, entry_label)
+        await _report_progress(api_base_url, session_id, f"{source.label} done")
+        return result
+
+    drafts = await asyncio.gather(*(draft_one(source) for source in sources))
 
     # Combine the N independent drafts via a pairwise TOURNAMENT merge
     # rather than N sequential one-at-a-time merges: round 1 merges drafts
@@ -235,24 +272,34 @@ async def generate_document(
     # of O(N) sequential merge calls — for a 4-source entry, 2 rounds
     # instead of 4 sequential merges, roughly halving wall-clock time on
     # the merge phase for source-heavy entries.
-    return await _tournament_merge(drafts, entry_label)
+    labels = [s.label for s in sources]
+    return await _tournament_merge(drafts, labels, entry_label, api_base_url, session_id)
 
 
-async def _tournament_merge(documents: list[str], entry_label: str) -> str:
+async def _tournament_merge(
+    documents: list[str], labels: list[str], entry_label: str, api_base_url: str, session_id: str,
+) -> str:
     current_round = documents
+    current_labels = labels
     while len(current_round) > 1:
         pairs = [current_round[i : i + 2] for i in range(0, len(current_round), 2)]
-        current_round = await asyncio.gather(
-            *(
-                _merge_documents(pair[0], pair[1], entry_label) if len(pair) == 2 else _identity(pair[0])
-                for pair in pairs
-            )
+        label_pairs = [current_labels[i : i + 2] for i in range(0, len(current_labels), 2)]
+
+        async def merge_pair(pair: list[str], label_pair: list[str]) -> tuple[str, str]:
+            if len(pair) == 1:
+                return pair[0], label_pair[0]
+            merged_label = " + ".join(label_pair)
+            await _report_progress(api_base_url, session_id, f"Merging {merged_label}...")
+            result = await _merge_documents(pair[0], pair[1], entry_label)
+            await _report_progress(api_base_url, session_id, f"Merge of {merged_label} done")
+            return result, merged_label
+
+        results = await asyncio.gather(
+            *(merge_pair(pair, label_pair) for pair, label_pair in zip(pairs, label_pairs))
         )
+        current_round = [r[0] for r in results]
+        current_labels = [r[1] for r in results]
     return current_round[0]
-
-
-async def _identity(value: str) -> str:
-    return value
 
 
 async def _draft_from_source(existing_html: str, source_text: str, entry_label: str) -> str:
@@ -299,7 +346,7 @@ async def _merge_documents(document_a: str, document_b: str, entry_label: str) -
 
 
 async def _check_for_clarification(
-    existing_document_html: str, raw_sources: list[str], entry_label: str,
+    existing_document_html: str, raw_sources: list[RawSource], entry_label: str,
 ) -> str | None:
     """One small, cheap call deciding whether the source material has a
     genuine, resolvable gap/contradiction worth asking the user about before
@@ -309,7 +356,7 @@ async def _check_for_clarification(
     over a summary of the material, not a full write-up) and must stay cheap
     even for large source sets.
     """
-    combined_source = "\n\n---\n\n".join(s for s in raw_sources if s.strip())
+    combined_source = "\n\n---\n\n".join(s.text for s in raw_sources if s.text.strip())
     if not combined_source.strip():
         return None
 
@@ -340,8 +387,10 @@ async def _check_for_clarification(
 
 
 async def run_entry_document_turn(
+    session_id: str,
+    api_base_url: str,
     existing_document_html: str,
-    raw_sources: list[str],
+    raw_sources: list[RawSource],
     entry_label: str,
     user_reply: str | None,
     already_asked: bool,
@@ -362,5 +411,7 @@ async def run_entry_document_turn(
         if question:
             return False, None, question
 
-    content_html = await generate_document(existing_document_html, raw_sources, entry_label, user_reply)
+    content_html = await generate_document(
+        session_id, api_base_url, existing_document_html, raw_sources, entry_label, user_reply,
+    )
     return True, content_html, None

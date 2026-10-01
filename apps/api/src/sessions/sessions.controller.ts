@@ -50,4 +50,11 @@ export class SessionsController {
   accept(@Param('id') id: string) {
     return this.sessions.accept(id);
   }
+
+  /** Called by the Python agent mid-run to post a live, one-line progress
+   * update into the session's chat (see SessionsService.progress). */
+  @Post(':id/progress')
+  progress(@Param('id') id: string, @Body() body: { message: string }) {
+    return this.sessions.progress(id, body.message);
+  }
 }

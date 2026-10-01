@@ -258,24 +258,34 @@ function SessionChat({ session }: { session: GenerationSession }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-        {session.messages.map((message) => (
-          <div
-            key={message.id}
-            className={`text-sm rounded p-2 whitespace-pre-wrap ${
-              message.role === 'USER'
-                ? 'bg-blue-50 dark:bg-blue-950/40 self-end max-w-[85%]'
-                : 'bg-black/5 dark:bg-white/5 self-start max-w-[90%]'
-            }`}
-          >
-            {message.role !== 'ASSISTANT'
-              ? message.content
-              : session.scope === 'LINKEDIN'
-                ? formatLinkedinMessage(message.content)
-                : session.scope === 'ENTRY_DOCUMENT'
-                  ? formatEntryDocumentMessage(message.content)
-                  : formatResumeMessage(message.content)}
-          </div>
-        ))}
+        {session.messages.map((message) =>
+          message.role === 'TOOL' ? (
+            // Live one-line progress update (e.g. "Evaluating X..." / "X
+            // done" / "Merging..." ), posted by the agent mid-run — a
+            // compact status line, not a full chat bubble, so a long
+            // generation's progress stays scannable at a glance.
+            <div key={message.id} className="text-xs opacity-50 self-start">
+              {message.content}
+            </div>
+          ) : (
+            <div
+              key={message.id}
+              className={`text-sm rounded p-2 whitespace-pre-wrap ${
+                message.role === 'USER'
+                  ? 'bg-blue-50 dark:bg-blue-950/40 self-end max-w-[85%]'
+                  : 'bg-black/5 dark:bg-white/5 self-start max-w-[90%]'
+              }`}
+            >
+              {message.role !== 'ASSISTANT'
+                ? message.content
+                : session.scope === 'LINKEDIN'
+                  ? formatLinkedinMessage(message.content)
+                  : session.scope === 'ENTRY_DOCUMENT'
+                    ? formatEntryDocumentMessage(message.content)
+                    : formatResumeMessage(message.content)}
+            </div>
+          ),
+        )}
         {isRunning && (
           <div className="text-xs opacity-50 self-start flex items-center gap-1">
             <span className="inline-block w-2 h-2 rounded-full bg-orange-300 animate-pulse" />

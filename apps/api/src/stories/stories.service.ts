@@ -57,24 +57,28 @@ export class StoriesService {
     return { contentHtml: doc.contentHtml };
   }
 
-  /** Every raw source's text tagged to one entry — a Stories file, a Resume
-   * file, and/or a connected GitHub repo — not combined, not LLM-processed;
-   * the document-generation agent does its own reading/combining. Called by
+  /** Every raw source tagged to one entry — a Stories file, a Resume file,
+   * and/or a connected GitHub repo — paired with a short label (filename or
+   * repo name) for progress reporting, not combined, not LLM-processed; the
+   * document-generation agent does its own reading/combining. Called by
    * SessionsService.runEntryDocumentTurn at the start of a Generate session. */
-  async getRawSourcesForEntry(entryType: StoryEntryType, entryId: string): Promise<string[]> {
+  async getRawSourcesForEntry(
+    entryType: StoryEntryType,
+    entryId: string,
+  ): Promise<{ label: string; text: string }[]> {
     const [storyFiles, resumeFiles, repos] = await Promise.all([
       this.resumes.listStoryFilesForEntry(entryType, entryId),
       this.resumes.listResumeFilesForEntry(entryType, entryId),
       this.github.listConnectedReposForEntry(entryType, entryId).catch(() => []),
     ]);
 
-    const texts = await Promise.all([
-      ...storyFiles.map((f) => this.resumes.getStoryFileText(f.id)),
-      ...resumeFiles.map((f) => this.resumes.getResumeFileText(f.id)),
-      ...repos.map((r) => this.getRepoRawText(r.fullName)),
+    const sources = await Promise.all([
+      ...storyFiles.map(async (f) => ({ label: f.filename, text: await this.resumes.getStoryFileText(f.id) })),
+      ...resumeFiles.map(async (f) => ({ label: f.filename, text: await this.resumes.getResumeFileText(f.id) })),
+      ...repos.map(async (r) => ({ label: r.fullName, text: await this.getRepoRawText(r.fullName) })),
     ]);
 
-    return texts.filter((t) => t.trim().length > 0);
+    return sources.filter((s) => s.text.trim().length > 0);
   }
 
   private async getRepoRawText(fullName: string): Promise<string> {

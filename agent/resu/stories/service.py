@@ -14,17 +14,22 @@ user_reply/already_asked do).
 """
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from .agent import run_entry_document_turn
+from .agent import RawSource, run_entry_document_turn
 
 router = APIRouter(prefix="/stories", tags=["stories"])
 
+API_BASE_URL = os.environ.get("JOB_TRACKER_API_URL", "http://localhost:4100")
+
 
 class RunDocumentTurnRequest(BaseModel):
+    session_id: str
     existing_document_html: str
-    raw_sources: list[str]
+    raw_sources: list[RawSource]
     entry_label: str
     user_reply: str | None = None
     already_asked: bool = False
@@ -39,6 +44,8 @@ class RunDocumentTurnResponse(BaseModel):
 @router.post("/run-turn", response_model=RunDocumentTurnResponse)
 async def run_document_turn_endpoint(body: RunDocumentTurnRequest) -> RunDocumentTurnResponse:
     done, content_html, question = await run_entry_document_turn(
+        body.session_id,
+        API_BASE_URL,
         body.existing_document_html,
         body.raw_sources,
         body.entry_label,
