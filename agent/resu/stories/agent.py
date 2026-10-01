@@ -25,23 +25,20 @@ model's entire output budget to itself.
 """
 from __future__ import annotations
 
-import asyncio
 import os
-import random
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from pydantic import BaseModel
-from pydantic_ai import Agent
-from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai import Agent
 
 from .definition import WRITE_UP_INSTRUCTIONS, WRITE_UP_SOUL
-from ..rate_limit import LLM_CONCURRENCY
+from ..rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
 
 _model = OpenAIChatModel(
     os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
@@ -120,23 +117,8 @@ async def _write_up_chunk(chunk: str, chunk_index: int, chunk_count: int, entry_
     # which otherwise reliably bursts past the Azure deployment's per-minute
     # token rate limit (see rate_limit.py).
     async with LLM_CONCURRENCY:
-        result = await _run_with_retry(write_up_agent, prompt)
+        result = await retry_on_rate_limit(lambda: write_up_agent.run(prompt))
     return result.output.narrative_text
-
-
-async def _run_with_retry(agent: Agent, prompt: str, max_attempts: int = 5):
-    for attempt in range(max_attempts):
-        try:
-            return await agent.run(prompt)
-        except ModelHTTPError as e:
-            if e.status_code != 429 or attempt == max_attempts - 1:
-                raise
-            # Exponential backoff with jitter — the 429 is a per-minute
-            # token quota, so a short fixed retry would likely just hit it
-            # again; this spreads retries out enough for the quota window
-            # to roll over.
-            delay = (2**attempt) + random.uniform(0, 1)
-            await asyncio.sleep(delay)
 
 
 async def extract_narrative(raw_text: str, entry_label: str) -> str:

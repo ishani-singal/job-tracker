@@ -25,7 +25,7 @@ from pydantic_ai.providers.azure import AzureProvider
 
 from .deps import ResuDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS, build_profile_context
-from .rate_limit import LLM_CONCURRENCY
+from .rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
 
 _model = OpenAIChatModel(
     os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
@@ -194,10 +194,11 @@ async def run_turn(
         if message_history
         else f"Generate a tailored resume for application {application_id}."
     )
-    result = await resu_agent.run(
-        prompt,
-        deps=deps,
-        message_history=message_history,
+    # A 429 can surface from any model request inside this multi-step run
+    # (not just the narrative sub-agent's own calls), and nothing is
+    # persisted until .run() returns, so retrying the whole call is safe.
+    result = await retry_on_rate_limit(
+        lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
     )
     return result.output, result.all_messages()
 
@@ -219,9 +220,7 @@ async def run_company_turn(
         if message_history
         else f"Generate one common resume covering all applications at {company}."
     )
-    result = await resu_agent.run(
-        prompt,
-        deps=deps,
-        message_history=message_history,
+    result = await retry_on_rate_limit(
+        lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
     )
     return result.output, result.all_messages()
