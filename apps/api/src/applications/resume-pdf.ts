@@ -2,7 +2,8 @@ import PDFDocument from 'pdfkit';
 import type { Prisma } from '@prisma/client';
 import type { ResumeTemplate as SharedResumeTemplate } from '@job-tracker/shared-types';
 import { isStructuredResume } from './structured-resume-content';
-import { renderStructuredResumePdf } from './structured-resume-pdf';
+import { renderStructuredResumeDocx } from './structured-resume-docx';
+import { convertDocxToPdf } from './docx-to-pdf';
 
 // Callers pass either Prisma's raw ResumeTemplate row (updatedAt: Date) or
 // the API's serialized shape (updatedAt: string) — the renderer only reads
@@ -10,13 +11,35 @@ import { renderStructuredResumePdf } from './structured-resume-pdf';
 type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
 
 /**
+ * Renders generated resume content into a .docx — the primary rendered
+ * artifact. PDF downloads are produced by converting this same document
+ * (see renderResumePdf below) rather than a separate pdfkit layout, so the
+ * two formats never drift apart. Only structured resumes (which carry a
+ * ResumeTemplate) can be rendered as Word; legacy free-form content has no
+ * .docx equivalent and must go through the pdfkit text fallback for PDF.
+ */
+export function renderResumeDocx(
+  content: Prisma.JsonValue,
+  template: ResumeTemplate,
+  candidateName?: string | null,
+): Promise<Buffer> {
+  if (!isStructuredResume(content)) {
+    throw new Error('renderResumeDocx requires structured resume content');
+  }
+  return renderStructuredResumeDocx(content, template, candidateName);
+}
+
+/**
  * Renders generated resume content into a PDF. Two shapes are supported:
- * - Structured (StructuredResume: {contactLine, sections}) — rendered via
- *   the shrink-to-fit-one-page ResumeTemplate-driven renderer. Requires
- *   `template` (fetch via ResumesService.getResumeTemplate() first).
+ * - Structured (StructuredResume: {contactLine, sections}) — built as a
+ *   Word document (renderResumeDocx, using the shrink-to-fit-one-page
+ *   ResumeTemplate-driven layout) and converted to PDF via headless
+ *   LibreOffice, so the PDF is always a faithful rendering of the same
+ *   document available for Word download. Requires `template`.
  * - Legacy free-form markdown-ish string (what the Resu agent still
  *   produces as of this writing) — rendered via lightweight markdown
- *   parsing, unchanged from before structured resumes existed.
+ *   parsing directly in pdfkit, unchanged from before structured resumes
+ *   existed (no Word equivalent to convert from).
  * Any other JSON shape is stringified so this never throws.
  *
  * candidateName (from ResumesService.getProfile().candidateName) is printed
@@ -27,14 +50,15 @@ type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
  * In structured mode, candidateName is rendered bold above the contact line
  * (email | city, state | phone | LinkedIn) built by the agent.
  */
-export function renderResumePdf(
+export async function renderResumePdf(
   title: string,
   content: Prisma.JsonValue,
   template?: ResumeTemplate,
   candidateName?: string | null,
 ): Promise<Buffer> {
   if (isStructuredResume(content) && template) {
-    return renderStructuredResumePdf(content, template, candidateName);
+    const docxBuffer = await renderStructuredResumeDocx(content, template, candidateName);
+    return convertDocxToPdf(docxBuffer);
   }
   const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
   return renderResumePdfFromText(candidateName ?? title, text);

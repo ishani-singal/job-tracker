@@ -16,7 +16,7 @@ import {
   UpdateApplicationInput,
 } from './applications.service';
 import { AnalyticsService } from '../analytics/analytics.service';
-import { renderResumePdf } from './resume-pdf';
+import { renderResumeDocx, renderResumePdf } from './resume-pdf';
 import { isStructuredResume } from './structured-resume-content';
 import { ResumesService } from '../resumes/resumes.service';
 
@@ -73,5 +73,26 @@ export class ApplicationsController {
       .header('Content-Type', 'application/pdf')
       .header('Content-Disposition', `attachment; filename="${safeName}-resume.pdf"`)
       .send(pdf);
+  }
+
+  @Get(':id/resume.docx')
+  async downloadResumeDocx(@Param('id') id: string, @Res() res: FastifyReply) {
+    const application = await this.applications.get(id);
+    if (!application.resumeContent) {
+      throw new NotFoundException('No resume has been generated for this application yet');
+    }
+    if (!isStructuredResume(application.resumeContent)) {
+      throw new NotFoundException('This resume predates Word export and must be regenerated to download as .docx');
+    }
+
+    const template = await this.resumes.getResumeTemplate();
+    const profile = await this.resumes.getProfile();
+    const docx = await renderResumeDocx(application.resumeContent, template, profile.candidateName);
+
+    const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
+    res
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+      .header('Content-Disposition', `attachment; filename="${safeName}-resume.docx"`)
+      .send(docx);
   }
 }

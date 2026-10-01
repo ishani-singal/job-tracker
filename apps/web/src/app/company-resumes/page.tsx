@@ -228,12 +228,20 @@ function CompanyCard({
             {startSession.isPending ? 'Starting...' : company.hasResume ? 'Regenerate' : 'Generate Resume'}
           </button>
           {company.hasResume && (
-            <a
-              href={`${API_BASE}/company-resumes/${encodeURIComponent(company.resumeCompanyKey)}/resume.pdf`}
-              className="px-2 py-1 text-xs rounded border"
-            >
-              Download PDF
-            </a>
+            <>
+              <a
+                href={`${API_BASE}/company-resumes/${encodeURIComponent(company.resumeCompanyKey)}/resume.pdf`}
+                className="px-2 py-1 text-xs rounded border"
+              >
+                Download PDF
+              </a>
+              <a
+                href={`${API_BASE}/company-resumes/${encodeURIComponent(company.resumeCompanyKey)}/resume.docx`}
+                className="px-2 py-1 text-xs rounded border"
+              >
+                Download Word
+              </a>
+            </>
           )}
           <button
             className="px-2 py-1 text-xs rounded border"

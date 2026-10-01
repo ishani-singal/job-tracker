@@ -13,9 +13,9 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@job-tracker/shared-types": "workspace:*",
     "@fastify/multipart": "^8.3.0",
     "@fastify/static": "^7.0.4",
+    "@job-tracker/shared-types": "workspace:*",
     "@nestjs/common": "^10.4.0",
     "@nestjs/core": "^10.4.0",
     "@nestjs/platform-fastify": "^10.4.0",
@@ -26,6 +26,7 @@
     "cheerio": "^1.0.0",
     "country-list": "^2.4.1",
     "csv-parse": "^5.6.0",
+    "docx": "^9.8.1",
     "fastify": "^4.28.1",
     "mammoth": "^1.8.0",
     "pdf-parse": "^1.1.1",

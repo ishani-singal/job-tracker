@@ -98,12 +98,20 @@ export function ApplicationRow({
           {startSession.isPending ? 'Starting...' : application.resumeContent ? 'Regenerate' : 'Generate Resume'}
         </button>
         {application.resumeContent && (
-          <a
-            href={`${API_BASE}/applications/${application.id}/resume.pdf`}
-            className="px-2 py-1 text-xs rounded border"
-          >
-            Download PDF
-          </a>
+          <>
+            <a
+              href={`${API_BASE}/applications/${application.id}/resume.pdf`}
+              className="px-2 py-1 text-xs rounded border"
+            >
+              Download PDF
+            </a>
+            <a
+              href={`${API_BASE}/applications/${application.id}/resume.docx`}
+              className="px-2 py-1 text-xs rounded border"
+            >
+              Download Word
+            </a>
+          </>
         )}
         <button className="px-2 py-1 text-xs rounded border" onClick={() => setEditOpen(true)}>
           Edit

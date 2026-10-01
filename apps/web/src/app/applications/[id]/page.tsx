@@ -91,12 +91,20 @@ export default function ApplicationDetailPage({
           <h2 className="text-sm font-medium">Generated Resume</h2>
           <div className="flex gap-2">
             {application.resumeContent && (
-              <a
-                href={`${API_BASE}/applications/${id}/resume.pdf`}
-                className="px-2 py-1 text-xs rounded border"
-              >
-                Download PDF
-              </a>
+              <>
+                <a
+                  href={`${API_BASE}/applications/${id}/resume.pdf`}
+                  className="px-2 py-1 text-xs rounded border"
+                >
+                  Download PDF
+                </a>
+                <a
+                  href={`${API_BASE}/applications/${id}/resume.docx`}
+                  className="px-2 py-1 text-xs rounded border"
+                >
+                  Download Word
+                </a>
+              </>
             )}
             <button
               className="px-2 py-1 text-xs rounded border"

@@ -5,7 +5,7 @@ import type { ResumeTemplate as SharedResumeTemplate, StructuredResume } from '@
 // accepts either the API's serialized shape (updatedAt: string) or Prisma's
 // raw model (updatedAt: Date) without forcing callers to convert one to the
 // other just to satisfy this function's signature.
-type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
+export type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
 
 /**
  * Renders a StructuredResume against a ResumeTemplate's min/max ranges,
@@ -32,7 +32,7 @@ function lerp(min: number, max: number, scale: number): number {
   return min + (max - min) * scale;
 }
 
-function resolvedFields(template: ResumeTemplate, scale: number) {
+export function resolvedFields(template: ResumeTemplate, scale: number) {
   const bulletFont = Math.max(BULLET_FONT_HARD_FLOOR, lerp(template.bulletFontMin, template.bulletFontMax, scale));
   const nameFont = bulletFont + lerp(template.nameFontOffsetMin, template.nameFontOffsetMax, scale);
   const sectionHeaderFont = nameFont + lerp(
@@ -60,8 +60,13 @@ function resolvedFields(template: ResumeTemplate, scale: number) {
  * (may overflow), lower scale means smaller/tighter (always fits, since
  * scale=0 uses every field's MIN). 12 iterations gets well under 1/1000
  * granularity between min and max, plenty for point-sized font/spacing steps.
+ *
+ * Exported so the Word renderer (structured-resume-docx.ts) can reuse the
+ * same pdfkit-measured fitting scale rather than re-implementing layout
+ * measurement in the `docx` library, which has no equivalent of reading back
+ * a measured height before committing to a page.
  */
-function findFittingScale(
+export function findFittingScale(
   content: StructuredResume,
   template: ResumeTemplate,
   candidateName?: string | null,
@@ -146,7 +151,7 @@ async function renderAtScale(
   });
 }
 
-type ResolvedFields = ReturnType<typeof resolvedFields>;
+export type ResolvedFields = ReturnType<typeof resolvedFields>;
 
 function layoutResume(
   doc: PDFKit.PDFDocument,
