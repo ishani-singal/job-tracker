@@ -59,7 +59,7 @@ function AtsScoreBadge({
   invalid?: boolean;
 }) {
   if (invalid) return <span className="text-xs font-medium text-red-600">Conditions not valid</span>;
-  if (score === null) return <span className="text-xs opacity-40">Scoring...</span>;
+  if (score === null) return <span className="text-xs opacity-40">Not scored</span>;
   const color =
     score >= 75 ? 'text-green-600' : score >= 50 ? 'text-amber-600' : 'text-red-600';
   return <span className={`text-xs font-medium ${color}`}>{score}% match</span>;
@@ -170,10 +170,6 @@ export default function ApplicationsPage() {
   const { data: unselectedRolesRaw } = useQuery({
     queryKey: ['discovered-roles', 'unselected'],
     queryFn: () => api.listDiscoveredRoles('unselected'),
-    refetchInterval: (query) => {
-      const anyUnscored = query.state.data?.some((r) => r.atsScore === null);
-      return anyUnscored ? 4000 : false;
-    },
   });
   const minScore = minScoreFilter === '' ? null : Number(minScoreFilter);
   const unselectedRoles = unselectedRolesRaw?.filter(
@@ -187,10 +183,6 @@ export default function ApplicationsPage() {
   const { data: selectedRolesRaw } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
     queryFn: () => api.listDiscoveredRoles('selected'),
-    refetchInterval: (query) => {
-      const anyUnscored = query.state.data?.some((r) => r.atsScore === null);
-      return anyUnscored ? 4000 : false;
-    },
   });
   // scoreByApplicationId/roleIdByApplicationId are built from the
   // UNFILTERED selected roles — unselect and the score badge must keep
@@ -234,6 +226,11 @@ export default function ApplicationsPage() {
       queryClient.invalidateQueries({ queryKey: ['discovered-roles'] });
       queryClient.invalidateQueries({ queryKey: ['applications'] });
     },
+  });
+
+  const rescoreRole = useMutation({
+    mutationFn: (id: string) => api.rescoreRole(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['discovered-roles'] }),
   });
 
   // Applications added directly (via AddApplicationDialog) have no backing
@@ -341,6 +338,8 @@ export default function ApplicationsPage() {
                 profile={profile}
                 onSelect={() => selectRole.mutate(role.id)}
                 selecting={selectRole.isPending}
+                onScore={() => rescoreRole.mutate(role.id)}
+                scoring={rescoreRole.isPending && rescoreRole.variables === role.id}
               />
             ))}
             {unselectedRoles?.length === 0 && (
@@ -404,11 +403,15 @@ function DiscoveredRoleRow({
   profile,
   onSelect,
   selecting,
+  onScore,
+  scoring,
 }: {
   role: DiscoveredRole;
   profile: ResumeProfile | undefined;
   onSelect: () => void;
   selecting: boolean;
+  onScore: () => void;
+  scoring: boolean;
 }) {
   return (
     <div className="border rounded px-4 py-3 text-sm flex items-center justify-between gap-3">
@@ -430,13 +433,22 @@ function DiscoveredRoleRow({
         <RoleExperience role={role} />
         <AtsScoreBadge score={role.atsScore} invalid={hasInvalidCondition(role, profile)} />
       </div>
-      <button
-        className="px-2 py-1 text-xs rounded border shrink-0"
-        onClick={onSelect}
-        disabled={selecting}
-      >
-        {selecting ? 'Selecting...' : 'Select to Apply'}
-      </button>
+      <div className="flex flex-col gap-1 shrink-0">
+        <button
+          className="px-2 py-1 text-xs rounded border"
+          onClick={onScore}
+          disabled={scoring}
+        >
+          {scoring ? 'Scoring...' : role.atsScore === null ? 'Score' : 'Rescore'}
+        </button>
+        <button
+          className="px-2 py-1 text-xs rounded border"
+          onClick={onSelect}
+          disabled={selecting}
+        >
+          {selecting ? 'Selecting...' : 'Select to Apply'}
+        </button>
+      </div>
     </div>
   );
 }

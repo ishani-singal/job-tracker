@@ -11,17 +11,13 @@ import { Browser, chromium, Page } from 'playwright';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApplicationsService } from '../applications/applications.service';
 import { LocationsService } from '../locations/locations.service';
+import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service';
 
 /** Roles posted before this many days ago are dropped during discovery —
  * stale postings clutter the candidate pool and are usually already filled
  * or about to be. Undated roles (no postedDate could be extracted) are kept
  * since we can't tell either way. */
 const MAX_ROLE_AGE_DAYS = 30;
-
-/** Max roles scored in parallel per company. Each unit of work is a
- * headless-browser page load plus an LLM call, so this caps concurrent
- * browser pages and LLM requests rather than being an arbitrary batch size. */
-const SCORING_CONCURRENCY = 4;
 
 /** Some career pages (e.g. Netflix's Eightfold-powered board) render a large
  * JSON app-state/theming blob as literal visible body text — real prose, not
@@ -228,6 +224,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     @Inject(forwardRef(() => ApplicationsService))
     private readonly applications: ApplicationsService,
     private readonly locations: LocationsService,
+    private readonly killSwitch: LlmKillSwitchService,
   ) {}
 
   async onModuleDestroy() {
@@ -454,11 +451,9 @@ export class CompanyRolesService implements OnModuleDestroy {
         },
       });
 
-      // Fire-and-forget ATS scoring for newly discovered roles — don't block
-      // discovery completion on it.
-      this.scoreUnscoredRolesForCompany(company.id).catch((err) =>
-        this.logger.warn(`Scoring failed for ${name}: ${err}`),
-      );
+      // Scoring is no longer triggered automatically after discovery — it
+      // burns one LLM call per role, so it now only runs when the user
+      // clicks "Score" on a specific role (see rescoreRole).
     } catch (err) {
       await this.prisma.trackedCompany.update({
         where: { name },
@@ -1379,49 +1374,6 @@ export class CompanyRolesService implements OnModuleDestroy {
     return { unselected: true };
   }
 
-  private async scoreUnscoredRolesForCompany(companyId: string) {
-    const roles = await this.prisma.discoveredRole.findMany({
-      where: { companyId, atsScore: null },
-    });
-    if (roles.length === 0) return;
-
-    const [profile, entries] = await Promise.all([this.fetchCandidateProfile(), this.fetchCandidateEntries()]);
-
-    const candidateLocation = this.extractCandidateLocation(profile);
-    const candidateMaxYears = this.extractCandidateMaxYears(profile);
-
-    await this.runWithConcurrency(roles, SCORING_CONCURRENCY, async (role) => {
-      try {
-        const jdText = role.jdText || (await this.fetchRoleJd(role.roleUrl));
-        if (!jdText) {
-          // Couldn't resolve a real per-posting page (e.g. the board
-          // redirected to a generic careers/search page) — leave atsScore
-          // null (shown as "unavailable") rather than scoring against the
-          // wrong content.
-          return;
-        }
-        const result = await this.estimateAtsScore(jdText, profile, entries);
-        await this.prisma.discoveredRole.update({
-          where: { id: role.id },
-          data: {
-            jdText: role.jdText || jdText || undefined,
-            atsScore: result.score,
-            atsScoreComputedAt: new Date(),
-            roleIsRemote: result.isRemote,
-            roleCountry: result.country,
-            roleState: result.state,
-            roleCity: result.city,
-            locationMismatch: this.computeLocationMismatch(result, candidateLocation),
-            roleMinYearsExperience: result.minYearsExperience,
-            experienceMismatch: this.computeExperienceMismatch(result.minYearsExperience, candidateMaxYears),
-          },
-        });
-      } catch (err) {
-        this.logger.warn(`ATS scoring failed for role ${role.id}: ${err}`);
-      }
-    });
-  }
-
   /** Resolves the candidate profile's stored country/state codes (from the
    * dropdowns) to display names, so they compare cleanly against a JD's
    * free-form extracted location in computeLocationMismatch(). */
@@ -1459,7 +1411,7 @@ export class CompanyRolesService implements OnModuleDestroy {
   private async fetchWithRetry(url: string, init: RequestInit, maxRetries = 5): Promise<Response> {
     let lastResponse: Response | undefined;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const response = await fetch(url, init);
+      const response = await fetch(url, { ...init, signal: this.killSwitch.signal });
       if (response.ok || (response.status < 500 && response.status !== 429)) return response;
 
       lastResponse = response;
@@ -1474,22 +1426,6 @@ export class CompanyRolesService implements OnModuleDestroy {
       await new Promise((resolve) => setTimeout(resolve, backoffMs));
     }
     return lastResponse!;
-  }
-
-  /** Runs `fn` over `items` with at most `limit` in flight at once — scoring
-   * a company's roles one-at-a-time (each a headless-browser page load plus
-   * an LLM round trip) made discovery scoring take minutes for companies with
-   * many open roles; a small worker pool keeps it bounded without opening
-   * unlimited concurrent browser pages/LLM calls. */
-  private async runWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
-    let index = 0;
-    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (index < items.length) {
-        const item = items[index++];
-        await fn(item);
-      }
-    });
-    await Promise.all(workers);
   }
 
   async rescoreRole(roleId: string) {

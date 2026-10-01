@@ -280,4 +280,6 @@ export const api = {
     request<{ unselected: boolean }>(`/discovered-roles/${id}/unselect`, { method: 'POST' }),
   rescoreRole: (id: string) =>
     request<DiscoveredRole>(`/discovered-roles/${id}/rescore`, { method: 'POST' }),
+
+  stopAllLlmCalls: () => request<{ stopped: boolean }>('/llm/stop', { method: 'POST' }),
 };

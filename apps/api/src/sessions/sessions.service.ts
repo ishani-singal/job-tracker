@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GenerationSessionScope, MessageRole, Prisma, StorySourceType } from '@prisma/client';
 import type { StructuredResume } from '@job-tracker/shared-types';
 import { StoriesService } from '../stories/stories.service';
+import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service';
 
 const SOURCE_TYPE_TO_PRISMA: Record<string, StorySourceType> = {
   story_file: StorySourceType.STORY_FILE,
@@ -68,6 +69,7 @@ export class SessionsService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => StoriesService))
     private readonly stories: StoriesService,
+    private readonly killSwitch: LlmKillSwitchService,
   ) {}
 
   /** All sessions across all scopes, newest first — what the side panel lists. */
@@ -279,6 +281,7 @@ export class SessionsService {
           message_history_json: priorHistoryJson,
           user_reply: userReply,
         }),
+        signal: this.killSwitch.signal,
       });
       if (!response.ok) throw new Error(`Agent stories run-turn failed: ${response.status}`);
       const result = (await response.json()) as StoriesRunTurnResponse;
@@ -343,6 +346,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
+      signal: this.killSwitch.signal,
     });
     if (!response.ok) throw new Error(`Agent run-turn failed: ${response.status}`);
     const result = (await response.json()) as RunTurnResponse;
@@ -377,6 +381,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
+      signal: this.killSwitch.signal,
     });
     if (!response.ok) throw new Error(`Agent run-company-turn failed: ${response.status}`);
     const result = (await response.json()) as RunTurnResponse;
@@ -409,6 +414,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
+      signal: this.killSwitch.signal,
     });
     if (!response.ok) throw new Error(`Agent linkedin run-turn failed: ${response.status}`);
     const result = (await response.json()) as LinkedinRunTurnResponse;

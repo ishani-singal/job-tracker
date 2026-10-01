@@ -14,6 +14,7 @@ import { CompanyResumesModule } from './company-resumes/company-resumes.module';
 import { LinkedinDataModule } from './linkedin-data/linkedin-data.module';
 import { CompanyRolesModule } from './company-roles/company-roles.module';
 import { StoriesModule } from './stories/stories.module';
+import { LlmKillSwitchModule } from './llm-kill-switch/llm-kill-switch.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { StoriesModule } from './stories/stories.module';
     LinkedinDataModule,
     CompanyRolesModule,
     StoriesModule,
+    LlmKillSwitchModule,
   ],
 })
 export class AppModule {}

@@ -110,6 +110,29 @@ function BackgroundPicker({
   );
 }
 
+function StopAllLlmCallsButton() {
+  const [stopping, setStopping] = useState(false);
+
+  async function handleStop() {
+    setStopping(true);
+    try {
+      await api.stopAllLlmCalls();
+    } finally {
+      setStopping(false);
+    }
+  }
+
+  return (
+    <button
+      className="px-3 py-1.5 text-sm rounded border border-red-600 text-red-600 dark:text-red-400 dark:border-red-400"
+      onClick={handleStop}
+      disabled={stopping}
+    >
+      {stopping ? 'Stopping...' : 'Stop All LLM Calls'}
+    </button>
+  );
+}
+
 export default function ResumesPage() {
   const queryClient = useQueryClient();
   const { openPanel } = useSessionsPanel();
@@ -173,7 +196,10 @@ export default function ResumesPage() {
 
   return (
     <div className="max-w-3xl mx-auto flex flex-col gap-8">
-      <h1 className="text-xl font-semibold">Resumes</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Resumes</h1>
+        <StopAllLlmCallsButton />
+      </div>
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium">Stories (primary source)</h2>
