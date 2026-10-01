@@ -47,6 +47,7 @@ export interface AppSettings {
   postedBeforeTodayFilterOn: boolean;
   postedWithinDaysFilter: number;
   hideInvalidConditionRolesFilterOn: boolean;
+  excludeKeywordsFilter: string;
   updatedAt: string;
 }
 

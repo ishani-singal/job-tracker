@@ -87,6 +87,16 @@ function RoleExperience({ role }: { role: DiscoveredRole }) {
   );
 }
 
+/** True when none of the user-entered exclude keywords (e.g. "Software
+ * Engineer", "UX Researcher") appear in the role's title or JD text —
+ * matched as whole phrases, case-insensitive. A role with no JD text yet
+ * (not scored) is still checked against its title. */
+function matchesExcludeKeywordsFilter(role: DiscoveredRole, keywords: string[]): boolean {
+  if (keywords.length === 0) return true;
+  const haystack = `${role.title} ${role.jdText ?? ''}`.toLowerCase();
+  return !keywords.some((k) => k.trim() && haystack.includes(k.trim().toLowerCase()));
+}
+
 /** A role's "posted date" for filtering purposes: its real postedDate when
  * known, otherwise the date it was first discovered/pulled (createdAt) —
  * a role with no extracted posting date still has to sit somewhere on a
@@ -121,11 +131,13 @@ export default function ApplicationsPage() {
   const [postedBeforeTodayFilterOn, setPostedBeforeTodayFilterOn] = useState(false);
   const [postedWithinDaysFilter, setPostedWithinDaysFilter] = useState('0');
   const [hideInvalidConditionRolesFilterOn, setHideInvalidConditionRolesFilterOn] = useState(false);
+  const [excludeKeywordsFilter, setExcludeKeywordsFilter] = useState('');
   if (settings && !minScoreFilterInitialized) {
     setMinScoreFilter(settings.minMatchScoreFilter != null ? String(settings.minMatchScoreFilter) : '');
     setPostedBeforeTodayFilterOn(settings.postedBeforeTodayFilterOn);
     setPostedWithinDaysFilter(String(settings.postedWithinDaysFilter));
     setHideInvalidConditionRolesFilterOn(settings.hideInvalidConditionRolesFilterOn);
+    setExcludeKeywordsFilter(settings.excludeKeywordsFilter);
     setMinScoreFilterInitialized(true);
   }
 
@@ -159,6 +171,16 @@ export default function ApplicationsPage() {
     updateSettings.mutate({ hideInvalidConditionRolesFilterOn: checked });
   }
 
+  function handleExcludeKeywordsFilterChange(value: string) {
+    setExcludeKeywordsFilter(value);
+    updateSettings.mutate({ excludeKeywordsFilter: value });
+  }
+
+  const excludeKeywords = excludeKeywordsFilter
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+
   const { data: applications, isLoading } = useQuery({
     queryKey: ['applications'],
     queryFn: api.listApplications,
@@ -178,7 +200,8 @@ export default function ApplicationsPage() {
       (!postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), postedWithinDays)) &&
       (!hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
       (!locationFilterOn || matchesLocationFilter(r, profile)) &&
-      (!experienceFilterOn || matchesExperienceFilter(r, profile)),
+      (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
+      matchesExcludeKeywordsFilter(r, excludeKeywords),
   );
   const { data: selectedRolesRaw } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
@@ -332,6 +355,16 @@ export default function ApplicationsPage() {
                   onChange={(e) => handleHideInvalidConditionRolesFilterChange(e.target.checked)}
                 />
                 Hide roles with invalid conditions
+              </label>
+              <label className="flex items-center gap-1.5 text-xs opacity-70">
+                Exclude keywords
+                <input
+                  type="text"
+                  placeholder="e.g. Software Engineer, UX Researcher"
+                  className="w-56 border rounded px-1.5 py-0.5 bg-transparent"
+                  value={excludeKeywordsFilter}
+                  onChange={(e) => handleExcludeKeywordsFilterChange(e.target.value)}
+                />
               </label>
             </div>
           </div>

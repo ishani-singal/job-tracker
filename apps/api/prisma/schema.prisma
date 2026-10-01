@@ -335,6 +335,11 @@ model AppSettings {
   // whose JD matches a disqualifierKeywords entry — a "Conditions not
   // valid" role, not a real numeric match.
   hideInvalidConditionRolesFilterOn Boolean @default(false)
+  // Comma-separated keywords (case-insensitive) — an Open Role is hidden if
+  // its title or JD text contains any of them. Separate from the profile's
+  // disqualifierKeywords (which marks a role "Conditions not valid" but
+  // still shows it); this one removes the role from Open Roles entirely.
+  excludeKeywordsFilter String @default("")
 
   updatedAt DateTime @updatedAt
 }
