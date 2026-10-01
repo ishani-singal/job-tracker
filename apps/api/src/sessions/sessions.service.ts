@@ -1,8 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { GenerationSessionScope, MessageRole, Prisma } from '@prisma/client';
+import { GenerationSessionScope, MessageRole, Prisma, StoryEntryType } from '@prisma/client';
 import type { StructuredResume } from '@job-tracker/shared-types';
 import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service';
+import { StoriesService, sanitizeDocumentHtml } from '../stories/stories.service';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
@@ -31,6 +32,26 @@ interface LinkedinRunTurnResponse {
   message_history_json: string;
 }
 
+interface EntryDocumentRunTurnResponse {
+  done: boolean;
+  content_html: string | null;
+  question: string | null;
+}
+
+/** ENTRY_DOCUMENT sessions have no real PydanticAI message history (the
+ * agent side is a plain two-call orchestration, not a conversational
+ * agent run — see agent/resu/stories/agent.py's run_entry_document_turn) —
+ * this small JSON blob is round-tripped through messageHistoryJson instead,
+ * same storage slot, different (session-local) meaning. */
+interface EntryDocumentSessionState {
+  entryType: StoryEntryType;
+  entryId: string;
+  entryLabel: string;
+  existingDocumentHtml: string;
+  rawSources: string[];
+  alreadyAsked: boolean;
+}
+
 @Injectable()
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
@@ -38,6 +59,7 @@ export class SessionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly killSwitch: LlmKillSwitchService,
+    private readonly stories: StoriesService,
   ) {}
 
   /** Combines the manual kill-switch signal with a per-call timeout, so
@@ -69,18 +91,28 @@ export class SessionsService {
    * Creates a session and kicks off the first agent turn in the background
    * (doesn't block the HTTP response — the frontend polls get() for status).
    */
-  async start(scope: GenerationSessionScope, applicationId?: string, company?: string) {
+  async start(
+    scope: GenerationSessionScope,
+    applicationId?: string,
+    company?: string,
+    entryType?: StoryEntryType,
+    entryId?: string,
+    entryLabel?: string,
+  ) {
     if (scope === 'APPLICATION' && !applicationId) {
       throw new Error('applicationId is required for scope=APPLICATION');
     }
     if (scope === 'COMPANY' && !company) {
       throw new Error('company is required for scope=COMPANY');
     }
+    if (scope === 'ENTRY_DOCUMENT' && (!entryType || !entryId)) {
+      throw new Error('entryType and entryId are required for scope=ENTRY_DOCUMENT');
+    }
 
     const session = await this.prisma.generationSession.create({
-      data: { scope, applicationId, company, status: 'RUNNING' },
+      data: { scope, applicationId, company, entryType, entryId, status: 'RUNNING' },
     });
-    this.runTurnInBackground(session, null, null);
+    this.runTurnInBackground(session, null, null, entryLabel);
     return session;
   }
 
@@ -144,6 +176,10 @@ export class SessionsService {
       } else {
         await this.prisma.linkedinProfile.create({ data: parsed });
       }
+    } else if (session.scope === 'ENTRY_DOCUMENT') {
+      // lastAssistantMessage.content is the sanitized document HTML itself
+      // (not JSON-wrapped, unlike the other scopes) — see runEntryDocumentTurn.
+      await this.stories.saveDocumentForEntry(session.entryType!, session.entryId!, lastAssistantMessage.content);
     }
 
     return this.prisma.generationSession.update({
@@ -193,15 +229,32 @@ export class SessionsService {
   }
 
   private async runTurnInBackground(
-    session: { id: string; scope: GenerationSessionScope; applicationId: string | null; company: string | null },
+    session: {
+      id: string;
+      scope: GenerationSessionScope;
+      applicationId: string | null;
+      company: string | null;
+      entryType: StoryEntryType | null;
+      entryId: string | null;
+    },
     priorHistoryJson: string | null,
     userReply: string | null,
+    entryLabel?: string,
   ) {
     try {
       if (session.scope === 'LINKEDIN') {
         await this.runLinkedinTurn(session.id, priorHistoryJson, userReply);
       } else if (session.scope === 'COMPANY') {
         await this.runCompanyTurn(session.id, session.company!, priorHistoryJson, userReply);
+      } else if (session.scope === 'ENTRY_DOCUMENT') {
+        await this.runEntryDocumentTurn(
+          session.id,
+          session.entryType!,
+          session.entryId!,
+          priorHistoryJson,
+          userReply,
+          entryLabel,
+        );
       } else {
         await this.runApplicationTurn(session.id, session.applicationId!, priorHistoryJson, userReply);
       }
@@ -280,6 +333,71 @@ export class SessionsService {
       data: {
         status: result.done ? 'DONE' : 'WAITING_FOR_INPUT',
         messageHistoryJson: result.message_history_json,
+      },
+    });
+  }
+
+  /**
+   * ENTRY_DOCUMENT scope: generates/revises one entry's detailed document.
+   * First turn (priorHistoryJson is null) gathers the entry's current
+   * document + raw tagged sources once and stashes them in
+   * messageHistoryJson (see EntryDocumentSessionState) — later turns (a
+   * reply answering a clarifying question) reuse that stashed state rather
+   * than re-gathering, since the raw sources don't change mid-session.
+   */
+  private async runEntryDocumentTurn(
+    sessionId: string,
+    entryType: StoryEntryType,
+    entryId: string,
+    priorHistoryJson: string | null,
+    userReply: string | null,
+    entryLabel?: string,
+  ) {
+    let state: EntryDocumentSessionState;
+    if (priorHistoryJson) {
+      state = JSON.parse(priorHistoryJson) as EntryDocumentSessionState;
+    } else {
+      const existing = await this.stories.getDocumentForEntry(entryType, entryId);
+      const rawSources = await this.stories.getRawSourcesForEntry(entryType, entryId);
+      state = {
+        entryType,
+        entryId,
+        entryLabel: entryLabel ?? entryId,
+        existingDocumentHtml: existing?.contentHtml ?? '',
+        rawSources,
+        alreadyAsked: false,
+      };
+    }
+
+    const response = await fetch(`${AGENT_SERVICE_URL}/stories/run-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        existing_document_html: state.existingDocumentHtml,
+        raw_sources: state.rawSources,
+        entry_label: state.entryLabel,
+        user_reply: userReply,
+        already_asked: state.alreadyAsked,
+      }),
+      signal: this.agentCallSignal(),
+    });
+    if (!response.ok) throw new Error(`Agent /stories/run-turn failed: ${response.status}`);
+    const result = (await response.json()) as EntryDocumentRunTurnResponse;
+
+    await this.prisma.sessionMessage.create({
+      data: {
+        sessionId,
+        role: MessageRole.ASSISTANT,
+        content: (result.done ? sanitizeDocumentHtml(result.content_html ?? '') : result.question) ?? '(no output)',
+      },
+    });
+
+    const nextState: EntryDocumentSessionState = { ...state, alreadyAsked: !result.done || state.alreadyAsked };
+    await this.prisma.generationSession.update({
+      where: { id: sessionId },
+      data: {
+        status: result.done ? 'DONE' : 'WAITING_FOR_INPUT',
+        messageHistoryJson: JSON.stringify(nextState),
       },
     });
   }

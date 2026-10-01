@@ -19,7 +19,7 @@ import { StoryEntryType } from '@prisma/client';
  * the specific entry e.g. "Dell" under Work Experience) before uploading.
  * Required: every Stories/Resume file must be pinned to exactly one entry
  * so that entry's "Generate Detailed Document" button knows which raw
- * sources to read (see StoriesService.generateDocumentForEntry) — there is
+ * sources to read (see StoriesService.getRawSourcesForEntry) — there is
  * no separate confirmation step to resolve an untagged upload later. */
 function readMultipartField(
   file: { fields: Record<string, unknown> },

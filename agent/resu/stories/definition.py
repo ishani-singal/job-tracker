@@ -33,6 +33,31 @@ from __future__ import annotations
 
 ALLOWED_TAGS = "<h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>"
 
+CLARIFY_SOUL = (
+    "You are a careful reviewer checking whether source material is clear "
+    "enough to write a detailed, faithful document from, before any writing "
+    "starts."
+)
+
+CLARIFY_INSTRUCTIONS = (
+    "You will be shown the raw source text tagged to one entry (and the "
+    "entry's current document, if it already has one). Decide: is there a "
+    "genuine gap or contradiction in the source material that a human could "
+    "resolve in one short answer, and that would materially change what gets "
+    "written (e.g. two conflicting date ranges for the same role, an "
+    "ambiguous title/company that could refer to either of two things, a "
+    "number that's illegible/cut off where context implies one should "
+    "exist)? If so, ask exactly ONE specific, answerable question about the "
+    "single most important gap — do not ask about minor stylistic "
+    "preferences, and do not ask more than one question at a time. If the "
+    "source material is clear enough to write a faithful, honest document "
+    "from (gaps that can simply be omitted rather than guessed at don't "
+    "count — that's expected and handled by the writing step itself, not a "
+    "reason to ask), set has_question to false and leave question empty. "
+    "Default to false — only ask when answering would meaningfully change "
+    "the document's content, not merely its phrasing."
+)
+
 DOCUMENT_SOUL = (
     "You are a precise, exhaustive document writer. Given source text — "
     "already known to belong to exactly one job, degree, internship, "

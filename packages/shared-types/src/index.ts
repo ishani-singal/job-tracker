@@ -244,7 +244,7 @@ export type GenerationSessionStatus =
   | 'ACCEPTED'
   | 'ERROR';
 
-export type GenerationSessionScope = 'APPLICATION' | 'LINKEDIN' | 'COMPANY';
+export type GenerationSessionScope = 'APPLICATION' | 'LINKEDIN' | 'COMPANY' | 'ENTRY_DOCUMENT';
 
 export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
 
@@ -256,19 +256,21 @@ export interface SessionMessage {
   createdAt: string;
 }
 
+export type StoryEntryType = 'WORK_EXPERIENCE' | 'EDUCATION' | 'INTERNSHIP' | 'PROJECT' | 'PAPER';
+
 export interface GenerationSession {
   id: string;
   scope: GenerationSessionScope;
   applicationId: string | null;
   company: string | null;
+  entryType: StoryEntryType | null;
+  entryId: string | null;
   status: GenerationSessionStatus;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
   messages: SessionMessage[];
 }
-
-export type StoryEntryType = 'WORK_EXPERIENCE' | 'EDUCATION' | 'INTERNSHIP' | 'PROJECT' | 'PAPER';
 
 export interface LinkedinEntryBullets {
   entry_type: string;

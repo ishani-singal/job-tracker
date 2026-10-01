@@ -119,11 +119,6 @@ export const api = {
     request<{ contentHtml: string } | null>(
       `/stories/document?entryType=${entryType}&entryId=${encodeURIComponent(entryId)}`,
     ),
-  generateDocumentForEntry: (entryType: StoryEntryType, entryId: string, entryLabel: string) =>
-    request<{ contentHtml: string }>('/stories/document/generate', {
-      method: 'POST',
-      body: JSON.stringify({ entryType, entryId, entryLabel }),
-    }),
   saveDocumentForEntry: (entryType: StoryEntryType, entryId: string, contentHtml: string) =>
     request<{ contentHtml: string }>('/stories/document', {
       method: 'PUT',
@@ -203,6 +198,11 @@ export const api = {
     request<GenerationSession>('/sessions', {
       method: 'POST',
       body: JSON.stringify({ scope: 'COMPANY', company }),
+    }),
+  startEntryDocumentSession: (entryType: StoryEntryType, entryId: string, entryLabel: string) =>
+    request<GenerationSession>('/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'ENTRY_DOCUMENT', entryType, entryId, entryLabel }),
     }),
   replyToSession: (id: string, message: string) =>
     request<GenerationSession>(`/sessions/${id}/reply`, {

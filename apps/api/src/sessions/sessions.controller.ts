@@ -1,11 +1,14 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { GenerationSessionScope } from '@prisma/client';
+import { GenerationSessionScope, StoryEntryType } from '@prisma/client';
 import { SessionsService } from './sessions.service';
 
 interface StartSessionBody {
   applicationId?: string;
   company?: string;
   scope?: GenerationSessionScope;
+  entryType?: StoryEntryType;
+  entryId?: string;
+  entryLabel?: string;
 }
 
 @Controller('sessions')
@@ -28,7 +31,14 @@ export class SessionsController {
     // { applicationId } and no scope, which means scope=APPLICATION.
     const scope = body.scope ?? (body.applicationId ? 'APPLICATION' : undefined);
     if (!scope) throw new Error('scope is required (or pass applicationId for APPLICATION scope)');
-    return this.sessions.start(scope, body.applicationId, body.company);
+    return this.sessions.start(
+      scope,
+      body.applicationId,
+      body.company,
+      body.entryType,
+      body.entryId,
+      body.entryLabel,
+    );
   }
 
   @Post(':id/reply')

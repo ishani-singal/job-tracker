@@ -27,6 +27,8 @@ function acceptLabel(scope: GenerationSession['scope']): string {
       return 'Accept LinkedIn Draft';
     case 'COMPANY':
       return 'Accept Company Resume';
+    case 'ENTRY_DOCUMENT':
+      return 'Accept Document';
     default:
       return 'Accept Resume for This Application';
   }
@@ -87,12 +89,32 @@ function formatResumeMessage(content: string): string {
   }
 }
 
+function formatEntryDocumentMessage(content: string): string {
+  // A done-turn message is the generated document's sanitized HTML itself
+  // (see SessionsService.runEntryDocumentTurn) — the chat panel shows a
+  // plain-text preview here rather than rendering it as rich text (that
+  // happens in the actual entry-document-editor.tsx once accepted); a
+  // question is already plain text and passes through unchanged (no tags
+  // to strip).
+  return content
+    .replace(/<\/(p|h[1-3]|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function sessionLabel(
   session: GenerationSession,
   applicationsById: Map<string, Application>,
 ): string {
   if (session.scope === 'LINKEDIN') return 'LinkedIn';
   if (session.scope === 'COMPANY') return session.company ?? 'Company';
+  if (session.scope === 'ENTRY_DOCUMENT') {
+    const typeLabel = session.entryType
+      ? session.entryType.toLowerCase().replace(/_/g, ' ')
+      : 'entry';
+    return `Document — ${typeLabel}`;
+  }
   // APPLICATION scope — label by "Company - Job Title" when we have the
   // application on hand, falling back to a timestamp for an application
   // that's since been deleted (or hasn't loaded yet).
@@ -221,6 +243,10 @@ function SessionChat({ session }: { session: GenerationSession }) {
       } else if (session.scope === 'COMPANY') {
         queryClient.invalidateQueries({ queryKey: ['company-resumes'] });
         queryClient.invalidateQueries({ queryKey: ['company-resume', session.company] });
+      } else if (session.scope === 'ENTRY_DOCUMENT') {
+        queryClient.invalidateQueries({
+          queryKey: ['entry-document', session.entryType, session.entryId],
+        });
       }
     },
   });
@@ -245,7 +271,9 @@ function SessionChat({ session }: { session: GenerationSession }) {
               ? message.content
               : session.scope === 'LINKEDIN'
                 ? formatLinkedinMessage(message.content)
-                : formatResumeMessage(message.content)}
+                : session.scope === 'ENTRY_DOCUMENT'
+                  ? formatEntryDocumentMessage(message.content)
+                  : formatResumeMessage(message.content)}
           </div>
         ))}
         {isRunning && (
@@ -298,7 +326,9 @@ function SessionChat({ session }: { session: GenerationSession }) {
             ? 'Accepted — saved to your LinkedIn profile draft.'
             : session.scope === 'COMPANY'
               ? `Accepted — saved as the common resume for ${session.company}.`
-              : 'Accepted — saved to the application.'}
+              : session.scope === 'ENTRY_DOCUMENT'
+                ? 'Accepted — saved as this entry’s detailed document.'
+                : 'Accepted — saved to the application.'}
         </div>
       )}
     </div>

@@ -395,6 +395,7 @@ enum GenerationSessionScope {
   APPLICATION
   LINKEDIN
   COMPANY
+  ENTRY_DOCUMENT
 }
 
 enum MessageRole {
@@ -407,15 +408,18 @@ enum MessageRole {
 // (orange = running/waiting, green = done, none = accepted) and holds the full
 // conversation so a multi-turn run (agent asks a clarifying question, user
 // answers, agent continues) can be resumed via PydanticAI's message_history.
-// scope determines which of applicationId/company (if either) is set:
-// APPLICATION -> applicationId required, company null
-// LINKEDIN    -> both null (whole-candidate scope)
-// COMPANY     -> company required, applicationId null
+// scope determines which of applicationId/company/entryType+entryId (if any) is set:
+// APPLICATION    -> applicationId required, company/entryType/entryId null
+// LINKEDIN       -> all null (whole-candidate scope)
+// COMPANY        -> company required, applicationId/entryType/entryId null
+// ENTRY_DOCUMENT -> entryType+entryId required, applicationId/company null
 model GenerationSession {
   id            String                  @id @default(cuid())
   scope         GenerationSessionScope  @default(APPLICATION)
   applicationId String?
   company       String?
+  entryType     StoryEntryType?
+  entryId       String?
   status        GenerationSessionStatus @default(RUNNING)
   errorMessage  String?
   // Opaque PydanticAI message-history JSON blob (from AgentRunResult.all_messages(),
@@ -429,6 +433,7 @@ model GenerationSession {
 
   @@index([applicationId])
   @@index([company])
+  @@index([entryType, entryId])
   @@index([scope])
   @@index([createdAt])
 }

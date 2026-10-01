@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Put, Query } from '@nestjs/common';
 import { StoriesService } from './stories.service';
 import { StoryEntryType } from '@prisma/client';
 
@@ -24,13 +24,6 @@ export class StoriesController {
     const validated = validateEntryType(entryType);
     if (!entryId) throw new BadRequestException('entryId is required');
     return this.stories.getDocumentForEntry(validated, entryId);
-  }
-
-  @Post('document/generate')
-  generateDocumentForEntry(@Body() body: { entryType: string; entryId: string; entryLabel: string }) {
-    const entryType = validateEntryType(body.entryType);
-    if (!body.entryId) throw new BadRequestException('entryId is required');
-    return this.stories.generateDocumentForEntry(entryType, body.entryId, body.entryLabel ?? body.entryId);
   }
 
   @Put('document')

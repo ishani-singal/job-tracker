@@ -293,7 +293,7 @@ export class GithubService {
   }
 
   /** Same shape as fetchConnectedRepoDetails but for exactly one repo — used
-   * by document generation (StoriesService.generateDocumentForEntry), which
+   * by document generation (StoriesService.getRawSourcesForEntry), which
    * only ever needs one entry's own connected repos, not every connected
    * repo in the account. */
   async fetchRepoDetail(fullName: string): Promise<GithubRepoDetails | null> {
