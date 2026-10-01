@@ -211,6 +211,8 @@ export const api = {
     }),
   acceptSession: (id: string) =>
     request<GenerationSession>(`/sessions/${id}/accept`, { method: 'POST' }),
+  stopSession: (id: string) =>
+    request<GenerationSession>(`/sessions/${id}/stop`, { method: 'POST' }),
 
   searchLocations: (q: string, country?: string, state?: string) => {
     const params = new URLSearchParams({ q });

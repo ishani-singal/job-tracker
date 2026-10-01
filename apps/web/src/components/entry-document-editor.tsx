@@ -72,13 +72,19 @@ export function EntryDocumentEditor({
     queryFn: api.listSessions,
     refetchInterval: 2000,
   });
-  const hasActiveSession = (sessions ?? []).some(
+  const activeSession = (sessions ?? []).find(
     (s) =>
       s.scope === 'ENTRY_DOCUMENT' &&
       s.entryType === entryType &&
       s.entryId === entryId &&
       (s.status === 'RUNNING' || s.status === 'WAITING_FOR_INPUT' || s.status === 'DONE'),
   );
+  const hasActiveSession = !!activeSession;
+  // Stop only ever cancels something actually in flight (RUNNING) — a
+  // DONE/WAITING_FOR_INPUT session has no running agent call to abort, it's
+  // just waiting on the user (to Accept or to reply), so Stop isn't shown
+  // for those; the sessions panel is where the user acts on them instead.
+  const canStop = activeSession?.status === 'RUNNING';
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [expanded, setExpanded] = useState(false);
@@ -120,6 +126,11 @@ export function EntryDocumentEditor({
     onSuccess: (session) => openPanel(session.id),
   });
 
+  const stopMutation = useMutation({
+    mutationFn: () => api.stopSession(activeSession!.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+  });
+
   if (isLoading) {
     return <p className="text-xs opacity-50 italic border-t pt-1">Loading document…</p>;
   }
@@ -141,24 +152,35 @@ export function EntryDocumentEditor({
           {saveMutation.isPending || saveStatus === 'saving' ? ' · Saving…' : ''}
           {saveStatus === 'saved' && !saveMutation.isPending ? ' · Saved' : ''}
         </span>
-        <button
-          className="opacity-70 hover:opacity-100 underline disabled:opacity-40"
-          onClick={() => generateMutation.mutate()}
-          disabled={generateMutation.isPending || hasActiveSession || sourceCount === 0}
-          title={
-            sourceCount === 0
-              ? 'Tag a source to this entry first'
-              : hasActiveSession
-                ? 'A generation session for this entry is already in progress — check the sessions panel'
-                : undefined
-          }
-        >
-          {generateMutation.isPending || hasActiveSession
-            ? 'Generating…'
-            : doc?.contentHtml
-              ? 'Regenerate'
-              : 'Generate'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="opacity-70 hover:opacity-100 underline disabled:opacity-40"
+            onClick={() => generateMutation.mutate()}
+            disabled={generateMutation.isPending || hasActiveSession || sourceCount === 0}
+            title={
+              sourceCount === 0
+                ? 'Tag a source to this entry first'
+                : hasActiveSession
+                  ? 'A generation session for this entry is already in progress — check the sessions panel'
+                  : undefined
+            }
+          >
+            {generateMutation.isPending || hasActiveSession
+              ? 'Generating…'
+              : doc?.contentHtml
+                ? 'Regenerate'
+                : 'Generate'}
+          </button>
+          {canStop && (
+            <button
+              className="text-red-600 dark:text-red-400 opacity-70 hover:opacity-100 underline disabled:opacity-40"
+              onClick={() => stopMutation.mutate()}
+              disabled={stopMutation.isPending}
+            >
+              {stopMutation.isPending ? 'Stopping…' : 'Stop'}
+            </button>
+          )}
+        </div>
       </div>
       {doc?.contentHtml ? (
         expanded ? (

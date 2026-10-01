@@ -51,6 +51,11 @@ export class SessionsController {
     return this.sessions.accept(id);
   }
 
+  @Post(':id/stop')
+  stop(@Param('id') id: string) {
+    return this.sessions.stop(id);
+  }
+
   /** Called by the Python agent mid-run to post a live, one-line progress
    * update into the session's chat (see SessionsService.progress). */
   @Post(':id/progress')

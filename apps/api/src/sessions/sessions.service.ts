@@ -75,18 +75,51 @@ interface EntryDocumentSessionState {
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
 
+  // Per-session abort controllers — lets a single session be cancelled (via
+  // stop(sessionId)) without aborting every OTHER in-flight call the way
+  // the global LlmKillSwitchService does. Entries are removed once a
+  // session's turn finishes (success, error, or stop) so this map never
+  // grows unbounded; a session not present here simply has no in-flight
+  // call to cancel (already finished, or hasn't started its fetch yet).
+  private readonly sessionControllers = new Map<string, AbortController>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly killSwitch: LlmKillSwitchService,
     private readonly stories: StoriesService,
   ) {}
 
-  /** Combines the manual kill-switch signal with a per-call timeout, so
-   * either aborts the fetch — without this, a hung/slow agent call relies
-   * entirely on undici's internal default (see AGENT_FETCH_TIMEOUT_MS above)
-   * which gives no clear signal that it was a timeout. */
-  private agentCallSignal(): AbortSignal {
-    return AbortSignal.any([this.killSwitch.signal, AbortSignal.timeout(AGENT_FETCH_TIMEOUT_MS)]);
+  /** Combines the manual global kill-switch signal, a per-session abort
+   * (so stop(sessionId) only cancels THIS session's call), and a per-call
+   * timeout — without the timeout, a hung/slow agent call relies entirely
+   * on undici's internal default (see AGENT_FETCH_TIMEOUT_MS above) which
+   * gives no clear signal that it was a timeout. */
+  private agentCallSignal(sessionId: string): AbortSignal {
+    const controller = new AbortController();
+    this.sessionControllers.set(sessionId, controller);
+    return AbortSignal.any([this.killSwitch.signal, controller.signal, AbortSignal.timeout(AGENT_FETCH_TIMEOUT_MS)]);
+  }
+
+  /** Cancels whatever this session's current turn is doing — the in-flight
+   * fetch to the agent service aborts, runTurnInBackground's catch block
+   * marks the session ERROR, same as any other failure. No-op (not an
+   * error) if the session has no in-flight call right now (already
+   * finished, or between turns) — the user clicking Stop on a session
+   * that's already done shouldn't be treated as a problem. */
+  async stop(sessionId: string) {
+    const session = await this.get(sessionId);
+    const controller = this.sessionControllers.get(sessionId);
+    if (controller) {
+      controller.abort();
+      this.sessionControllers.delete(sessionId);
+    }
+    if (session.status === 'RUNNING') {
+      await this.prisma.generationSession.update({
+        where: { id: sessionId },
+        data: { status: 'ERROR', errorMessage: 'Stopped by user' },
+      });
+    }
+    return this.get(sessionId);
   }
 
   /** All sessions across all scopes, newest first — what the side panel lists. */
@@ -299,10 +332,19 @@ export class SessionsService {
       // failure look identical and undiagnosable. Surface it explicitly.
       const cause = err instanceof Error && err.cause ? ` (cause: ${err.cause})` : '';
       this.logger.error(`Session ${session.id} turn failed: ${err}${cause}`);
-      await this.prisma.generationSession.update({
-        where: { id: session.id },
-        data: { status: 'ERROR', errorMessage: `${err}${cause}` },
-      });
+      // A stop(sessionId) call already marks the session ERROR itself —
+      // don't overwrite its "Stopped by user" message with the generic
+      // abort error this catch block would otherwise write (the fetch
+      // rejects with an AbortError once its signal fires, landing here).
+      const current = await this.prisma.generationSession.findUnique({ where: { id: session.id } });
+      if (current?.status !== 'ERROR') {
+        await this.prisma.generationSession.update({
+          where: { id: session.id },
+          data: { status: 'ERROR', errorMessage: `${err}${cause}` },
+        });
+      }
+    } finally {
+      this.sessionControllers.delete(session.id);
     }
   }
 
@@ -320,7 +362,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
-      signal: this.agentCallSignal(),
+      signal: this.agentCallSignal(sessionId),
       dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent run-turn failed: ${response.status}`);
@@ -356,7 +398,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
-      signal: this.agentCallSignal(),
+      signal: this.agentCallSignal(sessionId),
       dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent run-company-turn failed: ${response.status}`);
@@ -421,7 +463,7 @@ export class SessionsService {
         user_reply: userReply,
         already_asked: state.alreadyAsked,
       }),
-      signal: this.agentCallSignal(),
+      signal: this.agentCallSignal(sessionId),
       dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent /stories/run-turn failed: ${response.status}`);
@@ -457,7 +499,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
-      signal: this.agentCallSignal(),
+      signal: this.agentCallSignal(sessionId),
       dispatcher: agentDispatcher,
     });
     if (!response.ok) throw new Error(`Agent linkedin run-turn failed: ${response.status}`);
