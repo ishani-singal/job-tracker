@@ -356,18 +356,18 @@ export default function ApplicationsPage() {
                 />
                 Hide roles with invalid conditions
               </label>
-              <label className="flex items-center gap-1.5 text-xs opacity-70">
-                Exclude keywords
-                <input
-                  type="text"
-                  placeholder="e.g. Software Engineer, UX Researcher"
-                  className="w-56 border rounded px-1.5 py-0.5 bg-transparent"
-                  value={excludeKeywordsFilter}
-                  onChange={(e) => handleExcludeKeywordsFilterChange(e.target.value)}
-                />
-              </label>
             </div>
           </div>
+          <label className="flex items-center gap-1.5 text-xs opacity-70">
+            Exclude keywords
+            <input
+              type="text"
+              placeholder="e.g. Software Engineer, UX Researcher"
+              className="flex-1 min-w-0 border rounded px-1.5 py-0.5 bg-transparent"
+              value={excludeKeywordsFilter}
+              onChange={(e) => handleExcludeKeywordsFilterChange(e.target.value)}
+            />
+          </label>
           <div className="flex flex-col gap-2">
             {unselectedRoles?.map((role) => (
               <DiscoveredRoleRow
