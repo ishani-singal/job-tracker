@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
-import type { GenerationSession } from '@job-tracker/shared-types';
+import type { Application, GenerationSession } from '@job-tracker/shared-types';
 
 function statusDotClass(status: GenerationSession['status']): string {
   switch (status) {
@@ -27,6 +27,8 @@ function acceptLabel(scope: GenerationSession['scope']): string {
       return 'Accept LinkedIn Draft';
     case 'COMPANY':
       return 'Accept Company Resume';
+    case 'STORY_EXTRACTION':
+      return 'Send Stories to Review';
     default:
       return 'Accept Resume for This Application';
   }
@@ -51,6 +53,35 @@ function formatLinkedinMessage(content: string): string {
       ),
     ].filter(Boolean);
     return sections.join('\n\n');
+  } catch {
+    return content;
+  }
+}
+
+function formatStoryExtractionMessage(content: string): string {
+  // A finished turn's message is JSON-encoded {candidates: [...]} (see
+  // SessionsService.runStoryExtractionTurn) — a clarifying question is plain
+  // text and won't parse as that shape, so fall back to showing it as-is.
+  try {
+    const parsed = JSON.parse(content) as {
+      candidates?: {
+        entry_type: string | null;
+        new_entry_label: string | null;
+        story_text: string;
+        confidence: number;
+      }[];
+    };
+    if (!parsed.candidates) return content;
+    if (parsed.candidates.length === 0) {
+      return 'Nothing in this document was attributable to a specific entry.';
+    }
+    return parsed.candidates
+      .map((c) => {
+        const label = c.entry_type ?? (c.new_entry_label ? `new: ${c.new_entry_label}` : 'unmatched');
+        const confidence = `${Math.round(c.confidence * 100)}% confidence`;
+        return `${label} (${confidence})\n${c.story_text}`;
+      })
+      .join('\n\n');
   } catch {
     return content;
   }
@@ -87,9 +118,20 @@ function formatResumeMessage(content: string): string {
   }
 }
 
-function sessionLabel(session: GenerationSession): string {
+function sessionLabel(
+  session: GenerationSession,
+  applicationsById: Map<string, Application>,
+): string {
   if (session.scope === 'LINKEDIN') return 'LinkedIn';
   if (session.scope === 'COMPANY') return session.company ?? 'Company';
+  if (session.scope === 'STORY_EXTRACTION') return session.sourceLabel ?? 'Story';
+  // APPLICATION scope — label by "Company - Job Title" when we have the
+  // application on hand, falling back to a timestamp for an application
+  // that's since been deleted (or hasn't loaded yet).
+  const application = session.applicationId ? applicationsById.get(session.applicationId) : undefined;
+  if (application) {
+    return [application.company, application.role].filter(Boolean).join(' - ');
+  }
   return new Date(session.createdAt).toLocaleTimeString(undefined, {
     hour: 'numeric',
     minute: '2-digit',
@@ -116,6 +158,18 @@ export function SessionsPanel() {
     enabled: open,
     refetchInterval: open ? 2000 : false,
   });
+  // Needed only to label APPLICATION-scope sessions by "Company - Job Title"
+  // instead of a bare timestamp — already fetched/cached elsewhere in the
+  // app under the same query key, so this just reuses that cache entry.
+  const { data: applications } = useQuery({
+    queryKey: ['applications'],
+    queryFn: api.listApplications,
+    enabled: open,
+  });
+  const applicationsById = useMemo(
+    () => new Map((applications ?? []).map((a) => [a.id, a])),
+    [applications],
+  );
 
   const activeSession = sessions?.find((s) => s.id === activeSessionId);
   const grouped = useMemo(() => groupByDate(sessions ?? []), [sessions]);
@@ -125,7 +179,7 @@ export function SessionsPanel() {
   return (
     <div className="fixed inset-y-0 right-0 w-[480px] bg-white dark:bg-neutral-900 border-l shadow-xl z-50 flex flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-sm font-medium">Resume Generation Sessions</h2>
+        <h2 className="text-sm font-medium">Generation Sessions</h2>
         <button className="text-xs opacity-60 hover:opacity-100" onClick={closePanel}>
           Close
         </button>
@@ -152,7 +206,7 @@ export function SessionsPanel() {
                   <span
                     className={`inline-block w-2 h-2 rounded-full shrink-0 ${statusDotClass(session.status)}`}
                   />
-                  <span className="truncate">{sessionLabel(session)}</span>
+                  <span className="truncate">{sessionLabel(session, applicationsById)}</span>
                 </button>
               ))}
             </div>
@@ -199,6 +253,9 @@ function SessionChat({ session }: { session: GenerationSession }) {
       } else if (session.scope === 'COMPANY') {
         queryClient.invalidateQueries({ queryKey: ['company-resumes'] });
         queryClient.invalidateQueries({ queryKey: ['company-resume', session.company] });
+      } else if (session.scope === 'STORY_EXTRACTION') {
+        queryClient.invalidateQueries({ queryKey: ['story-candidates'] });
+        queryClient.invalidateQueries({ queryKey: ['story-parse-runs'] });
       }
     },
   });
@@ -219,11 +276,13 @@ function SessionChat({ session }: { session: GenerationSession }) {
                 : 'bg-black/5 dark:bg-white/5 self-start max-w-[90%]'
             }`}
           >
-            {message.role === 'ASSISTANT' && session.scope === 'LINKEDIN'
-              ? formatLinkedinMessage(message.content)
-              : message.role === 'ASSISTANT'
-                ? formatResumeMessage(message.content)
-                : message.content}
+            {message.role !== 'ASSISTANT'
+              ? message.content
+              : session.scope === 'LINKEDIN'
+                ? formatLinkedinMessage(message.content)
+                : session.scope === 'STORY_EXTRACTION'
+                  ? formatStoryExtractionMessage(message.content)
+                  : formatResumeMessage(message.content)}
           </div>
         ))}
         {isRunning && (
@@ -276,7 +335,9 @@ function SessionChat({ session }: { session: GenerationSession }) {
             ? 'Accepted — saved to your LinkedIn profile draft.'
             : session.scope === 'COMPANY'
               ? `Accepted — saved as the common resume for ${session.company}.`
-              : 'Accepted — saved to the application.'}
+              : session.scope === 'STORY_EXTRACTION'
+                ? 'Sent to Story Review — confirm each proposed story on the Resumes page.'
+                : 'Accepted — saved to the application.'}
         </div>
       )}
     </div>

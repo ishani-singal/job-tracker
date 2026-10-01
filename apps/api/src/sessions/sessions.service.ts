@@ -1,7 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { GenerationSessionScope, MessageRole, Prisma } from '@prisma/client';
+import { GenerationSessionScope, MessageRole, Prisma, StorySourceType } from '@prisma/client';
 import type { StructuredResume } from '@job-tracker/shared-types';
+import { StoriesService } from '../stories/stories.service';
+
+const SOURCE_TYPE_TO_PRISMA: Record<string, StorySourceType> = {
+  story_file: StorySourceType.STORY_FILE,
+  resume_file: StorySourceType.RESUME_FILE,
+  github_repo: StorySourceType.GITHUB_REPO,
+};
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
@@ -21,11 +28,46 @@ interface LinkedinRunTurnResponse {
   message_history_json: string;
 }
 
+interface StoryCandidateOut {
+  entry_type: string | null;
+  entry_id: string | null;
+  new_entry_label: string | null;
+  source_span: string;
+  story_text: string;
+  confidence: number;
+}
+
+interface StoriesRunTurnResponse {
+  done: boolean;
+  candidates: StoryCandidateOut[] | null;
+  question: string | null;
+  message_history_json: string;
+}
+
+/** First-turn-only context for a STORY_EXTRACTION session — not persisted on
+ * the session row (it's only needed to kick off turn 1; the agent's own
+ * message_history carries it forward from there), passed straight through
+ * from StoriesService.createParseRunForUpload/triggerManualRerun. */
+export interface StoryExtractionStartContext {
+  rawText: string;
+  sourceType: 'story_file' | 'resume_file' | 'github_repo';
+  sourceLabel: string;
+  storyFileId?: string;
+  resumeFileId?: string;
+  repoFullName?: string;
+  entries: Record<string, unknown>;
+  hintEntryType: string | null;
+}
+
 @Injectable()
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => StoriesService))
+    private readonly stories: StoriesService,
+  ) {}
 
   /** All sessions across all scopes, newest first — what the side panel lists. */
   listAll() {
@@ -63,6 +105,30 @@ export class SessionsService {
     return session;
   }
 
+  /**
+   * Creates a STORY_EXTRACTION session for one uploaded document/repo and
+   * kicks off its first turn in the background — one session per source,
+   * labeled by sourceLabel (filename/repo name) in the UI. Called by
+   * StoriesService, not exposed directly on SessionsController, since the
+   * caller needs to also link the resulting session to a StoryParseRun.
+   */
+  async startStoryExtraction(storyParseRunId: string, context: StoryExtractionStartContext) {
+    const session = await this.prisma.generationSession.create({
+      data: {
+        scope: 'STORY_EXTRACTION',
+        storyParseRunId,
+        sourceLabel: context.sourceLabel,
+        sourceType: SOURCE_TYPE_TO_PRISMA[context.sourceType],
+        storyFileId: context.storyFileId,
+        resumeFileId: context.resumeFileId,
+        repoFullName: context.repoFullName,
+        status: 'RUNNING',
+      },
+    });
+    this.runStoryExtractionTurn(session.id, null, null, context);
+    return session;
+  }
+
   /** User answering a question the agent asked — resumes the same conversation. */
   async reply(sessionId: string, userReply: string) {
     const session = await this.get(sessionId);
@@ -78,7 +144,11 @@ export class SessionsService {
       data: { status: 'RUNNING' },
     });
 
-    this.runTurnInBackground(session, session.messageHistoryJson, userReply);
+    if (session.scope === 'STORY_EXTRACTION') {
+      this.runStoryExtractionTurn(sessionId, session.messageHistoryJson, userReply, null);
+    } else {
+      this.runTurnInBackground(session, session.messageHistoryJson, userReply);
+    }
     return this.get(sessionId);
   }
 
@@ -115,6 +185,9 @@ export class SessionsService {
         create: { company: session.company!, resumeContent },
         update: { resumeContent },
       });
+    } else if (session.scope === 'STORY_EXTRACTION') {
+      const candidates = this.parseStoryCandidates(lastAssistantMessage.content);
+      await this.stories.persistCandidatesFromSession(session.storyParseRunId!, session.id, candidates);
     } else if (session.scope === 'LINKEDIN') {
       const parsed = this.parseLinkedinContent(lastAssistantMessage.content);
       const existing = await this.prisma.linkedinProfile.findFirst();
@@ -168,6 +241,67 @@ export class SessionsService {
       };
     } catch {
       return { headline: null, about: null, entryBullets: [] };
+    }
+  }
+
+  /**
+   * A finished story-extraction turn's message is stored as JSON-encoded
+   * `{candidates: [...]}` (see runStoryExtractionTurn) so it can be parsed
+   * back out on accept.
+   */
+  private parseStoryCandidates(content: string): StoryCandidateOut[] {
+    try {
+      const parsed = JSON.parse(content) as { candidates?: StoryCandidateOut[] };
+      return parsed.candidates ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async runStoryExtractionTurn(
+    sessionId: string,
+    priorHistoryJson: string | null,
+    userReply: string | null,
+    startContext: StoryExtractionStartContext | null,
+  ) {
+    try {
+      const response = await fetch(`${AGENT_SERVICE_URL}/stories/run-turn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          raw_text: startContext?.rawText,
+          source_type: startContext?.sourceType,
+          source_label: startContext?.sourceLabel,
+          entries: startContext?.entries,
+          hint_entry_type: startContext?.hintEntryType,
+          message_history_json: priorHistoryJson,
+          user_reply: userReply,
+        }),
+      });
+      if (!response.ok) throw new Error(`Agent stories run-turn failed: ${response.status}`);
+      const result = (await response.json()) as StoriesRunTurnResponse;
+
+      await this.prisma.sessionMessage.create({
+        data: {
+          sessionId,
+          role: MessageRole.ASSISTANT,
+          content: (result.done ? JSON.stringify({ candidates: result.candidates }) : result.question) ??
+            '(no output)',
+        },
+      });
+      await this.prisma.generationSession.update({
+        where: { id: sessionId },
+        data: {
+          status: result.done ? 'DONE' : 'WAITING_FOR_INPUT',
+          messageHistoryJson: result.message_history_json,
+        },
+      });
+    } catch (err) {
+      this.logger.error(`Story extraction session ${sessionId} turn failed: ${err}`);
+      await this.prisma.generationSession.update({
+        where: { id: sessionId },
+        data: { status: 'ERROR', errorMessage: String(err) },
+      });
     }
   }
 

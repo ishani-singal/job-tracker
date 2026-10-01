@@ -367,6 +367,7 @@ enum GenerationSessionScope {
   APPLICATION
   LINKEDIN
   COMPANY
+  STORY_EXTRACTION
 }
 
 enum MessageRole {
@@ -380,14 +381,33 @@ enum MessageRole {
 // conversation so a multi-turn run (agent asks a clarifying question, user
 // answers, agent continues) can be resumed via PydanticAI's message_history.
 // scope determines which of applicationId/company (if either) is set:
-// APPLICATION -> applicationId required, company null
-// LINKEDIN    -> both null (whole-candidate scope)
-// COMPANY     -> company required, applicationId null
+// APPLICATION      -> applicationId required, company null
+// LINKEDIN         -> both null (whole-candidate scope)
+// COMPANY          -> company required, applicationId null
+// STORY_EXTRACTION -> storyParseRunId required, applicationId/company null;
+//                     one session per uploaded document/repo, labeled by
+//                     sourceLabel (the filename or repo name) in the UI —
+//                     the agent asks clarifying questions to fill gaps/
+//                     inconsistencies before the story is considered done.
 model GenerationSession {
   id            String                  @id @default(cuid())
   scope         GenerationSessionScope  @default(APPLICATION)
   applicationId String?
   company       String?
+  storyParseRunId String?
+  // Filename or repo name this session is extracting a story from — only
+  // set for STORY_EXTRACTION, used as the session's label in the UI instead
+  // of a generic timestamp.
+  sourceLabel     String?
+  // Exactly which source this one session covers — set alongside
+  // sourceLabel for STORY_EXTRACTION, so persisting this session's finished
+  // candidates (on accept) always has unambiguous provenance, independent
+  // of whether the parent StoryParseRun was a single-file upload trigger or
+  // a manual rerun covering many sources at once.
+  sourceType      StorySourceType?
+  storyFileId     String?
+  resumeFileId    String?
+  repoFullName    String?
   status        GenerationSessionStatus @default(RUNNING)
   errorMessage  String?
   // Opaque PydanticAI message-history JSON blob (from AgentRunResult.all_messages(),
@@ -401,6 +421,7 @@ model GenerationSession {
 
   @@index([applicationId])
   @@index([company])
+  @@index([storyParseRunId])
   @@index([scope])
   @@index([createdAt])
 }
@@ -488,6 +509,13 @@ model StoryParseRun {
   triggerStoryFileId  String?
   triggerResumeFileId String?
   triggerRepoFullName String?
+
+  // The background category the user picked at upload time (Work Experience/
+  // Education/Internship/Project/Paper) — a strong hint passed to the
+  // extraction agent to narrow which entries it tries to match the document
+  // against. Null on a manual rerun (no single document to hint about) or on
+  // an upload where the user left it unset.
+  hintEntryType StoryEntryType?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -64,11 +64,12 @@ export function StoryReviewSection() {
         <div>
           <h2 className="text-sm font-medium">Story Review</h2>
           <p className="text-xs opacity-60">
-            Every uploaded Stories/Resume file and connected GitHub repo is parsed into
-            proposed stories, each scoped to exactly one Work Experience / Education /
-            Internship / Project entry below — confirm, edit, or reassign each one before
-            it&apos;s used for resume generation. This is what keeps one job&apos;s details
-            from bleeding into another&apos;s.
+            Every uploaded Stories/Resume file and connected GitHub repo gets its own chat
+            (in the Chat panel) that asks questions to fill gaps before producing a
+            comprehensive, scoped-to-one-entry story. Once that chat is accepted, its stories
+            show up here — confirm, edit, or reassign each one before it&apos;s used for
+            resume generation. This is what keeps one job&apos;s details from bleeding into
+            another&apos;s.
           </p>
         </div>
         <button
@@ -89,7 +90,9 @@ export function StoryReviewSection() {
       {pending.length === 0 && !isParsing && (
         <p className="text-xs opacity-60">
           No proposed stories waiting for review. Upload a Stories/Resume file above, connect
-          a GitHub repo, or click &quot;Re-parse&quot; to generate some.
+          a GitHub repo, or click &quot;Re-parse&quot; to generate some — each document gets
+          its own chat (see the Chat button) where you can answer clarifying questions before
+          its stories land here.
         </p>
       )}
 

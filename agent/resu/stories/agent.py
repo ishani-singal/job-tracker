@@ -1,9 +1,12 @@
 """Story Extraction Agent instance + entry point.
 
-Single structured-output call per source (one document or one GitHub repo) —
-not a multi-turn chat. Low-confidence attribution surfaces as a flagged
-candidate for the user to resolve in the review UI, rather than as an
-in-chat clarifying question.
+Multi-turn, same pattern as agent/resu/agent.py and agent/linkedin/agent.py:
+each run_turn() call is one full agent run (PydanticAI has no mid-execution
+pause), but the structured output's `done` flag tells the caller whether the
+story is actually finished or the agent needs the user to fill a gap/resolve
+an inconsistency first. One session per source document/repo (see
+agent/resu/stories/service.py + NestJS's SessionsService), labeled by that
+source's filename/repo name in the UI.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ load_dotenv()
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 
@@ -43,16 +47,40 @@ class StoryCandidateOut(BaseModel):
     confidence: float
 
 
-class StoryExtractionOutput(BaseModel):
-    candidates: list[StoryCandidateOut]
+class StoriesTurnOutput(BaseModel):
+    """What the agent produces each turn. `done=False` means `question` holds
+    a clarifying question about a gap or inconsistency the source text left
+    unresolved — the user answers and the agent continues from there on the
+    next turn. `done=True` means `candidates` holds the finished, comprehensive
+    per-entry stories derived from this source (plus the user's answers).
+    """
+
+    done: bool
+    candidates: list[StoryCandidateOut] | None = None
+    question: str | None = None
 
 
-_SYSTEM_PROMPT = f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}"
+_SYSTEM_PROMPT = (
+    f"{SOUL}\n\n{IDENTITY}\n\n{INSTRUCTIONS}\n\n"
+    "Respond with structured output every turn: set done=true and fill in "
+    "`candidates` once every entry the source text covers has a complete, "
+    "comprehensive, gap-free story with no open questions. If the source "
+    "text leaves a real gap or inconsistency you can't resolve on your own "
+    "— a missing date range, an unclear scope ('managed a team' with no "
+    "size), a contradiction (two different titles for the same period), or "
+    "a vague claim that needs a concrete detail to be useful in a resume — "
+    "set done=false, leave `candidates` unset, and ask exactly ONE clear, "
+    "specific question in `question` (reference the entry/company by name "
+    "so the user knows what you're asking about). The user will reply and "
+    "you will continue from there on the next turn. Don't ask about "
+    "something the text already answers, and don't ask more than one "
+    "question per turn — work through gaps one at a time."
+)
 
 stories_agent = Agent(
     model=_model,
     deps_type=StoriesDeps,
-    output_type=StoryExtractionOutput,
+    output_type=StoriesTurnOutput,
     system_prompt=_SYSTEM_PROMPT,
 )
 
@@ -111,19 +139,49 @@ def _render_entries_for_matching(entries: dict) -> str:
     return "\n".join(lines) if lines else "(no structured entries yet)"
 
 
-async def extract_stories(
+def _render_hint_line(hint_entry_type: str | None) -> str:
+    if not hint_entry_type:
+        return ""
+    return (
+        f"Background hint: the user tagged this entire document as "
+        f"\"{hint_entry_type}\" at upload time, and the entries list above "
+        "has already been narrowed to only that category — every candidate "
+        "you return must use this entry_type (or propose a new entry of "
+        "this type); do not second-guess this boundary.\n\n"
+    )
+
+
+async def run_turn(
     raw_text: str,
     source_type: str,
     source_label: str,
     entries: dict,
     api_base_url: str,
-) -> StoryExtractionOutput:
-    entries_block = _render_entries_for_matching(entries)
-    prompt = (
-        f"Source type: {source_type}\n"
-        f"Source label: {source_label}\n\n"
-        f"## Candidate's structured entries (match source text against these)\n{entries_block}\n\n"
-        f"## Source text to attribute\n{raw_text}"
-    )
-    result = await stories_agent.run(prompt, deps=StoriesDeps(api_base_url=api_base_url))
-    return result.output
+    hint_entry_type: str | None,
+    message_history: list[ModelMessage] | None,
+    user_reply: str | None,
+) -> tuple[StoriesTurnOutput, list[ModelMessage]]:
+    """Runs one turn of the per-document story-extraction conversation.
+
+    First turn: message_history=None, user_reply=None — starts fresh with
+    the full source text. Later turns: message_history from the prior turn's
+    all_messages(), user_reply is the user's answer to the agent's question.
+    Returns (output, updated_message_history) — the caller persists both.
+    """
+    deps = StoriesDeps(api_base_url=api_base_url)
+
+    if message_history:
+        prompt = user_reply or ""
+    else:
+        entries_block = _render_entries_for_matching(entries)
+        hint_line = _render_hint_line(hint_entry_type)
+        prompt = (
+            f"Source type: {source_type}\n"
+            f"Source label: {source_label}\n\n"
+            f"{hint_line}"
+            f"## Candidate's structured entries (match source text against these)\n{entries_block}\n\n"
+            f"## Source text to attribute\n{raw_text}"
+        )
+
+    result = await stories_agent.run(prompt, deps=deps, message_history=message_history)
+    return result.output, result.all_messages()

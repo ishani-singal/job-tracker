@@ -243,7 +243,7 @@ export type GenerationSessionStatus =
   | 'ACCEPTED'
   | 'ERROR';
 
-export type GenerationSessionScope = 'APPLICATION' | 'LINKEDIN' | 'COMPANY';
+export type GenerationSessionScope = 'APPLICATION' | 'LINKEDIN' | 'COMPANY' | 'STORY_EXTRACTION';
 
 export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
 
@@ -260,6 +260,10 @@ export interface GenerationSession {
   scope: GenerationSessionScope;
   applicationId: string | null;
   company: string | null;
+  storyParseRunId: string | null;
+  /** Filename or repo name — set only for STORY_EXTRACTION scope, used as
+   * this session's label in the UI instead of a generic timestamp. */
+  sourceLabel: string | null;
   status: GenerationSessionStatus;
   errorMessage: string | null;
   createdAt: string;

@@ -1,11 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ResumesService } from '../resumes/resumes.service';
 import { EntriesService } from '../entries/entries.service';
 import { GithubService } from '../github/github.service';
+import { SessionsService } from '../sessions/sessions.service';
 import { StoryEntryType, StorySourceType, StoryStatus } from '@prisma/client';
-
-const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
 interface ExtractCandidate {
   entry_type: string | null;
@@ -16,10 +15,6 @@ interface ExtractCandidate {
   confidence: number;
 }
 
-interface ExtractResponse {
-  candidates: ExtractCandidate[];
-}
-
 const ENTRY_TYPE_TO_PRISMA: Record<string, StoryEntryType> = {
   workExperience: StoryEntryType.WORK_EXPERIENCE,
   education: StoryEntryType.EDUCATION,
@@ -28,22 +23,23 @@ const ENTRY_TYPE_TO_PRISMA: Record<string, StoryEntryType> = {
   paper: StoryEntryType.PAPER,
 };
 
-// Internal source-type literals ('story_file' etc.) are lowercase/snake_case
-// throughout this file — including when sent to the Python agent as
-// source_type — but the Prisma enum is SCREAMING_SNAKE_CASE; map at the
-// Prisma-write boundary rather than changing the internal convention.
-const SOURCE_TYPE_TO_PRISMA: Record<string, StorySourceType> = {
-  story_file: StorySourceType.STORY_FILE,
-  resume_file: StorySourceType.RESUME_FILE,
-  github_repo: StorySourceType.GITHUB_REPO,
-};
-
 export interface RerunTrigger {
   sourceType?: StorySourceType;
   storyFileId?: string;
   resumeFileId?: string;
   repoFullName?: string;
+  /** The background category the user picked at upload time — a strong hint
+   * for the extraction agent. Only meaningful for a single-file trigger. */
+  hintEntryType?: StoryEntryType;
 }
+
+const HINT_ENTRY_TYPE_TO_MATCH_KEY: Record<StoryEntryType, string> = {
+  WORK_EXPERIENCE: 'workExperience',
+  EDUCATION: 'education',
+  INTERNSHIP: 'internship',
+  PROJECT: 'project',
+  PAPER: 'paper',
+};
 
 @Injectable()
 export class StoriesService {
@@ -54,6 +50,8 @@ export class StoriesService {
     private readonly resumes: ResumesService,
     private readonly entries: EntriesService,
     private readonly github: GithubService,
+    @Inject(forwardRef(() => SessionsService))
+    private readonly sessions: SessionsService,
   ) {}
 
   // ---- Parse runs ----------------------------------------------------
@@ -71,7 +69,7 @@ export class StoriesService {
     return run;
   }
 
-  /** Triggered by a Stories/Resume upload — parses only the new file. */
+  /** Triggered by a Stories/Resume upload — starts a chat for only the new file. */
   async createParseRunForUpload(trigger: RerunTrigger) {
     const run = await this.prisma.storyParseRun.create({
       data: {
@@ -80,20 +78,28 @@ export class StoriesService {
         triggerStoryFileId: trigger.storyFileId,
         triggerResumeFileId: trigger.resumeFileId,
         triggerRepoFullName: trigger.repoFullName,
+        hintEntryType: trigger.hintEntryType,
       },
     });
-    this.runParseInBackground(run.id, trigger);
+    this.startSessionsInBackground(run.id, trigger);
     return run;
   }
 
-  /** Manual rerun — re-examines every currently uploaded file + connected repo. */
+  /** Manual rerun — starts a chat for every currently uploaded file + connected repo. */
   async triggerManualRerun() {
     const run = await this.prisma.storyParseRun.create({ data: { status: 'PENDING' } });
-    this.runParseInBackground(run.id, {});
+    this.startSessionsInBackground(run.id, {});
     return run;
   }
 
-  private async runParseInBackground(runId: string, trigger: RerunTrigger) {
+  /**
+   * Starts one STORY_EXTRACTION chat session per source (document or repo) —
+   * each session is the per-document chat the user sees in the Sessions
+   * panel, labeled by that source's filename/repo name. Candidates only land
+   * in the review queue once each session's chat is accepted (see
+   * persistCandidatesFromSession, called from SessionsService.accept).
+   */
+  private async startSessionsInBackground(runId: string, trigger: RerunTrigger) {
     try {
       await this.prisma.storyParseRun.update({ where: { id: runId }, data: { status: 'PARSING' } });
 
@@ -102,17 +108,34 @@ export class StoriesService {
       const papers = await this.prisma.paperEntry.findMany({ orderBy: { sortOrder: 'asc' } });
       const entriesForMatching = { ...entries, papers };
 
-      let anyCandidates = false;
-      for (const source of sources) {
-        if (!source.text.trim()) continue;
-        const response = await this.callExtract(source.text, source.sourceType, source.label, entriesForMatching);
-        const created = await this.reconcileCandidates(runId, source, response.candidates);
-        anyCandidates = anyCandidates || created > 0;
+      // A user-picked background hint narrows which category of entries the
+      // extraction agent even considers for this document, rather than just
+      // being advisory — this is the "ask the user to pick a background"
+      // step: it removes the chance of a document tagged "Education" ever
+      // getting matched against a Work Experience entry.
+      const narrowedEntries = trigger.hintEntryType
+        ? this.narrowEntriesToHint(entriesForMatching, trigger.hintEntryType)
+        : entriesForMatching;
+
+      const sourcesWithText = sources.filter((s) => s.text.trim());
+      for (const source of sourcesWithText) {
+        await this.sessions.startStoryExtraction(runId, {
+          rawText: source.text,
+          sourceType: source.sourceType,
+          sourceLabel: source.label,
+          storyFileId: source.storyFileId,
+          resumeFileId: source.resumeFileId,
+          repoFullName: source.repoFullName,
+          entries: narrowedEntries,
+          hintEntryType: trigger.hintEntryType
+            ? HINT_ENTRY_TYPE_TO_MATCH_KEY[trigger.hintEntryType]
+            : null,
+        });
       }
 
       await this.prisma.storyParseRun.update({
         where: { id: runId },
-        data: { status: anyCandidates ? 'AWAITING_REVIEW' : 'DONE' },
+        data: { status: sourcesWithText.length > 0 ? 'AWAITING_REVIEW' : 'DONE' },
       });
     } catch (err) {
       this.logger.error(`Parse run ${runId} failed: ${err}`);
@@ -123,26 +146,51 @@ export class StoriesService {
     }
   }
 
-  private async callExtract(
-    rawText: string,
-    sourceType: 'story_file' | 'resume_file' | 'github_repo',
-    sourceLabel: string,
-    entries: Record<string, unknown>,
-  ): Promise<ExtractResponse> {
-    const response = await fetch(`${AGENT_SERVICE_URL}/stories/extract`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        raw_text: rawText,
-        source_type: sourceType,
-        source_label: sourceLabel,
-        entries,
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(`Agent /stories/extract failed: ${response.status}`);
-    }
-    return response.json();
+  /** Restricts the entries dict to only the hinted category — e.g. a
+   * document tagged "Education" is matched only against EducationEntry rows,
+   * so the model can never attribute it to a Work Experience/Project/etc.
+   * entry even if it mentions one in passing. */
+  private narrowEntriesToHint(
+    entries: Record<string, unknown[]>,
+    hint: StoryEntryType,
+  ): Record<string, unknown[]> {
+    const key = HINT_ENTRY_TYPE_TO_MATCH_KEY[hint];
+    const narrowed: Record<string, unknown[]> = {
+      workExperience: [],
+      education: [],
+      internships: [],
+      projects: [],
+      papers: [],
+    };
+    const sourceKey = key === 'internship' ? 'internships' : key === 'project' ? 'projects' : key;
+    narrowed[sourceKey] = entries[sourceKey] ?? [];
+    return narrowed;
+  }
+
+  /**
+   * Called by SessionsService.accept() once a per-document chat is accepted
+   * — applies the same diff/rerun reconciliation algorithm the old one-shot
+   * flow used, now keyed by the finished session's candidates instead of an
+   * inline extract-call response. Provenance (sourceType/storyFileId/etc.)
+   * is read from the session itself, not the shared StoryParseRun — a run
+   * can cover many sources (a manual rerun), but each session is always
+   * exactly one source, set when that session was started (see
+   * startSessionsInBackground).
+   */
+  async persistCandidatesFromSession(
+    parseRunId: string,
+    sessionId: string,
+    candidates: ExtractCandidate[],
+  ) {
+    const run = await this.prisma.storyParseRun.findUnique({ where: { id: parseRunId } });
+    const session = await this.prisma.generationSession.findUniqueOrThrow({ where: { id: sessionId } });
+    const source = {
+      sourceType: session.sourceType ?? StorySourceType.STORY_FILE,
+      storyFileId: session.storyFileId ?? undefined,
+      resumeFileId: session.resumeFileId ?? undefined,
+      repoFullName: session.repoFullName ?? undefined,
+    };
+    await this.reconcileCandidates(parseRunId, source, candidates, run?.hintEntryType ?? undefined);
   }
 
   /**
@@ -222,12 +270,22 @@ export class StoriesService {
   /** Applies the diff/rerun reconciliation algorithm — see plan §"Diff/rerun". */
   private async reconcileCandidates(
     runId: string,
-    source: { sourceType: string; storyFileId?: string; resumeFileId?: string; repoFullName?: string },
+    source: {
+      sourceType: StorySourceType;
+      storyFileId?: string;
+      resumeFileId?: string;
+      repoFullName?: string;
+    },
     candidates: ExtractCandidate[],
+    hintEntryType?: StoryEntryType,
   ): Promise<number> {
     let created = 0;
     for (const c of candidates) {
-      const entryType = c.entry_type ? ENTRY_TYPE_TO_PRISMA[c.entry_type] : null;
+      // When the document was pre-tagged with a background hint, every
+      // candidate it produces belongs to that category by construction (the
+      // entries dict was narrowed to only that category) — fall back to the
+      // hint if the agent didn't echo entry_type for a new-entry proposal.
+      const entryType = c.entry_type ? ENTRY_TYPE_TO_PRISMA[c.entry_type] : (hintEntryType ?? null);
 
       if (entryType && c.entry_id) {
         const existing = await this.prisma.candidateStory.findUnique({
@@ -239,7 +297,7 @@ export class StoriesService {
         await this.prisma.storyCandidate.create({
           data: {
             parseRunId: runId,
-            sourceType: SOURCE_TYPE_TO_PRISMA[source.sourceType],
+            sourceType: source.sourceType,
             storyFileId: source.storyFileId,
             resumeFileId: source.resumeFileId,
             repoFullName: source.repoFullName,
@@ -259,7 +317,7 @@ export class StoriesService {
       await this.prisma.storyCandidate.create({
         data: {
           parseRunId: runId,
-          sourceType: SOURCE_TYPE_TO_PRISMA[source.sourceType],
+          sourceType: source.sourceType,
           storyFileId: source.storyFileId,
           resumeFileId: source.resumeFileId,
           repoFullName: source.repoFullName,
