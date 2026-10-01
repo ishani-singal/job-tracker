@@ -6,6 +6,15 @@ import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
+// Node's undici fetch falls back to an internal ~300s headers timeout with
+// no explicit one set, surfacing as an opaque "TypeError: fetch failed"
+// that gives no hint it was a timeout. An explicit, longer-than-that
+// timeout here means a run that's genuinely still working (retrying
+// through Azure rate limits, chunked narrative extraction, etc.) isn't cut
+// off right as it might have succeeded, while still failing eventually with
+// a clear AbortError rather than hanging forever.
+const AGENT_FETCH_TIMEOUT_MS = 8 * 60 * 1000;
+
 interface RunTurnResponse {
   done: boolean;
   resume: StructuredResume | null;
@@ -30,6 +39,14 @@ export class SessionsService {
     private readonly prisma: PrismaService,
     private readonly killSwitch: LlmKillSwitchService,
   ) {}
+
+  /** Combines the manual kill-switch signal with a per-call timeout, so
+   * either aborts the fetch — without this, a hung/slow agent call relies
+   * entirely on undici's internal default (see AGENT_FETCH_TIMEOUT_MS above)
+   * which gives no clear signal that it was a timeout. */
+  private agentCallSignal(): AbortSignal {
+    return AbortSignal.any([this.killSwitch.signal, AbortSignal.timeout(AGENT_FETCH_TIMEOUT_MS)]);
+  }
 
   /** All sessions across all scopes, newest first — what the side panel lists. */
   listAll() {
@@ -211,7 +228,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
-      signal: this.killSwitch.signal,
+      signal: this.agentCallSignal(),
     });
     if (!response.ok) throw new Error(`Agent run-turn failed: ${response.status}`);
     const result = (await response.json()) as RunTurnResponse;
@@ -246,7 +263,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
-      signal: this.killSwitch.signal,
+      signal: this.agentCallSignal(),
     });
     if (!response.ok) throw new Error(`Agent run-company-turn failed: ${response.status}`);
     const result = (await response.json()) as RunTurnResponse;
@@ -279,7 +296,7 @@ export class SessionsService {
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),
-      signal: this.killSwitch.signal,
+      signal: this.agentCallSignal(),
     });
     if (!response.ok) throw new Error(`Agent linkedin run-turn failed: ${response.status}`);
     const result = (await response.json()) as LinkedinRunTurnResponse;
