@@ -11,6 +11,30 @@ from pydantic_ai import RunContext
 
 from .deps import ResuDeps
 
+# fetch_structured_entries returns camelCase group keys (workExperience,
+# internships, projects, ...) and the model naturally echoes that casing
+# back when it calls fetch_narratives_for_entry itself — but the NestJS
+# /stories/narratives endpoint's entryType param is the Prisma enum
+# (WORK_EXPERIENCE, etc.), same as agent.py's _fetch_all_narratives already
+# sends. Normalize here instead of relying on the model to use the right
+# casing, since a plain string param gives it no structural guardrail.
+_ENTRY_TYPE_TO_PRISMA = {
+    "workExperience": "WORK_EXPERIENCE",
+    "education": "EDUCATION",
+    "internship": "INTERNSHIP",
+    "internships": "INTERNSHIP",
+    "project": "PROJECT",
+    "projects": "PROJECT",
+    "paper": "PAPER",
+    "papers": "PAPER",
+    # Already-correct Prisma enum values pass through unchanged.
+    "WORK_EXPERIENCE": "WORK_EXPERIENCE",
+    "EDUCATION": "EDUCATION",
+    "INTERNSHIP": "INTERNSHIP",
+    "PROJECT": "PROJECT",
+    "PAPER": "PAPER",
+}
+
 
 async def fetch_job_description(ctx: RunContext[ResuDeps], application_id: str) -> str:
     """Fetch the job description text for a given application.
@@ -51,10 +75,11 @@ async def fetch_narratives_for_entry(
     source tagged to this entry, not combined) — an empty list means no
     source has been tagged to this entry yet.
     """
+    prisma_entry_type = _ENTRY_TYPE_TO_PRISMA.get(entry_type, entry_type)
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.get(
             f"{ctx.deps.api_base_url}/stories/narratives",
-            params={"entryType": entry_type, "entryId": entry_id, "entryLabel": entry_label},
+            params={"entryType": prisma_entry_type, "entryId": entry_id, "entryLabel": entry_label},
         )
         resp.raise_for_status()
         return resp.json()
