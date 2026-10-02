@@ -17,6 +17,8 @@ import type {
   ProjectEntry,
   ResumeProfile,
   ResumeTemplate,
+  LlmModelPrice,
+  LlmUsage,
   StoryEntryType,
   TrackedCompany,
   WorkExperienceEntry,
@@ -69,6 +71,22 @@ export const api = {
   getSettings: () => request<AppSettings>('/settings'),
   updateSettings: (data: Partial<AppSettings>) =>
     request<AppSettings>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+
+  getLlmUsage: () => request<LlmUsage>('/llm-calls'),
+  setLlmDailyBudget: (dailyBudgetUsd: number) =>
+    request<{ dailyBudgetUsd: number }>('/llm-calls/budget', {
+      method: 'PATCH',
+      body: JSON.stringify({ dailyBudgetUsd }),
+    }),
+  upsertLlmPrice: (model: string, price: Omit<LlmModelPrice, 'model'>) =>
+    request<LlmModelPrice>(`/llm-calls/prices/${encodeURIComponent(model)}`, {
+      method: 'PUT',
+      body: JSON.stringify(price),
+    }),
+  deleteLlmPrice: (model: string) =>
+    request<{ deleted: boolean }>(`/llm-calls/prices/${encodeURIComponent(model)}`, {
+      method: 'DELETE',
+    }),
 
   getSummary: () => request<AnalyticsSummary>('/analytics/summary'),
   getTimeseries: () => request<AnalyticsTimeseriesPoint[]>('/analytics/timeseries'),

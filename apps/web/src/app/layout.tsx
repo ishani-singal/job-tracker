@@ -21,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/applications">Applications</Link>
               <Link href="/resumes">Resumes</Link>
               <Link href="/dashboard">Dashboard</Link>
+              <Link href="/llm-usage">LLM Usage</Link>
               <Link href="/linkedin">LinkedIn</Link>
               <Link href="/company-resumes">Company Resumes</Link>
               <Link href="/resume-template">Resume Template</Link>

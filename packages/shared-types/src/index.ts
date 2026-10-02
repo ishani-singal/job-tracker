@@ -339,3 +339,35 @@ export interface LinkedinMessage {
   content: string | null;
   sentAt: string | null;
 }
+
+export interface LlmCall {
+  id: string;
+  createdAt: string;
+  agent: string;
+  model: string;
+  inputTokens: number;
+  cachedTokens: number;
+  outputTokens: number;
+  inputCostUsd: number;
+  outputCostUsd: number;
+  costUsd: number;
+}
+
+export interface LlmModelPrice {
+  model: string;
+  inputPer1M: number;
+  cachedInputPer1M: number;
+  outputPer1M: number;
+}
+
+export interface LlmUsage {
+  calls: LlmCall[];
+  summary: {
+    todayUsd: number;
+    monthUsd: number;
+    byAgent: { agent: string; calls: number; costUsd: number }[];
+    byDay: { date: string; costUsd: number }[];
+  };
+  dailyBudgetUsd: number;
+  prices: LlmModelPrice[];
+}

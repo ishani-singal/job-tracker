@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, TypeAdapter
 from pydantic_ai.messages import ModelMessage
 
@@ -21,7 +24,20 @@ import httpx
 from .agent import ResuTurnOutput, StructuredResume, _fetch_all_documents, run_company_turn, run_turn
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, build_profile_context
 
+from cost_guard import BudgetExceededError
+
 app = FastAPI(title="resu-agent")
+
+# uvicorn doesn't route app loggers to its handlers by default, so the
+# per-call cost lines (cost_guard.py) would otherwise never reach pm2 logs.
+_cost_logger = logging.getLogger("llm_cost")
+_cost_logger.setLevel(logging.INFO)
+_cost_logger.handlers = logging.getLogger("uvicorn").handlers
+
+
+@app.exception_handler(BudgetExceededError)
+async def _budget_exceeded(_: Request, exc: BudgetExceededError) -> JSONResponse:
+    return JSONResponse(status_code=402, content={"detail": str(exc)})
 
 # The LinkedIn Description Agent shares this same process/app (see
 # agent/linkedin/service.py) — mounted here rather than run as a separate

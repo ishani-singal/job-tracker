@@ -387,7 +387,36 @@ model AppSettings {
   // still shows it); this one removes the role from Open Roles entirely.
   excludeKeywordsFilter String @default("")
 
+  // Daily LLM spend cap in USD — the agent (agent/cost_guard.py) refuses new
+  // requests once today's llm_calls total reaches it. Editable on /llm-usage.
+  llmDailyBudgetUsd Float @default(5)
+
   updatedAt DateTime @updatedAt
+}
+
+// One row per individual LLM request, posted by the agent's CostGuardModel.
+model LlmCall {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  agent          String
+  model          String
+  inputTokens    Int
+  cachedTokens   Int
+  outputTokens   Int
+  inputCostUsd   Float
+  outputCostUsd  Float
+  costUsd        Float
+
+  @@index([createdAt])
+}
+
+// Per-1M-token USD prices by model/deployment name — input, cached input and
+// output are priced separately. A model with no row here is costed at $0.
+model LlmModelPrice {
+  model             String @id
+  inputPer1M        Float
+  cachedInputPer1M  Float
+  outputPer1M       Float
 }
 
 // Single-user GitHub OAuth connection — the resu agent reads connected repos'

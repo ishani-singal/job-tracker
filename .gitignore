@@ -12,3 +12,4 @@ __pycache__/
 *.pyc
 .venv/
 .claude/
+.llm_spend.json

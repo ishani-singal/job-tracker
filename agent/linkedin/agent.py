@@ -22,6 +22,8 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 
+from cost_guard import CostGuardModel, run_scope
+
 from .deps import LinkedinDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS
 
@@ -33,14 +35,17 @@ from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS
 # convention (see module docstring).
 _AZURE_HTTP_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
-_model = OpenAIChatModel(
-    os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
-    provider=AzureProvider(
-        azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
-        api_key=os.environ["AZURE_LLM_API_KEY"],
-        api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
-        http_client=httpx.AsyncClient(timeout=_AZURE_HTTP_TIMEOUT),
+_model = CostGuardModel(
+    OpenAIChatModel(
+        os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
+        provider=AzureProvider(
+            azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
+            api_key=os.environ["AZURE_LLM_API_KEY"],
+            api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
+            http_client=httpx.AsyncClient(timeout=_AZURE_HTTP_TIMEOUT),
+        ),
     ),
+    agent="linkedin",
 )
 
 
@@ -107,9 +112,10 @@ async def run_turn(
         else "Generate updated LinkedIn profile copy (headline, About, and "
         "per-entry bullets) based on the candidate's current background."
     )
-    result = await linkedin_agent.run(
-        prompt,
-        deps=deps,
-        message_history=message_history,
-    )
+    with run_scope():
+        result = await linkedin_agent.run(
+            prompt,
+            deps=deps,
+            message_history=message_history,
+        )
     return result.output, result.all_messages()

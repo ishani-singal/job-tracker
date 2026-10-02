@@ -71,6 +71,7 @@ from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai import Agent
 
+from cost_guard import CostGuardModel, run_scope
 from .definition import CLARIFY_INSTRUCTIONS, CLARIFY_SOUL, DOCUMENT_INSTRUCTIONS, DOCUMENT_SOUL
 from ..rate_limit import AZURE_HTTP_TIMEOUT, LLM_CONCURRENCY, retry_on_rate_limit
 
@@ -109,14 +110,17 @@ async def _report_progress(api_base_url: str, session_id: str, message: str) -> 
     except Exception:
         pass
 
-_model = OpenAIChatModel(
-    os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
-    provider=AzureProvider(
-        azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
-        api_key=os.environ["AZURE_LLM_API_KEY"],
-        api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
-        http_client=httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
+_model = CostGuardModel(
+    OpenAIChatModel(
+        os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
+        provider=AzureProvider(
+            azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
+            api_key=os.environ["AZURE_LLM_API_KEY"],
+            api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
+            http_client=httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
+        ),
     ),
+    agent="stories",
 )
 
 # gpt-4.1 on Azure supports up to 32768 output tokens per call — the
@@ -210,7 +214,8 @@ async def _generate_or_revise_chunk(
     # otherwise reliably bursts past the Azure deployment's per-minute
     # token rate limit (see rate_limit.py).
     async with LLM_CONCURRENCY:
-        result = await retry_on_rate_limit(lambda: document_agent.run(prompt))
+        with run_scope():
+            result = await retry_on_rate_limit(lambda: document_agent.run(prompt))
     return result.output.content_html
 
 
@@ -385,7 +390,8 @@ async def _merge_documents(document_a: str, document_b: str, entry_label: str) -
         f"either side."
     )
     async with LLM_CONCURRENCY:
-        result = await retry_on_rate_limit(lambda: document_agent.run(prompt))
+        with run_scope():
+            result = await retry_on_rate_limit(lambda: document_agent.run(prompt))
     return result.output.content_html
 
 
@@ -423,7 +429,8 @@ async def _check_for_clarification(
         # tripped the Node fetch timeout after this feature moved to a
         # two-call session flow).
         async with LLM_CONCURRENCY:
-            result = await clarify_agent.run(prompt)
+            with run_scope():
+                result = await clarify_agent.run(prompt)
     except Exception:
         return None
     output = result.output
