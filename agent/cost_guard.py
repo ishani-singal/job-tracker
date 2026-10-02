@@ -24,6 +24,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -41,6 +42,7 @@ _WARN_FRACTION = 0.8
 _lock = threading.Lock()
 _pending: set[asyncio.Task] = set()  # keeps fire-and-forget posts from being GC'd
 _run_total: contextvars.ContextVar[list[float] | None] = contextvars.ContextVar("llm_run_total", default=None)
+_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("llm_run_id", default=None)
 
 
 class BudgetExceededError(Exception):
@@ -142,10 +144,12 @@ def _add_day(cost: float) -> float:
 def run_scope():
     """Starts a fresh per-run spend tally for the calls made inside the block."""
     token = _run_total.set([0.0])
+    id_token = _run_id.set(uuid.uuid4().hex)
     try:
         yield
     finally:
         _run_total.reset(token)
+        _run_id.reset(id_token)
 
 
 class CostGuardModel(WrapperModel):
@@ -207,7 +211,7 @@ class CostGuardModel(WrapperModel):
             # of calls can't overshoot the cap by a whole refresh interval.
             config["todayUsd"] = day
         _pending.add(task := asyncio.create_task(_post_call({
-            "agent": self.agent_name, "model": model,
+            "agent": self.agent_name, "runId": _run_id.get(), "model": model,
             "inputTokens": in_tok, "cachedTokens": cached, "outputTokens": out_tok,
             "inputCostUsd": in_cost, "outputCostUsd": out_cost,
         })))

@@ -399,6 +399,9 @@ model LlmCall {
   id             String   @id @default(cuid())
   createdAt      DateTime @default(now())
   agent          String
+  // Groups the calls of one agent run (cost_guard.run_scope); null on rows
+  // recorded before this column existed.
+  runId          String?
   model          String
   inputTokens    Int
   cachedTokens   Int
@@ -408,6 +411,7 @@ model LlmCall {
   costUsd        Float
 
   @@index([createdAt])
+  @@index([runId])
 }
 
 // Per-1M-token USD prices by model/deployment name — input, cached input and

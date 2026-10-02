@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 export interface RecordCallInput {
   agent: string;
+  runId?: string;
   model: string;
   inputTokens: number;
   cachedTokens: number;

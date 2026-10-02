@@ -344,6 +344,7 @@ export interface LlmCall {
   id: string;
   createdAt: string;
   agent: string;
+  runId: string | null;
   model: string;
   inputTokens: number;
   cachedTokens: number;
