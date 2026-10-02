@@ -128,7 +128,13 @@ function layoutContactLine(contactLine: string, fontPt: number): Paragraph {
   return new Paragraph({ alignment: AlignmentType.CENTER, children: runs });
 }
 
-/** Mirrors layoutEntry: name (bold) with date/location right-aligned at a tab stop, optional subtitle, bullets. */
+/**
+ * Mirrors layoutEntry: header reads "COMPANY (ALL CAPS) | Subtitle", bold,
+ * sized to match the bullet font (not the larger nameFont — entry headers
+ * are the same size as body text, just bold), with date/location
+ * right-aligned at a tab stop, followed by a horizontal rule (same
+ * convention as the section-heading rule), then bullets.
+ */
 function layoutEntry(
   entry: StructuredResume['sections'][number]['entries'][number],
   fields: ResolvedFields,
@@ -137,24 +143,20 @@ function layoutEntry(
 ): Paragraph[] {
   const paragraphs: Paragraph[] = [];
 
+  const headerText = [entry.name.toUpperCase(), entry.subtitle].filter(Boolean).join(' | ');
   const trailing = [entry.dateRange, entry.location].filter(Boolean).join(' | ');
   paragraphs.push(
     new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: contentWidthTwips }],
+      border: {
+        bottom: { style: BorderStyle.SINGLE, size: 4, space: 2, color: '000000' },
+      },
       children: [
-        new TextRun({ text: entry.name, bold: true, size: pt(fields.nameFont) }),
+        new TextRun({ text: headerText, bold: true, size: pt(fields.bulletFont) }),
         ...(trailing ? [new TextRun({ text: `\t${trailing}`, size: pt(fields.bulletFont) })] : []),
       ],
     }),
   );
-
-  if (entry.subtitle) {
-    paragraphs.push(
-      new Paragraph({
-        children: [new TextRun({ text: entry.subtitle, italics: true, size: pt(fields.bulletFont) })],
-      }),
-    );
-  }
 
   for (const bullet of entry.bullets) {
     paragraphs.push(

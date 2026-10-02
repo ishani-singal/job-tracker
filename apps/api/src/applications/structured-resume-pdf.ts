@@ -226,37 +226,76 @@ function layoutContactLine(doc: PDFKit.PDFDocument, contactLine: string, fontSiz
   doc.x = doc.page.margins.left;
 }
 
+// pdfkit's `width` + `lineBreak: false` does not truncate — it still wraps
+// character-by-character, so a long header with a narrow width renders as a
+// vertical column of single characters. Truncating the string ourselves
+// before handing it to doc.text() is the only reliable way to fit it.
+function truncateToWidth(doc: PDFKit.PDFDocument, text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
+  if (doc.widthOfString(text) <= maxWidth) return text;
+  const ellipsis = '…';
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = text.slice(0, mid).trimEnd() + ellipsis;
+    if (doc.widthOfString(candidate) <= maxWidth) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return lo === 0 ? ellipsis : text.slice(0, lo).trimEnd() + ellipsis;
+}
+
 function layoutEntry(
   doc: PDFKit.PDFDocument,
   entry: StructuredResume['sections'][number]['entries'][number],
   fields: ResolvedFields,
 ): void {
+  // Header line: "COMPANY (ALL CAPS) | Subtitle" on the left, bold, sized to
+  // match the bullet font (not the larger nameFont — entry headers read at
+  // the same size as the body text, just bold, per the current template),
+  // with the date range right-aligned against the same tab stop the bullets
+  // indent from.
   const nameY = doc.y;
-  doc.font('Helvetica-Bold').fontSize(fields.nameFont).text(entry.name, { continued: false });
-
-  // Right-aligned against a horizontal tab stop measured in from the right
-  // margin (mirrors fields.tabStop, which indents bullets in from the left),
-  // rather than a fixed-width box, so the date column stays flush with the
-  // page's right margin regardless of content width.
+  const headerText = [entry.name.toUpperCase(), entry.subtitle].filter(Boolean).join(' | ');
   const trailing = [entry.dateRange, entry.location].filter(Boolean).join(' | ');
+
+  const contentLeft = doc.page.margins.left;
+  const contentRight = doc.page.width - doc.page.margins.right;
+
+  // Reserve space for the right-aligned date/location column based on its
+  // actual rendered width (not fields.tabStop, which is an unrelated
+  // bullet-indent value) so a long header truncates instead of running
+  // underneath it.
+  const trailingWidth = trailing ? doc.font('Helvetica').fontSize(fields.bulletFont).widthOfString(trailing) : 0;
+  const headerReservedGap = trailing ? 10 : 0;
+  const headerWidth = contentRight - contentLeft - trailingWidth - headerReservedGap;
+
+  doc.font('Helvetica-Bold').fontSize(fields.bulletFont);
+  const fittedHeaderText = truncateToWidth(doc, headerText, headerWidth);
+  doc.text(fittedHeaderText, contentLeft, nameY, { continued: false, lineBreak: false });
+
   if (trailing) {
-    const dateTabStop = doc.page.margins.left + fields.tabStop;
-    const trailingWidth = doc.page.width - doc.page.margins.right - dateTabStop;
     doc
       .font('Helvetica')
       .fontSize(fields.bulletFont)
-      .text(trailing, dateTabStop, nameY, {
-        width: trailingWidth,
-        align: 'right',
-      });
-    doc.y = Math.max(doc.y, nameY + fields.nameFont * 1.2);
+      .text(trailing, contentRight - trailingWidth, nameY, { continued: false, lineBreak: false });
+    doc.y = Math.max(doc.y, nameY + fields.bulletFont * 1.2);
   }
+  doc.x = contentLeft;
 
-  if (entry.subtitle) {
-    doc.font('Helvetica-Oblique').fontSize(fields.bulletFont).text(entry.subtitle);
-  }
-
+  // Horizontal rule under every entry header, same convention as the
+  // section-heading rule above it (full content width, hairline weight).
   doc.moveDown(0.1);
+  doc
+    .moveTo(doc.page.margins.left, doc.y)
+    .lineTo(doc.page.width - doc.page.margins.right, doc.y)
+    .lineWidth(0.5)
+    .stroke();
+  doc.moveDown(0.15);
+
   const startX = doc.page.margins.left + fields.tabStop;
   const bulletWidth = doc.page.width - doc.page.margins.right - startX;
   for (const bullet of entry.bullets) {
@@ -280,10 +319,22 @@ function layoutEntry(
  */
 function layoutBoldedText(doc: PDFKit.PDFDocument, text: string, fontSize: number, width: number): void {
   const segments = text.split(/\*\*([^*]+)\*\*/);
+  // A bullet ending exactly at a **bold** span (or starting with one) splits
+  // into a trailing/leading EMPTY string (e.g. "...**last bold**".split(...)
+  // -> [plain, bold, ""]) — skipped below via `if (!segment) return`, but
+  // naively computing isLast as `i === segments.length - 1` then marks the
+  // real final segment (the bold one, one index before that empty string)
+  // as NOT last, so it renders with continued:true and is never properly
+  // closed. The next bullet's draw call then lands mid-stream, overlapping
+  // the unclosed text. Find the last actually-non-empty index instead.
+  const lastNonEmptyIndex = segments.reduce(
+    (last, segment, i) => (segment ? i : last),
+    0,
+  );
   segments.forEach((segment, i) => {
     if (!segment) return;
     const isBold = i % 2 === 1;
-    const isLast = i === segments.length - 1;
+    const isLast = i === lastNonEmptyIndex;
     doc
       .font(isBold ? 'Helvetica-Bold' : 'Helvetica')
       .fontSize(fontSize)

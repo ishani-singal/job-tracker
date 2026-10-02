@@ -35,13 +35,14 @@ const RANGE_GROUPS: { title: string; fields: RangeField[] }[] = [
       },
       {
         key: 'nameFontOffset',
-        label: 'Entry name size, offset above bullet size (pt)',
+        label: 'Your name (header) size, offset above bullet size (pt)',
         minKey: 'nameFontOffsetMin',
         maxKey: 'nameFontOffsetMax',
+        hint: 'Entry headers (e.g. "DELL TECHNOLOGIES | Program Manager") always match the bullet text size, just bold — this offset only affects your own name at the top of the resume.',
       },
       {
         key: 'sectionHeaderFontOffset',
-        label: 'Section header size, offset above name size (pt)',
+        label: 'Section header size, offset above your name size (pt)',
         minKey: 'sectionHeaderFontOffsetMin',
         maxKey: 'sectionHeaderFontOffsetMax',
       },
