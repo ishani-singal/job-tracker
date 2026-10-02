@@ -146,7 +146,30 @@ export class SessionsService {
   private agentCallSignal(sessionId: string, timeoutMs: number = AGENT_FETCH_TIMEOUT_FLOOR_MS): AbortSignal {
     const controller = new AbortController();
     this.sessionControllers.set(sessionId, controller);
-    return AbortSignal.any([this.killSwitch.signal, controller.signal, AbortSignal.timeout(timeoutMs)]);
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+
+    // AbortSignal.any() collapses whichever of these three fires first into
+    // one generic AbortError with no indication which — an abort that
+    // can't be attributed to the scaled timeout, the per-session stop(), or
+    // the global kill switch is undiagnosable (a real production abort hit
+    // this exact gap: none of the three looked like they should have fired,
+    // and there was no way to tell which actually did). { once: true } on
+    // the kill-switch listener specifically, since that signal is
+    // long-lived/reused across every call — without it, every
+    // agentCallSignal() call would add one more permanent listener to it.
+    this.killSwitch.signal.addEventListener(
+      'abort',
+      () => this.logger.warn(`Session ${sessionId}: aborted by global kill switch`),
+      { once: true },
+    );
+    controller.signal.addEventListener('abort', () =>
+      this.logger.warn(`Session ${sessionId}: aborted by stop(sessionId)`),
+    );
+    timeoutSignal.addEventListener('abort', () =>
+      this.logger.warn(`Session ${sessionId}: aborted by scaled timeout (${timeoutMs}ms)`),
+    );
+
+    return AbortSignal.any([this.killSwitch.signal, controller.signal, timeoutSignal]);
   }
 
   /** Cancels whatever this session's current turn is doing — the in-flight
