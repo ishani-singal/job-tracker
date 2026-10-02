@@ -114,7 +114,7 @@ function layoutContactLine(contactLine: string, fontPt: number): Paragraph {
       runs.push(
         new ExternalHyperlink({
           link: url,
-          children: [new TextRun({ text: part, size: pt(fontPt), color: '000000' })],
+          children: [new TextRun({ text: part, size: pt(fontPt), color: '0563C1', underline: {} })],
         }),
       );
     } else {
@@ -145,14 +145,20 @@ function layoutEntry(
 
   const headerText = [entry.name.toUpperCase(), entry.subtitle].filter(Boolean).join(' | ');
   const trailing = entry.dateRange ?? '';
-  const headerRun = new TextRun({ text: headerText, bold: true, size: pt(fields.bulletFont) });
+  const headerRun = entry.url
+    ? new TextRun({
+        text: headerText,
+        bold: true,
+        size: pt(fields.bulletFont),
+        color: '0563C1',
+        underline: {},
+      })
+    : new TextRun({ text: headerText, bold: true, size: pt(fields.bulletFont) });
   paragraphs.push(
     new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: contentWidthTwips }],
       children: [
-        entry.url
-          ? new ExternalHyperlink({ link: entry.url, children: [headerRun] })
-          : headerRun,
+        entry.url ? new ExternalHyperlink({ link: entry.url, children: [headerRun] }) : headerRun,
         ...(trailing ? [new TextRun({ text: `\t${trailing}`, size: pt(fields.bulletFont) })] : []),
       ],
     }),

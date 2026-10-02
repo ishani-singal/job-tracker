@@ -192,10 +192,13 @@ function layoutResume(
   }
 }
 
+const LINK_COLOR = '#0563C1'; // Word's standard hyperlink blue, matched here for consistency
+
 /**
  * Renders the " | "-joined contact line centered, turning any segment that
- * looks like a LinkedIn URL into a clickable hyperlink (still plain black
- * text — just an underlying link annotation, no blue/underline styling).
+ * looks like a LinkedIn URL into a clickable, underlined blue hyperlink so
+ * it's visually recognizable as a link rather than indistinguishable from
+ * plain text.
  */
 function layoutContactLine(doc: PDFKit.PDFDocument, contactLine: string, fontSize: number): void {
   const parts = contactLine.split('|').map((p) => p.trim());
@@ -211,15 +214,20 @@ function layoutContactLine(doc: PDFKit.PDFDocument, contactLine: string, fontSiz
   parts.forEach((part, i) => {
     const isLinkedIn = /linkedin\.com/i.test(part);
     const url = isLinkedIn ? (part.startsWith('http') ? part : `https://${part}`) : undefined;
+    if (url) doc.fillColor(LINK_COLOR);
+    // Not passed via text()'s own `link`/`underline` options: both compute
+    // their annotation/line geometry internally from `options.textWidth`,
+    // which isn't populated on this lineBreak:false/non-continued call
+    // path and comes out `undefined` — producing a NaN rect/line and
+    // crashing with "unsupported number: NaN". Drawing the link annotation
+    // and underline manually with the width we already computed
+    // (`widths[i]`) sidesteps that pdfkit bug entirely.
     doc.text(part, x, y, { continued: false, lineBreak: false });
-    // Not passed via text()'s own `link` option: pdfkit computes that
-    // annotation's width internally from `options.textWidth`, which isn't
-    // populated on this lineBreak:false/non-continued call path and comes
-    // out `undefined` — producing a NaN rect and crashing annotate() with
-    // "unsupported number: NaN". Calling .link() directly with the width we
-    // already computed (`widths[i]`) sidesteps that pdfkit bug entirely.
     if (url) {
+      const underlineY = y + doc.currentLineHeight();
+      doc.moveTo(x, underlineY).lineTo(x + widths[i], underlineY).lineWidth(0.5).stroke(LINK_COLOR);
       doc.link(x, y, widths[i], doc.currentLineHeight(), url);
+      doc.fillColor('black');
     }
     x += widths[i];
     if (i < parts.length - 1) {
@@ -280,14 +288,22 @@ function layoutEntry(
 
   doc.font('Helvetica-Bold').fontSize(fields.bulletFont);
   const fittedHeaderText = truncateToWidth(doc, headerText, headerWidth);
+  if (entry.url) doc.fillColor(LINK_COLOR);
   doc.text(fittedHeaderText, contentLeft, nameY, { continued: false, lineBreak: false });
   if (entry.url) {
-    // Same direct .link() pattern as layoutContactLine — text()'s own
-    // `link` option computes the annotation's width from options.textWidth,
-    // which isn't populated on this lineBreak:false/non-continued call
-    // path and produces a NaN rect that crashes annotate().
+    // Same manual link/underline pattern as layoutContactLine — text()'s
+    // own `link`/`underline` options compute their geometry from
+    // options.textWidth, which isn't populated on this lineBreak:false/
+    // non-continued call path and produces a NaN rect/line that crashes.
     const linkWidth = doc.widthOfString(fittedHeaderText);
+    const underlineY = nameY + doc.currentLineHeight();
+    doc
+      .moveTo(contentLeft, underlineY)
+      .lineTo(contentLeft + linkWidth, underlineY)
+      .lineWidth(0.5)
+      .stroke(LINK_COLOR);
     doc.link(contentLeft, nameY, linkWidth, doc.currentLineHeight(), entry.url);
+    doc.fillColor('black');
   }
 
   if (trailing) {
