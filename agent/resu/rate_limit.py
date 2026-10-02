@@ -13,7 +13,7 @@ import time
 from typing import Awaitable, Callable, TypeVar
 
 import httpx
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 
 # The OpenAI/Azure SDK's own default httpx timeout is generous enough that a
 # hung or silently-stalled connection to Azure can sit for a very long time
@@ -48,11 +48,15 @@ _MAX_RETRY_SECONDS = 90.0
 
 
 async def retry_on_rate_limit(call: Callable[[], Awaitable[T]], max_attempts: int = 4) -> T:
-    """Retries an awaitable-producing call with exponential backoff + jitter
-    whenever it raises a 429 ModelHTTPError, re-raising anything else (or the
-    429 itself once attempts/time are exhausted) immediately. Used both for
-    the narrative write-up sub-agent's single model call and for the main
-    resu agent's whole multi-step `.run()` — a 429 can surface from any model
+    """Retries an awaitable-producing call whenever it raises a 429
+    ModelHTTPError (exponential backoff — a per-minute token quota needs the
+    retry window spread out) or a ModelAPIError (a stalled/timed-out
+    connection to Azure, per AZURE_HTTP_TIMEOUT above — a short fixed retry
+    is enough here since this isn't a quota issue, just a transient network
+    hiccup). Re-raises anything else, or either of these once attempts/time
+    are exhausted, immediately. Used both for the narrative write-up
+    sub-agent's single model call and for the main resu agent's whole
+    multi-step `.run()` — either exception can surface from any model
     request inside that run, and since nothing is mutated until `.run()`
     returns, retrying the entire call is safe.
     """
@@ -67,6 +71,17 @@ async def retry_on_rate_limit(call: Callable[[], Awaitable[T]], max_attempts: in
             # it again; this spreads retries out enough for the window to
             # roll over, but never past the wall-clock deadline above.
             delay = min((2**attempt) + random.uniform(0, 1), max(0.0, deadline - time.monotonic()))
+            if delay <= 0:
+                raise
+            await asyncio.sleep(delay)
+        except ModelAPIError:
+            if attempt == max_attempts - 1:
+                raise
+            # A stalled connection timing out isn't a quota problem, so a
+            # short fixed delay (not the growing backoff above) is enough —
+            # still capped by the same overall deadline so this can't
+            # compound indefinitely either.
+            delay = min(5.0 + random.uniform(0, 2), max(0.0, deadline - time.monotonic()))
             if delay <= 0:
                 raise
             await asyncio.sleep(delay)

@@ -44,25 +44,40 @@ const agentDispatcher = new UndiciAgent({
 // Mirrors agent/resu/stories/agent.py's _CHUNK_SIZE_CHARS — kept in sync so
 // this estimate reflects the same chunking the Python side actually does.
 const DOCUMENT_CHUNK_SIZE_CHARS = 12000;
-// Per the user's own worst-case math: ~30s per chunk, +10% buffer.
-const SECONDS_PER_CHUNK = 30 * 1.1;
+// The first estimate (30s/chunk) undercounted a real production call —
+// it hit its own computed ceiling (2178s) at chunk 33 of 37 on the LAST of
+// 3 sources, meaning the 2 tournament-merge rounds after drafting hadn't
+// even started yet. Raised to 60s/chunk and merge rounds are now counted
+// as their own LLM calls on top (see mergeCallEstimateSeconds below),
+// instead of assuming drafting alone covers the whole call.
+const SECONDS_PER_CHUNK = 60 * 1.1;
+// A pairwise tournament reducing N independent drafts to one document
+// always takes exactly N-1 merge calls in total, regardless of how many
+// run concurrently per round (a standard property of binary reduction) —
+// see _tournament_merge in agent/resu/stories/agent.py. Each merge is its
+// own full document_agent call (same cost family as a chunk, not cheaper),
+// so it gets the same per-call budget.
+const SECONDS_PER_MERGE_CALL = 60 * 1.1;
 
 /**
  * Estimates a generous but scaled timeout for one ENTRY_DOCUMENT run-turn
- * call, based on how many sequential chunks its sources actually need —
- * sources are processed one chunk at a time (see SOURCE_MAX_CONCURRENCY in
- * agent/resu/stories/agent.py), so total chunks across all sources is a
- * reasonable proxy for how long the whole call can legitimately take.
- * Floors at AGENT_FETCH_TIMEOUT_FLOOR_MS so a small entry still gets a
- * comfortable cushion (clarify-check call, retries, network latency) rather
- * than a timeout scaled down to near-zero for a one-paragraph source.
+ * call, based on how many sequential chunks its sources actually need PLUS
+ * how many merge calls combining them requires — sources (and, within a
+ * source, chunks) are processed one at a time by design (see
+ * SOURCE_MAX_CONCURRENCY in agent/resu/stories/agent.py), so total chunks
+ * plus total merges is a reasonable proxy for how long the whole call can
+ * legitimately take. Floors at AGENT_FETCH_TIMEOUT_FLOOR_MS so a small
+ * entry still gets a comfortable cushion (clarify-check call, retries,
+ * network latency) rather than a timeout scaled down to near-zero for a
+ * one-paragraph source.
  */
 function estimateEntryDocumentTimeoutMs(rawSources: { text: string }[]): number {
   const totalChunks = rawSources.reduce(
     (sum, s) => sum + Math.max(1, Math.ceil(s.text.length / DOCUMENT_CHUNK_SIZE_CHARS)),
     0,
   );
-  const scaledMs = totalChunks * SECONDS_PER_CHUNK * 1000;
+  const mergeCalls = Math.max(0, rawSources.length - 1);
+  const scaledMs = (totalChunks * SECONDS_PER_CHUNK + mergeCalls * SECONDS_PER_MERGE_CALL) * 1000;
   return Math.max(AGENT_FETCH_TIMEOUT_FLOOR_MS, scaledMs);
 }
 
