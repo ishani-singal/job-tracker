@@ -206,7 +206,16 @@ function layoutContactLine(doc: PDFKit.PDFDocument, contactLine: string, fontSiz
   parts.forEach((part, i) => {
     const isLinkedIn = /linkedin\.com/i.test(part);
     const url = isLinkedIn ? (part.startsWith('http') ? part : `https://${part}`) : undefined;
-    doc.text(part, x, y, { continued: false, lineBreak: false, link: url });
+    doc.text(part, x, y, { continued: false, lineBreak: false });
+    // Not passed via text()'s own `link` option: pdfkit computes that
+    // annotation's width internally from `options.textWidth`, which isn't
+    // populated on this lineBreak:false/non-continued call path and comes
+    // out `undefined` — producing a NaN rect and crashing annotate() with
+    // "unsupported number: NaN". Calling .link() directly with the width we
+    // already computed (`widths[i]`) sidesteps that pdfkit bug entirely.
+    if (url) {
+      doc.link(x, y, widths[i], doc.currentLineHeight(), url);
+    }
     x += widths[i];
     if (i < parts.length - 1) {
       doc.text(SEP, x, y, { continued: false, lineBreak: false });
