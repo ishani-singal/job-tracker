@@ -32,6 +32,8 @@ function lerp(min: number, max: number, scale: number): number {
   return min + (max - min) * scale;
 }
 
+const POINTS_PER_INCH = 72;
+
 export function resolvedFields(template: ResumeTemplate, scale: number) {
   const bulletFont = Math.max(BULLET_FONT_HARD_FLOOR, lerp(template.bulletFontMin, template.bulletFontMax, scale));
   const nameFont = bulletFont + lerp(template.nameFontOffsetMin, template.nameFontOffsetMax, scale);
@@ -40,11 +42,14 @@ export function resolvedFields(template: ResumeTemplate, scale: number) {
     template.sectionHeaderFontOffsetMax,
     scale,
   );
+  // Margins are stored in inches (how the Settings UI presents them) —
+  // convert to points here, once, since everything downstream (pdfkit,
+  // the docx renderer's pointsToTwips) works in points.
   return {
-    marginTop: lerp(template.marginTopMin, template.marginTopMax, scale),
-    marginBottom: lerp(template.marginBottomMin, template.marginBottomMax, scale),
-    marginLeft: lerp(template.marginLeftMin, template.marginLeftMax, scale),
-    marginRight: lerp(template.marginRightMin, template.marginRightMax, scale),
+    marginTop: lerp(template.marginTopMin, template.marginTopMax, scale) * POINTS_PER_INCH,
+    marginBottom: lerp(template.marginBottomMin, template.marginBottomMax, scale) * POINTS_PER_INCH,
+    marginLeft: lerp(template.marginLeftMin, template.marginLeftMax, scale) * POINTS_PER_INCH,
+    marginRight: lerp(template.marginRightMin, template.marginRightMax, scale) * POINTS_PER_INCH,
     bulletFont,
     nameFont,
     sectionHeaderFont,
@@ -260,7 +265,7 @@ function layoutEntry(
   // indent from.
   const nameY = doc.y;
   const headerText = [entry.name.toUpperCase(), entry.subtitle].filter(Boolean).join(' | ');
-  const trailing = [entry.dateRange, entry.location].filter(Boolean).join(' | ');
+  const trailing = entry.dateRange ?? '';
 
   const contentLeft = doc.page.margins.left;
   const contentRight = doc.page.width - doc.page.margins.right;

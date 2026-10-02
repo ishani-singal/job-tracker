@@ -176,18 +176,6 @@ model ResumePromptTemplate {
   maxYearsExperience    Int?
   matchScoreTarget      Int      @default(93)
 
-  // Per-entry-type bullet count bounds for resume generation — null means
-  // open-ended (no instruction given to the model for that bound). Internship
-  // entries render as part of the combined Projects & Internships section
-  // but keep their own bullet-count bounds since they're a distinct entry
-  // type with its own source material depth.
-  minBulletsWork        Int?
-  maxBulletsWork        Int?
-  minBulletsInternship  Int?
-  maxBulletsInternship  Int?
-  minBulletsProject     Int?
-  maxBulletsProject     Int?
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -211,6 +199,15 @@ model WorkExperienceEntry {
   isFamilyBusiness Boolean  @default(false)
   required         Boolean  @default(true)
   sortOrder        Int      @default(0)
+  // Bullet count bounds for this specific entry's resume bullets — null
+  // means open-ended (no instruction given to the model for that bound).
+  minBullets       Int?
+  maxBullets       Int?
+  // When true, the resu agent is allowed to change this entry's job title
+  // on the generated resume if it would better fit the target role — off
+  // by default, since silently retitling a real job is something the user
+  // must explicitly opt into per entry, not a blanket resume-wide behavior.
+  allowRetitle     Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
@@ -246,6 +243,10 @@ model InternshipEntry {
   isFamilyBusiness Boolean  @default(false)
   required         Boolean  @default(false)
   sortOrder        Int      @default(0)
+  // Bullet count bounds for this specific entry's resume bullets — null
+  // means open-ended (no instruction given to the model for that bound).
+  minBullets       Int?
+  maxBullets       Int?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
@@ -267,6 +268,10 @@ model ProjectEntry {
   isPresent  Boolean  @default(false)
   required   Boolean  @default(false)
   sortOrder  Int      @default(0)
+  // Bullet count bounds for this specific entry's resume bullets — null
+  // means open-ended (no instruction given to the model for that bound).
+  minBullets Int?
+  maxBullets Int?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
@@ -300,14 +305,20 @@ model ResumeTemplate {
   id   String @id @default(cuid())
   name String @default("default")
 
-  marginTopMin    Float @default(36)
-  marginTopMax    Float @default(54)
-  marginBottomMin Float @default(36)
-  marginBottomMax Float @default(54)
-  marginLeftMin   Float @default(36)
-  marginLeftMax   Float @default(54)
-  marginRightMin  Float @default(36)
-  marginRightMax  Float @default(54)
+  // Stored in inches (not points) — resolvedFields() in
+  // structured-resume-pdf.ts converts to points, pdfkit's native unit,
+  // before use. 0.5in == 36pt, 0.75in == 54pt (the prior point-based
+  // defaults), kept equal here so existing saved templates render
+  // unchanged after the inches migration backfills these from the old
+  // point columns.
+  marginTopMin    Float @default(0.5)
+  marginTopMax    Float @default(0.75)
+  marginBottomMin Float @default(0.5)
+  marginBottomMax Float @default(0.75)
+  marginLeftMin   Float @default(0.5)
+  marginLeftMax   Float @default(0.75)
+  marginRightMin  Float @default(0.5)
+  marginRightMax  Float @default(0.75)
 
   // Bullet text font size — the base every other font-size rule is relative
   // to. Hard floor of 9pt enforced in the renderer regardless of what's

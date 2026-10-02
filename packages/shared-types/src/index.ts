@@ -67,12 +67,6 @@ export interface ResumeProfile {
   openToRemote: boolean;
   maxYearsExperience: number | null;
   matchScoreTarget: number;
-  minBulletsWork: number | null;
-  maxBulletsWork: number | null;
-  minBulletsInternship: number | null;
-  maxBulletsInternship: number | null;
-  minBulletsProject: number | null;
-  maxBulletsProject: number | null;
 }
 
 interface DateRangeFields {
@@ -91,6 +85,9 @@ export interface WorkExperienceEntry extends DateRangeFields {
   isFamilyBusiness: boolean;
   required: boolean;
   sortOrder: number;
+  minBullets: number | null;
+  maxBullets: number | null;
+  allowRetitle: boolean;
 }
 
 export interface EducationEntry extends DateRangeFields {
@@ -110,6 +107,8 @@ export interface InternshipEntry extends DateRangeFields {
   isFamilyBusiness: boolean;
   required: boolean;
   sortOrder: number;
+  minBullets: number | null;
+  maxBullets: number | null;
 }
 
 export interface ProjectEntry extends DateRangeFields {
@@ -120,6 +119,8 @@ export interface ProjectEntry extends DateRangeFields {
   demoUrl: string | null;
   required: boolean;
   sortOrder: number;
+  minBullets: number | null;
+  maxBullets: number | null;
 }
 
 export interface PaperEntry {

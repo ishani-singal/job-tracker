@@ -68,6 +68,9 @@ interface WorkExperienceForm extends DateRangeFormState {
   title: string;
   isFamilyBusiness: boolean;
   required: boolean;
+  minBullets: string;
+  maxBullets: string;
+  allowRetitle: boolean;
 }
 
 const EMPTY_WORK_FORM: WorkExperienceForm = {
@@ -76,6 +79,9 @@ const EMPTY_WORK_FORM: WorkExperienceForm = {
   title: '',
   isFamilyBusiness: false,
   required: true,
+  minBullets: '',
+  maxBullets: '',
+  allowRetitle: false,
 };
 
 function workExperienceToForm(e: WorkExperienceEntry): WorkExperienceForm {
@@ -90,6 +96,9 @@ function workExperienceToForm(e: WorkExperienceEntry): WorkExperienceForm {
     isPresent: e.isPresent,
     isFamilyBusiness: e.isFamilyBusiness,
     required: e.required,
+    minBullets: e.minBullets?.toString() ?? '',
+    maxBullets: e.maxBullets?.toString() ?? '',
+    allowRetitle: e.allowRetitle,
   };
 }
 
@@ -109,6 +118,9 @@ function WorkExperienceList() {
         title: form.title || undefined,
         isFamilyBusiness: form.isFamilyBusiness,
         required: form.required,
+        minBullets: form.minBullets ? Number(form.minBullets) : null,
+        maxBullets: form.maxBullets ? Number(form.maxBullets) : null,
+        allowRetitle: form.allowRetitle,
         ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
@@ -124,6 +136,9 @@ function WorkExperienceList() {
         title: form.title || undefined,
         isFamilyBusiness: form.isFamilyBusiness,
         required: form.required,
+        minBullets: form.minBullets ? Number(form.minBullets) : null,
+        maxBullets: form.maxBullets ? Number(form.maxBullets) : null,
+        allowRetitle: form.allowRetitle,
         ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
@@ -149,6 +164,8 @@ function WorkExperienceList() {
             entry.location,
             formatEntryDateRange(entry),
             entry.isFamilyBusiness ? 'Family Business' : '',
+            formatBulletBounds(entry.minBullets, entry.maxBullets),
+            entry.allowRetitle ? 'Retitle Allowed' : '',
           ]
             .filter(Boolean)
             .join(' · ')}
@@ -195,6 +212,16 @@ function WorkExperienceList() {
           />
           Family Business
         </label>
+        <label className="flex items-center gap-1 text-xs col-span-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.allowRetitle}
+            onChange={(e) => setForm({ ...form, allowRetitle: e.target.checked })}
+          />
+          Allow the agent to retitle this role on generated resumes if it better fits the
+          target role
+        </label>
+        <BulletBoundsFields form={form} onChange={setForm} />
         <FormButtons
           editing={!!editingId}
           disabled={!form.company}
@@ -357,6 +384,8 @@ interface InternshipForm extends DateRangeFormState {
   isClassProject: boolean;
   isFamilyBusiness: boolean;
   required: boolean;
+  minBullets: string;
+  maxBullets: string;
 }
 
 const EMPTY_INTERNSHIP_FORM: InternshipForm = {
@@ -366,6 +395,8 @@ const EMPTY_INTERNSHIP_FORM: InternshipForm = {
   isClassProject: false,
   isFamilyBusiness: false,
   required: false,
+  minBullets: '',
+  maxBullets: '',
 };
 
 function internshipToForm(e: InternshipEntry): InternshipForm {
@@ -381,6 +412,8 @@ function internshipToForm(e: InternshipEntry): InternshipForm {
     isClassProject: e.isClassProject,
     isFamilyBusiness: e.isFamilyBusiness,
     required: e.required,
+    minBullets: e.minBullets?.toString() ?? '',
+    maxBullets: e.maxBullets?.toString() ?? '',
   };
 }
 
@@ -401,6 +434,8 @@ function InternshipList() {
         isClassProject: form.isClassProject,
         isFamilyBusiness: form.isFamilyBusiness,
         required: form.required,
+        minBullets: form.minBullets ? Number(form.minBullets) : null,
+        maxBullets: form.maxBullets ? Number(form.maxBullets) : null,
         ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
@@ -417,6 +452,8 @@ function InternshipList() {
         isClassProject: form.isClassProject,
         isFamilyBusiness: form.isFamilyBusiness,
         required: form.required,
+        minBullets: form.minBullets ? Number(form.minBullets) : null,
+        maxBullets: form.maxBullets ? Number(form.maxBullets) : null,
         ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
@@ -443,6 +480,7 @@ function InternshipList() {
             formatEntryDateRange(entry),
             entry.isClassProject ? 'Class Project' : '',
             entry.isFamilyBusiness ? 'Family Business' : '',
+            formatBulletBounds(entry.minBullets, entry.maxBullets),
           ]
             .filter(Boolean)
             .join(' · ')}
@@ -497,6 +535,7 @@ function InternshipList() {
           />
           Required
         </label>
+        <BulletBoundsFields form={form} onChange={setForm} />
         <FormButtons
           editing={!!editingId}
           disabled={!form.company}
@@ -518,6 +557,8 @@ interface ProjectForm extends DateRangeFormState {
   repoUrl: string;
   liveUrl: string;
   required: boolean;
+  minBullets: string;
+  maxBullets: string;
 }
 
 const EMPTY_PROJECT_FORM: ProjectForm = {
@@ -526,6 +567,8 @@ const EMPTY_PROJECT_FORM: ProjectForm = {
   repoUrl: '',
   liveUrl: '',
   required: false,
+  minBullets: '',
+  maxBullets: '',
 };
 
 function projectToForm(e: ProjectEntry): ProjectForm {
@@ -540,6 +583,8 @@ function projectToForm(e: ProjectEntry): ProjectForm {
     endYear: e.endYear ? String(e.endYear) : '',
     isPresent: e.isPresent,
     required: e.required,
+    minBullets: e.minBullets?.toString() ?? '',
+    maxBullets: e.maxBullets?.toString() ?? '',
   };
 }
 
@@ -563,6 +608,8 @@ function ProjectList() {
         repoUrl: form.repoUrl || undefined,
         liveUrl: form.liveUrl || undefined,
         required: form.required,
+        minBullets: form.minBullets ? Number(form.minBullets) : null,
+        maxBullets: form.maxBullets ? Number(form.maxBullets) : null,
         ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
@@ -578,6 +625,8 @@ function ProjectList() {
         repoUrl: form.repoUrl || undefined,
         liveUrl: form.liveUrl || undefined,
         required: form.required,
+        minBullets: form.minBullets ? Number(form.minBullets) : null,
+        maxBullets: form.maxBullets ? Number(form.maxBullets) : null,
         ...dateRangeToPayload(form),
       }),
     onSuccess: () => {
@@ -601,7 +650,13 @@ function ProjectList() {
         <EntryRow
           key={entry.id}
           label={entry.name}
-          sublabel={[entry.repoUrl, entry.liveUrl, entry.location, formatEntryDateRange(entry)]
+          sublabel={[
+            entry.repoUrl,
+            entry.liveUrl,
+            entry.location,
+            formatEntryDateRange(entry),
+            formatBulletBounds(entry.minBullets, entry.maxBullets),
+          ]
             .filter(Boolean)
             .join(' · ')}
           required={entry.required}
@@ -660,6 +715,7 @@ function ProjectList() {
           />
           Required
         </label>
+        <BulletBoundsFields form={form} onChange={setForm} />
         <FormButtons
           editing={!!editingId}
           disabled={!form.name}
@@ -675,6 +731,47 @@ function ProjectList() {
 }
 
 // ---------- Shared ----------
+
+interface BulletBoundsFormState {
+  minBullets: string;
+  maxBullets: string;
+}
+
+function formatBulletBounds(min: number | null, max: number | null): string {
+  if (min == null && max == null) return '';
+  if (min != null && max != null) return `${min}-${max} bullets`;
+  if (min != null) return `${min}+ bullets`;
+  return `up to ${max} bullets`;
+}
+
+function BulletBoundsFields<T extends BulletBoundsFormState>({
+  form,
+  onChange,
+}: {
+  form: T;
+  onChange: (form: T) => void;
+}) {
+  return (
+    <>
+      <input
+        type="number"
+        min={0}
+        className="border rounded px-2 py-1 text-sm bg-transparent col-span-2"
+        placeholder="Min bullets (optional)"
+        value={form.minBullets}
+        onChange={(e) => onChange({ ...form, minBullets: e.target.value })}
+      />
+      <input
+        type="number"
+        min={0}
+        className="border rounded px-2 py-1 text-sm bg-transparent col-span-2"
+        placeholder="Max bullets (optional)"
+        value={form.maxBullets}
+        onChange={(e) => onChange({ ...form, maxBullets: e.target.value })}
+      />
+    </>
+  );
+}
 
 function FormButtons({
   editing,

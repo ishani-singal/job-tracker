@@ -126,46 +126,30 @@ def build_profile_context(
         (s["entryType"], s["entryId"]): s["storyText"] for s in (stories or [])
     }
     entries_section = _render_entries(entries, stories_by_entry) if entries else ""
-    bullet_bounds_instruction = _render_bullet_bounds(profile)
 
     return (
         f"## Candidate profile facts\n{facts}\n\n"
         f"{contact_line_instruction}"
         f"{entries_section}"
-        f"{bullet_bounds_instruction}"
         f"## Process template\n{profile.get('templateBody', '')}"
     )
 
 
-def _render_bullet_bounds(profile: dict) -> str:
-    """Per-entry-type bullet count bounds set in Settings — overrides any
-    fixed bullet-count prose in the process template below (the template's
-    old "minimum of 3, max of 5" language was removed from the default in
-    favor of this explicit, user-editable control). A bound left blank in
-    Settings is None here and simply isn't mentioned, leaving that entry
-    type open-ended.
+def _bullet_bounds_suffix(e: dict) -> str:
+    """Renders this specific entry's own bullet count bound (set per-entry in
+    Settings, not shared across every entry of the same type) as a bracketed
+    instruction appended to its line — overrides any bullet-count guidance in
+    the process template below. Missing/null bounds render nothing, leaving
+    that entry open-ended.
     """
-    rows = [
-        ("Work Experience", profile.get("minBulletsWork"), profile.get("maxBulletsWork")),
-        ("Internship", profile.get("minBulletsInternship"), profile.get("maxBulletsInternship")),
-        ("Project", profile.get("minBulletsProject"), profile.get("maxBulletsProject")),
-    ]
-    lines = []
-    for label, lo, hi in rows:
-        if lo is None and hi is None:
-            continue
-        if lo is not None and hi is not None:
-            lines.append(f"- {label}: {lo}-{hi} bullets per entry")
-        elif lo is not None:
-            lines.append(f"- {label}: at least {lo} bullets per entry, no upper bound")
-        else:
-            lines.append(f"- {label}: up to {hi} bullets per entry, no lower bound")
-    if not lines:
+    lo, hi = e.get("minBullets"), e.get("maxBullets")
+    if lo is None and hi is None:
         return ""
-    return (
-        "## Bullet count bounds (required, overrides any bullet-count "
-        "guidance in the process template below)\n" + "\n".join(lines) + "\n\n"
-    )
+    if lo is not None and hi is not None:
+        return f" [BULLET COUNT: {lo}-{hi} bullets, required]"
+    if lo is not None:
+        return f" [BULLET COUNT: at least {lo} bullets, no upper bound, required]"
+    return f" [BULLET COUNT: up to {hi} bullets, no lower bound, required]"
 
 
 _MONTH_NAMES = [
@@ -226,7 +210,13 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
         + (f" ({e['location']})" if e.get("location") else "")
         + f" [{_format_date_range(e)}]"
         + (" [FAMILY BUSINESS — real scope/impact, but do not imply a formal "
-           "competitive hiring process]" if e.get("isFamilyBusiness") else ""),
+           "competitive hiring process]" if e.get("isFamilyBusiness") else "")
+        + (" [RETITLE ALLOWED — you may change this entry's job title on the "
+           "generated resume if a different title would better fit the "
+           "target role; flag the change to the user]" if e.get("allowRetitle")
+           else " [RETITLE NOT ALLOWED — keep this entry's title exactly as "
+           "given, even if a different title would fit the role better]")
+        + _bullet_bounds_suffix(e),
     )
     education = render_group(
         "Education",
@@ -250,7 +240,8 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
            "real internship hire; use project/coursework framing, not employment "
            "language]" if e.get("isClassProject") else "")
         + (" [FAMILY BUSINESS — real scope/impact, but do not imply a formal "
-           "competitive hiring process]" if e.get("isFamilyBusiness") else ""),
+           "competitive hiring process]" if e.get("isFamilyBusiness") else "")
+        + _bullet_bounds_suffix(e),
     )
     projects = render_group(
         "Projects",
@@ -260,7 +251,8 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
         + (f" — {e['repoUrl']}" if e.get("repoUrl") else "")
         + (f" — live: {e['liveUrl']}" if e.get("liveUrl") else "")
         + (f" ({e['location']})" if e.get("location") else "")
-        + f" [{_format_date_range(e)}]",
+        + f" [{_format_date_range(e)}]"
+        + _bullet_bounds_suffix(e),
     )
 
     return f"## Candidate background\n\n{work}{education}{internships}{projects}"

@@ -144,7 +144,7 @@ function layoutEntry(
   const paragraphs: Paragraph[] = [];
 
   const headerText = [entry.name.toUpperCase(), entry.subtitle].filter(Boolean).join(' | ');
-  const trailing = [entry.dateRange, entry.location].filter(Boolean).join(' | ');
+  const trailing = entry.dateRange ?? '';
   paragraphs.push(
     new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: contentWidthTwips }],

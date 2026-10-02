@@ -13,9 +13,10 @@ type RangeField = {
   hint?: string;
 };
 
-const RANGE_GROUPS: { title: string; fields: RangeField[] }[] = [
+const RANGE_GROUPS: { title: string; step?: string; fields: RangeField[] }[] = [
   {
-    title: 'Margins (points)',
+    title: 'Margins (inches)',
+    step: '0.05',
     fields: [
       { key: 'marginTop', label: 'Top', minKey: 'marginTopMin', maxKey: 'marginTopMax' },
       { key: 'marginBottom', label: 'Bottom', minKey: 'marginBottomMin', maxKey: 'marginBottomMax' },
@@ -126,7 +127,7 @@ export default function ResumeTemplatePage() {
               <div className="flex items-center gap-3">
                 <input
                   type="number"
-                  step="0.5"
+                  step={group.step ?? '0.5'}
                   className="w-24 border rounded px-2 py-1 text-sm bg-transparent"
                   value={draft[field.minKey] as number | undefined ?? ''}
                   onChange={(e) => setField(field.minKey, Number(e.target.value))}
@@ -134,7 +135,7 @@ export default function ResumeTemplatePage() {
                 <span className="text-xs opacity-60">to</span>
                 <input
                   type="number"
-                  step="0.5"
+                  step={group.step ?? '0.5'}
                   className="w-24 border rounded px-2 py-1 text-sm bg-transparent"
                   value={draft[field.maxKey] as number | undefined ?? ''}
                   onChange={(e) => setField(field.maxKey, Number(e.target.value))}

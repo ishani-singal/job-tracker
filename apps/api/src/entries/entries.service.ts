@@ -10,12 +10,18 @@ interface DateRangeFields {
   isPresent?: boolean;
 }
 
-export interface WorkExperienceInput extends DateRangeFields {
+interface BulletBoundsFields {
+  minBullets?: number | null;
+  maxBullets?: number | null;
+}
+
+export interface WorkExperienceInput extends DateRangeFields, BulletBoundsFields {
   company: string;
   title?: string;
   isFamilyBusiness?: boolean;
   required?: boolean;
   sortOrder?: number;
+  allowRetitle?: boolean;
 }
 
 export interface EducationInput extends DateRangeFields {
@@ -26,7 +32,7 @@ export interface EducationInput extends DateRangeFields {
   sortOrder?: number;
 }
 
-export interface InternshipInput extends DateRangeFields {
+export interface InternshipInput extends DateRangeFields, BulletBoundsFields {
   company: string;
   title?: string;
   isClassProject?: boolean;
@@ -35,7 +41,7 @@ export interface InternshipInput extends DateRangeFields {
   sortOrder?: number;
 }
 
-export interface ProjectInput extends DateRangeFields {
+export interface ProjectInput extends DateRangeFields, BulletBoundsFields {
   name: string;
   repoUrl?: string;
   liveUrl?: string;
