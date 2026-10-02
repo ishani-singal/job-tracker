@@ -145,11 +145,14 @@ function layoutEntry(
 
   const headerText = [entry.name.toUpperCase(), entry.subtitle].filter(Boolean).join(' | ');
   const trailing = entry.dateRange ?? '';
+  const headerRun = new TextRun({ text: headerText, bold: true, size: pt(fields.bulletFont) });
   paragraphs.push(
     new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: contentWidthTwips }],
       children: [
-        new TextRun({ text: headerText, bold: true, size: pt(fields.bulletFont) }),
+        entry.url
+          ? new ExternalHyperlink({ link: entry.url, children: [headerRun] })
+          : headerRun,
         ...(trailing ? [new TextRun({ text: `\t${trailing}`, size: pt(fields.bulletFont) })] : []),
       ],
     }),

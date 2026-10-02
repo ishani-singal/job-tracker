@@ -255,6 +255,13 @@ model ProjectEntry {
   id         String   @id @default(cuid())
   name       String
   repoUrl    String?
+  // Whether repoUrl points to a public GitHub repo — resolved once via an
+  // unauthenticated GitHub API call whenever repoUrl is set/changed (see
+  // EntriesService.resolveRepoVisibility), not re-checked at resume
+  // generation time, since visibility essentially never changes once a
+  // repo is connected and a live check on every generation would just add
+  // latency for no benefit. Null means not yet resolved or repoUrl is empty.
+  isRepoPublic Boolean?
   liveUrl    String?
   // Distinct from liveUrl (the deployed product itself) — a demo video/GIF/
   // recording/sandbox link, when the live product isn't public or a quick

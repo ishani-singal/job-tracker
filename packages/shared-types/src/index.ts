@@ -115,6 +115,7 @@ export interface ProjectEntry extends DateRangeFields {
   id: string;
   name: string;
   repoUrl: string | null;
+  isRepoPublic: boolean | null;
   liveUrl: string | null;
   demoUrl: string | null;
   required: boolean;
@@ -182,6 +183,11 @@ export interface StructuredResumeEntry {
   location: string | null;
   dateRange: string | null;
   bullets: string[];
+  // Hyperlink target for this entry's header — a project's public repo URL,
+  // or its demo/live link when the repo is private or absent. Null for
+  // entry types that don't carry a link (work, education) or when a
+  // project has neither.
+  url: string | null;
 }
 
 export interface StructuredResumeSection {

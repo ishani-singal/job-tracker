@@ -23,19 +23,24 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 
+from cost_guard import CostGuardModel, run_scope
+
 from .deps import ResuDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS, build_profile_context
 from .html_text import html_to_text
 from .rate_limit import AZURE_HTTP_TIMEOUT, retry_on_rate_limit
 
-_model = OpenAIChatModel(
-    os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
-    provider=AzureProvider(
-        azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
-        api_key=os.environ["AZURE_LLM_API_KEY"],
-        api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
-        http_client=httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
+_model = CostGuardModel(
+    OpenAIChatModel(
+        os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
+        provider=AzureProvider(
+            azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
+            api_key=os.environ["AZURE_LLM_API_KEY"],
+            api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
+            http_client=httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
+        ),
     ),
+    agent="resu",
 )
 
 
@@ -50,6 +55,7 @@ class ResumeEntry(BaseModel):
     location: str | None = None
     dateRange: str | None = None
     bullets: list[str]
+    url: str | None = None
 
 
 class ResumeSection(BaseModel):
@@ -88,8 +94,14 @@ _BASE_SYSTEM_PROMPT = (
     "Respond with structured output every turn: set done=true and put the "
     "complete finished resume in `resume` as a StructuredResume object "
     "(contactLine + sections, each section holding heading/kind/entries, "
-    "each entry holding name/subtitle/location/dateRange/bullets) once "
+    "each entry holding name/subtitle/location/dateRange/bullets/url) once "
     "you've gone through the full process template with no open questions. "
+    "A project entry's own line in the background below may carry a "
+    "'[LINK: <url>]' tag — if present, copy that URL verbatim into that "
+    "entry's `url` field; if absent, leave `url` unset (null). Never "
+    "construct or guess a URL yourself — only ever copy one from a "
+    "[LINK: ...] tag. Work/education/internship entries have no `url`; "
+    "leave it unset for those.\n\n"
     "Do not put a name, job title, or 'open to remote' in contactLine — it "
     "is rendered separately above the contact line; contactLine holds only "
     "the exact value given to you below under 'Contact line'. Every bullet "
@@ -195,9 +207,10 @@ async def run_turn(
     # A 429 can surface from any model request inside this multi-step run
     # (not just the narrative sub-agent's own calls), and nothing is
     # persisted until .run() returns, so retrying the whole call is safe.
-    result = await retry_on_rate_limit(
-        lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
-    )
+    with run_scope():
+        result = await retry_on_rate_limit(
+            lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
+        )
     return result.output, result.all_messages()
 
 
@@ -218,7 +231,8 @@ async def run_company_turn(
         if message_history
         else f"Generate one common resume covering all applications at {company}."
     )
-    result = await retry_on_rate_limit(
-        lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
-    )
+    with run_scope():
+        result = await retry_on_rate_limit(
+            lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
+        )
     return result.output, result.all_messages()

@@ -45,6 +45,7 @@ export interface ProjectInput extends DateRangeFields, BulletBoundsFields {
   name: string;
   repoUrl?: string;
   liveUrl?: string;
+  demoUrl?: string;
   required?: boolean;
   sortOrder?: number;
 }
@@ -52,6 +53,35 @@ export interface ProjectInput extends DateRangeFields, BulletBoundsFields {
 @Injectable()
 export class EntriesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Resolves whether a GitHub repo URL is public via an unauthenticated API
+   * call — deliberately not the user's connected GitHub OAuth token, since
+   * a project's repoUrl is a free-text field that need not even belong to
+   * the connected account, and an unauthenticated 200 vs. 404/anything-else
+   * is a direct, token-independent answer to "can a reviewer actually open
+   * this link." Resolved once here, when repoUrl is set/changed, rather
+   * than at resume-generation time, since visibility essentially never
+   * changes once a repo exists and a live check on every generation would
+   * just add latency for no benefit. Any failure (malformed URL, network
+   * error, rate limit) resolves to false, so the renderer falls back to a
+   * demo/live link rather than risk linking a reviewer to something they
+   * can't open.
+   */
+  private async resolveRepoVisibility(repoUrl: string | undefined): Promise<boolean | null> {
+    if (!repoUrl) return null;
+    const match = repoUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
+    if (!match) return false;
+    const fullName = match[1].replace(/\.git$/, '');
+    try {
+      const response = await fetch(`https://api.github.com/repos/${fullName}`, {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
 
   listWorkExperience() {
     return this.prisma.workExperienceEntry.findMany({ orderBy: { sortOrder: 'asc' } });
@@ -95,11 +125,21 @@ export class EntriesService {
   listProjects() {
     return this.prisma.projectEntry.findMany({ orderBy: { sortOrder: 'asc' } });
   }
-  createProject(input: ProjectInput) {
-    return this.prisma.projectEntry.create({ data: input });
+  async createProject(input: ProjectInput) {
+    const isRepoPublic = await this.resolveRepoVisibility(input.repoUrl);
+    return this.prisma.projectEntry.create({ data: { ...input, isRepoPublic } });
   }
-  updateProject(id: string, input: Partial<ProjectInput>) {
-    return this.prisma.projectEntry.update({ where: { id }, data: input });
+  async updateProject(id: string, input: Partial<ProjectInput>) {
+    // Only re-resolve visibility when repoUrl is actually part of this
+    // update — an edit to, say, just the title shouldn't trigger a GitHub
+    // call or risk clobbering a previously-resolved value with nothing to
+    // base it on.
+    const isRepoPublic =
+      input.repoUrl !== undefined ? await this.resolveRepoVisibility(input.repoUrl) : undefined;
+    return this.prisma.projectEntry.update({
+      where: { id },
+      data: { ...input, ...(isRepoPublic !== undefined && { isRepoPublic }) },
+    });
   }
   deleteProject(id: string) {
     return this.prisma.projectEntry.delete({ where: { id } });

@@ -152,6 +152,22 @@ def _bullet_bounds_suffix(e: dict) -> str:
     return f" [BULLET COUNT: up to {hi} bullets, no lower bound, required]"
 
 
+def _project_link_suffix(e: dict) -> str:
+    """Resolves a project's hyperlink target — its repo URL if that repo is
+    public (isRepoPublic, resolved once at save time by
+    EntriesService.resolveRepoVisibility, not re-checked here), else its
+    live/demo URL as a fallback, else no link at all. Rendered as a tag the
+    model echoes into ResumeEntry.url verbatim.
+    """
+    repo_url, is_public = e.get("repoUrl"), e.get("isRepoPublic")
+    if repo_url and is_public:
+        return f" [LINK: {repo_url}]"
+    fallback = e.get("liveUrl") or e.get("demoUrl")
+    if fallback:
+        return f" [LINK: {fallback}]"
+    return ""
+
+
 _MONTH_NAMES = [
     "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -252,7 +268,8 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
         + (f" — live: {e['liveUrl']}" if e.get("liveUrl") else "")
         + (f" ({e['location']})" if e.get("location") else "")
         + f" [{_format_date_range(e)}]"
-        + _bullet_bounds_suffix(e),
+        + _bullet_bounds_suffix(e)
+        + _project_link_suffix(e),
     )
 
     return f"## Candidate background\n\n{work}{education}{internships}{projects}"

@@ -281,6 +281,14 @@ function layoutEntry(
   doc.font('Helvetica-Bold').fontSize(fields.bulletFont);
   const fittedHeaderText = truncateToWidth(doc, headerText, headerWidth);
   doc.text(fittedHeaderText, contentLeft, nameY, { continued: false, lineBreak: false });
+  if (entry.url) {
+    // Same direct .link() pattern as layoutContactLine — text()'s own
+    // `link` option computes the annotation's width from options.textWidth,
+    // which isn't populated on this lineBreak:false/non-continued call
+    // path and produces a NaN rect that crashes annotate().
+    const linkWidth = doc.widthOfString(fittedHeaderText);
+    doc.link(contentLeft, nameY, linkWidth, doc.currentLineHeight(), entry.url);
+  }
 
   if (trailing) {
     doc
