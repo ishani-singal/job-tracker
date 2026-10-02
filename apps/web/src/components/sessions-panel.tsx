@@ -6,6 +6,8 @@ import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 import type { Application, GenerationSession } from '@job-tracker/shared-types';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
+
 function statusDotClass(status: GenerationSession['status']): string {
   switch (status) {
     case 'RUNNING':
@@ -221,6 +223,7 @@ export function SessionsPanel() {
 function SessionChat({ session }: { session: GenerationSession }) {
   const queryClient = useQueryClient();
   const [reply, setReply] = useState('');
+  const [previewApplicationId, setPreviewApplicationId] = useState<string | null>(null);
 
   const replyMutation = useMutation({
     mutationFn: () => api.replyToSession(session.id, reply),
@@ -232,11 +235,14 @@ function SessionChat({ session }: { session: GenerationSession }) {
 
   const acceptMutation = useMutation({
     mutationFn: () => api.acceptSession(session.id),
-    onSuccess: () => {
+    onSuccess: (updatedSession) => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       if (session.scope === 'APPLICATION') {
         queryClient.invalidateQueries({ queryKey: ['applications'] });
         queryClient.invalidateQueries({ queryKey: ['applications', session.applicationId] });
+        if (updatedSession.applicationId) {
+          setPreviewApplicationId(updatedSession.applicationId);
+        }
       } else if (session.scope === 'LINKEDIN') {
         queryClient.invalidateQueries({ queryKey: ['linkedin-profile'] });
         queryClient.invalidateQueries({ queryKey: ['linkedin-staleness'] });
@@ -341,6 +347,54 @@ function SessionChat({ session }: { session: GenerationSession }) {
                 : 'Accepted — saved to the application.'}
         </div>
       )}
+
+      {previewApplicationId && (
+        <ResumePreviewDialog
+          applicationId={previewApplicationId}
+          onClose={() => setPreviewApplicationId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Shown right after accepting an APPLICATION-scope session — embeds the PDF
+ * inline (the resume.pdf endpoint's `inline=1` disposition makes that
+ * possible; the plain download links elsewhere keep forcing a download) and
+ * offers a one-click Word download alongside it, since .docx has no
+ * practical in-browser preview.
+ */
+function ResumePreviewDialog({
+  applicationId,
+  onClose,
+}: {
+  applicationId: string;
+  onClose: () => void;
+}) {
+  const pdfUrl = `${API_BASE}/applications/${applicationId}/resume.pdf?inline=1`;
+  const pdfDownloadUrl = `${API_BASE}/applications/${applicationId}/resume.pdf`;
+  const docxDownloadUrl = `${API_BASE}/applications/${applicationId}/resume.docx`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white dark:bg-neutral-900 rounded-lg shadow-xl w-full max-w-3xl h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between border-b p-3">
+          <h2 className="text-sm font-medium">Resume Preview</h2>
+          <div className="flex items-center gap-2">
+            <a href={pdfDownloadUrl} className="px-2 py-1 text-xs rounded border">
+              Download PDF
+            </a>
+            <a href={docxDownloadUrl} className="px-2 py-1 text-xs rounded border">
+              Download Word
+            </a>
+            <button className="px-2 py-1 text-xs rounded border" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+        <iframe src={pdfUrl} title="Resume PDF preview" className="flex-1 w-full" />
+      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Res,
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
@@ -55,7 +56,11 @@ export class ApplicationsController {
   }
 
   @Get(':id/resume.pdf')
-  async downloadResumePdf(@Param('id') id: string, @Res() res: FastifyReply) {
+  async downloadResumePdf(
+    @Param('id') id: string,
+    @Res() res: FastifyReply,
+    @Query('inline') inline?: string,
+  ) {
     const application = await this.applications.get(id);
     if (!application.resumeContent) {
       throw new NotFoundException('No resume has been generated for this application yet');
@@ -69,9 +74,15 @@ export class ApplicationsController {
     const pdf = await renderResumePdf(title || 'Resume', application.resumeContent, template, profile.candidateName);
 
     const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
+    // `inline=1` is used by the in-chat preview dialog, which embeds this in
+    // an <iframe> — that only works with `inline`, since `attachment`
+    // forces a download instead of rendering in the browser. The plain
+    // download links elsewhere keep using `attachment` (the default, no
+    // query param) so clicking them still saves a file as expected.
+    const disposition = inline ? 'inline' : 'attachment';
     res
       .header('Content-Type', 'application/pdf')
-      .header('Content-Disposition', `attachment; filename="${safeName}-resume.pdf"`)
+      .header('Content-Disposition', `${disposition}; filename="${safeName}-resume.pdf"`)
       .send(pdf);
   }
 
