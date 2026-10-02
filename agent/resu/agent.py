@@ -32,13 +32,21 @@ from .html_text import html_to_text
 from .tools import fetch_company_job_descriptions, fetch_job_description
 from .rate_limit import AZURE_HTTP_TIMEOUT, retry_on_rate_limit
 
+# Resume generation can run on its own deployment (e.g. gpt-5.1) while the other
+# agents stay on AZURE_LLM_*; each RESU_LLM_* var falls back to its AZURE_LLM_*
+# counterpart when unset. The deployment name must match a row in the
+# /llm-usage price table or its calls are costed at $0.
+def _resu_env(name: str, default: str | None = None) -> str:
+    return os.environ.get(f"RESU_LLM_{name}") or os.environ.get(f"AZURE_LLM_{name}") or default or ""
+
+
 _model = CostGuardModel(
     OpenAIChatModel(
-        os.environ.get("AZURE_LLM_DEPLOYMENT_NAME", "gpt-4.1"),
+        _resu_env("DEPLOYMENT_NAME", "gpt-4.1"),
         provider=AzureProvider(
-            azure_endpoint=os.environ["AZURE_LLM_ENDPOINT"],
-            api_key=os.environ["AZURE_LLM_API_KEY"],
-            api_version=os.environ.get("AZURE_LLM_API_VERSION", "2024-12-01-preview"),
+            azure_endpoint=_resu_env("ENDPOINT"),
+            api_key=_resu_env("API_KEY"),
+            api_version=_resu_env("API_VERSION", "2024-12-01-preview"),
             http_client=httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
         ),
     ),
