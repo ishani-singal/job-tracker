@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import hashlib
 import json
 import logging
 import os
@@ -28,6 +29,7 @@ from datetime import date
 from pathlib import Path
 
 import httpx
+from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.wrapper import WrapperModel
 
 logger = logging.getLogger("llm_cost")
@@ -89,6 +91,36 @@ async def _post_call(record: dict) -> None:
         logger.warning("llm-cost: failed to record call in API")
 
 
+def _log_tools(agent: str, messages, response) -> tuple[int, str]:
+    """Logs the tool calls this response makes and the sizes of the tool results
+    that were just sent to the model (Soma's log_run tool-call/tool-return lines),
+    so a large payload or a chatty one-tool-per-step loop is visible. Returns
+    (step number, short hash of the first request's content) — a changed hash
+    between calls of one run means the cached prompt prefix was altered.
+    """
+    step, prefix = 0, "?"
+    try:
+        step = sum(isinstance(m, ModelResponse) for m in messages) + 1
+        if messages and isinstance(messages[0], ModelRequest):
+            prefix = hashlib.md5(str(messages[0].parts).encode()).hexdigest()[:8]
+        if messages and isinstance(messages[-1], ModelRequest):
+            for part in messages[-1].parts:
+                if isinstance(part, ToolReturnPart):
+                    logger.info(
+                        "tool-return: agent=%s step=%d tool=%s result_len=%d",
+                        agent, step, part.tool_name, len(str(part.content)),
+                    )
+        for part in response.parts:
+            if isinstance(part, ToolCallPart):
+                logger.info(
+                    "tool-call: agent=%s step=%d tool=%s args_len=%d",
+                    agent, step, part.tool_name, len(str(part.args or "")),
+                )
+    except Exception:
+        logger.exception("llm-cost: tool logging failed")
+    return step, prefix
+
+
 def _day_total() -> float:
     try:
         data = json.loads(_SPEND_FILE.read_text())
@@ -140,6 +172,7 @@ class CostGuardModel(WrapperModel):
 
         response = await self.wrapped.request(messages, model_settings, model_request_parameters)
 
+        step, prefix = _log_tools(self.agent_name, messages, response)
         u = response.usage
         in_tok, out_tok = u.input_tokens or 0, u.output_tokens or 0
         cached = u.cache_read_tokens or 0
@@ -161,8 +194,8 @@ class CostGuardModel(WrapperModel):
             file_day = _add_day(cost)
         day = day + cost if config is not None else file_day
         logger.info(
-            "llm-call: agent=%s model=%s in=%d cached=%d out=%d cost=$%.4f (in $%.4f out $%.4f) run_total=$%.4f day_total=$%.4f",
-            self.agent_name, model, in_tok, cached, out_tok, cost, in_cost, out_cost, run, day,
+            "llm-call: agent=%s step=%d prefix=%s model=%s in=%d cached=%d out=%d cost=$%.4f (in $%.4f out $%.4f) run_total=$%.4f day_total=$%.4f",
+            self.agent_name, step, prefix, model, in_tok, cached, out_tok, cost, in_cost, out_cost, run, day,
         )
         if run >= run_limit * _WARN_FRACTION or day >= day_limit * _WARN_FRACTION:
             logger.warning(
