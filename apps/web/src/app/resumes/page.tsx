@@ -364,6 +364,12 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
     openToRemote: profile.openToRemote ?? false,
     maxYearsExperience: profile.maxYearsExperience?.toString() ?? '',
     matchScoreTarget: profile.matchScoreTarget?.toString() ?? '93',
+    minBulletsWork: profile.minBulletsWork?.toString() ?? '',
+    maxBulletsWork: profile.maxBulletsWork?.toString() ?? '',
+    minBulletsInternship: profile.minBulletsInternship?.toString() ?? '',
+    maxBulletsInternship: profile.maxBulletsInternship?.toString() ?? '',
+    minBulletsProject: profile.minBulletsProject?.toString() ?? '',
+    maxBulletsProject: profile.maxBulletsProject?.toString() ?? '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -393,6 +399,12 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
         openToRemote: form.openToRemote,
         maxYearsExperience: form.maxYearsExperience ? Number(form.maxYearsExperience) : undefined,
         matchScoreTarget: form.matchScoreTarget ? Number(form.matchScoreTarget) : undefined,
+        minBulletsWork: form.minBulletsWork ? Number(form.minBulletsWork) : null,
+        maxBulletsWork: form.maxBulletsWork ? Number(form.maxBulletsWork) : null,
+        minBulletsInternship: form.minBulletsInternship ? Number(form.minBulletsInternship) : null,
+        maxBulletsInternship: form.maxBulletsInternship ? Number(form.maxBulletsInternship) : null,
+        minBulletsProject: form.minBulletsProject ? Number(form.minBulletsProject) : null,
+        maxBulletsProject: form.maxBulletsProject ? Number(form.maxBulletsProject) : null,
       });
       queryClient.invalidateQueries({ queryKey: ['profile'] });
     } finally {
@@ -529,6 +541,68 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
         93% is a reasonable default for most ATS systems — higher targets push the agent to
         incorporate more exact JD phrasing, which can read as less natural.
       </p>
+
+      <div className="flex flex-col gap-2">
+        <h3 className="text-xs font-medium opacity-80">Bullets per entry (leave blank = open-ended)</h3>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Work Experience — Min">
+            <input
+              type="number"
+              min={0}
+              className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+              value={form.minBulletsWork}
+              onChange={(e) => setForm({ ...form, minBulletsWork: e.target.value })}
+            />
+          </Field>
+          <Field label="Work Experience — Max">
+            <input
+              type="number"
+              min={0}
+              className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+              value={form.maxBulletsWork}
+              onChange={(e) => setForm({ ...form, maxBulletsWork: e.target.value })}
+            />
+          </Field>
+          <div />
+          <Field label="Internship — Min">
+            <input
+              type="number"
+              min={0}
+              className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+              value={form.minBulletsInternship}
+              onChange={(e) => setForm({ ...form, minBulletsInternship: e.target.value })}
+            />
+          </Field>
+          <Field label="Internship — Max">
+            <input
+              type="number"
+              min={0}
+              className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+              value={form.maxBulletsInternship}
+              onChange={(e) => setForm({ ...form, maxBulletsInternship: e.target.value })}
+            />
+          </Field>
+          <div />
+          <Field label="Project — Min">
+            <input
+              type="number"
+              min={0}
+              className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+              value={form.minBulletsProject}
+              onChange={(e) => setForm({ ...form, minBulletsProject: e.target.value })}
+            />
+          </Field>
+          <Field label="Project — Max">
+            <input
+              type="number"
+              min={0}
+              className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+              value={form.maxBulletsProject}
+              onChange={(e) => setForm({ ...form, maxBulletsProject: e.target.value })}
+            />
+          </Field>
+        </div>
+      </div>
 
       <button
         className="self-start px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black"

@@ -126,12 +126,45 @@ def build_profile_context(
         (s["entryType"], s["entryId"]): s["storyText"] for s in (stories or [])
     }
     entries_section = _render_entries(entries, stories_by_entry) if entries else ""
+    bullet_bounds_instruction = _render_bullet_bounds(profile)
 
     return (
         f"## Candidate profile facts\n{facts}\n\n"
         f"{contact_line_instruction}"
         f"{entries_section}"
+        f"{bullet_bounds_instruction}"
         f"## Process template\n{profile.get('templateBody', '')}"
+    )
+
+
+def _render_bullet_bounds(profile: dict) -> str:
+    """Per-entry-type bullet count bounds set in Settings — overrides any
+    fixed bullet-count prose in the process template below (the template's
+    old "minimum of 3, max of 5" language was removed from the default in
+    favor of this explicit, user-editable control). A bound left blank in
+    Settings is None here and simply isn't mentioned, leaving that entry
+    type open-ended.
+    """
+    rows = [
+        ("Work Experience", profile.get("minBulletsWork"), profile.get("maxBulletsWork")),
+        ("Internship", profile.get("minBulletsInternship"), profile.get("maxBulletsInternship")),
+        ("Project", profile.get("minBulletsProject"), profile.get("maxBulletsProject")),
+    ]
+    lines = []
+    for label, lo, hi in rows:
+        if lo is None and hi is None:
+            continue
+        if lo is not None and hi is not None:
+            lines.append(f"- {label}: {lo}-{hi} bullets per entry")
+        elif lo is not None:
+            lines.append(f"- {label}: at least {lo} bullets per entry, no upper bound")
+        else:
+            lines.append(f"- {label}: up to {hi} bullets per entry, no lower bound")
+    if not lines:
+        return ""
+    return (
+        "## Bullet count bounds (required, overrides any bullet-count "
+        "guidance in the process template below)\n" + "\n".join(lines) + "\n\n"
     )
 
 

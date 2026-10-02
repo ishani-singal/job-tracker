@@ -285,15 +285,6 @@ function layoutEntry(
     doc.y = Math.max(doc.y, nameY + fields.bulletFont * 1.2);
   }
   doc.x = contentLeft;
-
-  // Horizontal rule under every entry header, same convention as the
-  // section-heading rule above it (full content width, hairline weight).
-  doc.moveDown(0.1);
-  doc
-    .moveTo(doc.page.margins.left, doc.y)
-    .lineTo(doc.page.width - doc.page.margins.right, doc.y)
-    .lineWidth(0.5)
-    .stroke();
   doc.moveDown(0.15);
 
   const startX = doc.page.margins.left + fields.tabStop;

@@ -67,6 +67,12 @@ export interface ResumeProfile {
   openToRemote: boolean;
   maxYearsExperience: number | null;
   matchScoreTarget: number;
+  minBulletsWork: number | null;
+  maxBulletsWork: number | null;
+  minBulletsInternship: number | null;
+  maxBulletsInternship: number | null;
+  minBulletsProject: number | null;
+  maxBulletsProject: number | null;
 }
 
 interface DateRangeFields {

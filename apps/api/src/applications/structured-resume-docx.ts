@@ -132,8 +132,8 @@ function layoutContactLine(contactLine: string, fontPt: number): Paragraph {
  * Mirrors layoutEntry: header reads "COMPANY (ALL CAPS) | Subtitle", bold,
  * sized to match the bullet font (not the larger nameFont — entry headers
  * are the same size as body text, just bold), with date/location
- * right-aligned at a tab stop, followed by a horizontal rule (same
- * convention as the section-heading rule), then bullets.
+ * right-aligned at a tab stop, then bullets. The horizontal rule lives only
+ * under each section heading now, not under every entry.
  */
 function layoutEntry(
   entry: StructuredResume['sections'][number]['entries'][number],
@@ -148,9 +148,6 @@ function layoutEntry(
   paragraphs.push(
     new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: contentWidthTwips }],
-      border: {
-        bottom: { style: BorderStyle.SINGLE, size: 4, space: 2, color: '000000' },
-      },
       children: [
         new TextRun({ text: headerText, bold: true, size: pt(fields.bulletFont) }),
         ...(trailing ? [new TextRun({ text: `\t${trailing}`, size: pt(fields.bulletFont) })] : []),

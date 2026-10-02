@@ -21,6 +21,12 @@ export interface ProfileFieldsInput {
   openToRemote?: boolean;
   maxYearsExperience?: number;
   matchScoreTarget?: number;
+  minBulletsWork?: number | null;
+  maxBulletsWork?: number | null;
+  minBulletsInternship?: number | null;
+  maxBulletsInternship?: number | null;
+  minBulletsProject?: number | null;
+  maxBulletsProject?: number | null;
   templateBody?: string;
 }
 
@@ -142,6 +148,16 @@ export class ResumesService {
       ...(input.matchScoreTarget !== undefined && {
         matchScoreTarget: input.matchScoreTarget,
       }),
+      ...(input.minBulletsWork !== undefined && { minBulletsWork: input.minBulletsWork }),
+      ...(input.maxBulletsWork !== undefined && { maxBulletsWork: input.maxBulletsWork }),
+      ...(input.minBulletsInternship !== undefined && {
+        minBulletsInternship: input.minBulletsInternship,
+      }),
+      ...(input.maxBulletsInternship !== undefined && {
+        maxBulletsInternship: input.maxBulletsInternship,
+      }),
+      ...(input.minBulletsProject !== undefined && { minBulletsProject: input.minBulletsProject }),
+      ...(input.maxBulletsProject !== undefined && { maxBulletsProject: input.maxBulletsProject }),
       ...(input.templateBody !== undefined && { templateBody: input.templateBody }),
     };
     return this.prisma.resumePromptTemplate.update({ where: { id: existing.id }, data });

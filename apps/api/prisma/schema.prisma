@@ -176,6 +176,18 @@ model ResumePromptTemplate {
   maxYearsExperience    Int?
   matchScoreTarget      Int      @default(93)
 
+  // Per-entry-type bullet count bounds for resume generation — null means
+  // open-ended (no instruction given to the model for that bound). Internship
+  // entries render as part of the combined Projects & Internships section
+  // but keep their own bullet-count bounds since they're a distinct entry
+  // type with its own source material depth.
+  minBulletsWork        Int?
+  maxBulletsWork        Int?
+  minBulletsInternship  Int?
+  maxBulletsInternship  Int?
+  minBulletsProject     Int?
+  maxBulletsProject     Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
