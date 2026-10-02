@@ -22,8 +22,8 @@ from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.azure import AzureProvider
 
+from azure_provider import make_provider
 from cost_guard import CostGuardModel, run_scope
 
 from .deps import ResuDeps
@@ -43,11 +43,11 @@ def _resu_env(name: str, default: str | None = None) -> str:
 _model = CostGuardModel(
     OpenAIChatModel(
         _resu_env("DEPLOYMENT_NAME", "gpt-4.1"),
-        provider=AzureProvider(
-            azure_endpoint=_resu_env("ENDPOINT"),
-            api_key=_resu_env("API_KEY"),
-            api_version=_resu_env("API_VERSION", "2024-12-01-preview"),
-            http_client=httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
+        provider=make_provider(
+            _resu_env("ENDPOINT"),
+            _resu_env("API_KEY"),
+            _resu_env("API_VERSION", "2024-12-01-preview"),
+            httpx.AsyncClient(timeout=AZURE_HTTP_TIMEOUT),
         ),
     ),
     agent="resu",
