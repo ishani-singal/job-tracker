@@ -37,7 +37,7 @@ const POINTS_PER_INCH = 72;
 export function resolvedFields(template: ResumeTemplate, scale: number) {
   const bulletFont = Math.max(BULLET_FONT_HARD_FLOOR, lerp(template.bulletFontMin, template.bulletFontMax, scale));
   const nameFont = bulletFont + lerp(template.nameFontOffsetMin, template.nameFontOffsetMax, scale);
-  const sectionHeaderFont = nameFont + lerp(
+  const sectionHeaderFont = bulletFont + lerp(
     template.sectionHeaderFontOffsetMin,
     template.sectionHeaderFontOffsetMax,
     scale,

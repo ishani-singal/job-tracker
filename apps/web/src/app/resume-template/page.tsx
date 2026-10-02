@@ -43,7 +43,7 @@ const RANGE_GROUPS: { title: string; step?: string; fields: RangeField[] }[] = [
       },
       {
         key: 'sectionHeaderFontOffset',
-        label: 'Section header size, offset above your name size (pt)',
+        label: 'Section header size, offset above bullet size (pt)',
         minKey: 'sectionHeaderFontOffsetMin',
         maxKey: 'sectionHeaderFontOffsetMax',
       },
