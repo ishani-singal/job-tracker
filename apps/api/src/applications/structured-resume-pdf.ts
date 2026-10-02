@@ -168,7 +168,7 @@ function layoutResume(
     doc.font('Helvetica-Bold').fontSize(fields.nameFont).text(candidateName, { align: 'center' });
   }
 
-  const contactFontSize = Math.max(BULLET_FONT_HARD_FLOOR - 1, fields.bulletFont - 1);
+  const contactFontSize = fields.bulletFont;
   doc.font('Helvetica').fontSize(contactFontSize);
   layoutContactLine(doc, content.contactLine, contactFontSize);
   doc.moveDown(0.3);

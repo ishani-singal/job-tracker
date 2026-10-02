@@ -49,7 +49,7 @@ function buildDocument(content: StructuredResume, fields: ResolvedFields, candid
   const contentWidthTwips =
     PAGE_WIDTH_TWIPS - pointsToTwips(fields.marginLeft) - pointsToTwips(fields.marginRight);
   const tabStopTwips = pointsToTwips(fields.tabStop);
-  const contactFontPt = Math.max(8, fields.bulletFont - 1);
+  const contactFontPt = fields.bulletFont;
 
   const children: Paragraph[] = [];
 
