@@ -38,14 +38,11 @@ IDENTITY = (
 )
 
 INSTRUCTIONS = (
-    "If you were asked to generate a resume for one specific application, call "
-    "fetch_job_description for that application. If instead you were asked to "
-    "generate one common resume shared across all of a company's applications, "
-    "call fetch_company_job_descriptions for that company instead — do not call "
-    "both in the same run, only the one matching the task you were actually "
-    "given. Your profile facts, process template, structured entries, and each "
-    "entry's own Story are already provided below — you do not need to fetch "
-    "them yourself.\n\n"
+    "The job description(s) you are tailoring for are given in the user "
+    "message. Your profile facts, process template, structured entries, and "
+    "each entry's own Story are already provided below — you do not need to "
+    "fetch any of them yourself, and should not call a tool unless the "
+    "instructions below explicitly say to.\n\n"
     "Before writing anything: check the JD against the candidate's disqualifier "
     "keywords and max-years-experience cutoff from the profile facts below. If the "
     "JD clearly fails either, say so plainly and stop rather than generating a "
@@ -55,11 +52,9 @@ INSTRUCTIONS = (
     "authoritative source for that entry specifically, and never pull content "
     "from one entry's Story into a different entry's bullets. An entry marked "
     "'Story: [none yet]' has no detailed document generated for it yet — for "
-    "that entry only, you may fall back to fetch_candidate_resume (formatting "
-    "reference, used sparingly as content here), or call fetch_document_for_entry "
-    "yourself if you suspect a document was generated after this prompt was "
-    "built, but never invent facts not grounded in that entry's own Story or "
-    "fallback material."
+    "that entry only, you may call fetch_document_for_entry yourself if you "
+    "suspect a document was generated after this prompt was built, but never "
+    "invent facts not grounded in that entry's own Story."
 )
 
 
@@ -275,11 +270,7 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
     return f"## Candidate background\n\n{work}{education}{internships}{projects}"
 
 
-TOOLS = [
-    fetch_candidate_profile,
-    fetch_structured_entries,
-    fetch_document_for_entry,
-    fetch_job_description,
-    fetch_company_job_descriptions,
-    fetch_candidate_resume,
-]
+# Everything else (profile, entries, stories, JDs) is already in the prompt or
+# user message — each extra tool round trip re-sends the whole ~50k+ token
+# context, so only the one genuinely-needed fallback stays.
+TOOLS = [fetch_document_for_entry]

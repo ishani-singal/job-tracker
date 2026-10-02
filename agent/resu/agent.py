@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from types import SimpleNamespace
 
 from dotenv import load_dotenv
 
@@ -28,6 +29,7 @@ from cost_guard import CostGuardModel, run_scope
 from .deps import ResuDeps
 from .definition import IDENTITY, INSTRUCTIONS, SOUL, TOOLS, build_profile_context
 from .html_text import html_to_text
+from .tools import fetch_company_job_descriptions, fetch_job_description
 from .rate_limit import AZURE_HTTP_TIMEOUT, retry_on_rate_limit
 
 _model = CostGuardModel(
@@ -199,11 +201,17 @@ async def run_turn(
     Returns (output, updated_message_history) — the caller persists both.
     """
     deps = ResuDeps(api_base_url=api_base_url)
-    prompt = (
-        user_reply
-        if message_history
-        else f"Generate a tailored resume for application {application_id}."
-    )
+    if message_history:
+        prompt = user_reply
+    else:
+        # The JD goes in the user message (after the stable system-prompt
+        # prefix, so prompt caching still hits) instead of costing a tool
+        # round trip that re-sends the whole ~50k-token context.
+        jd = await fetch_job_description(SimpleNamespace(deps=deps), application_id)
+        prompt = (
+            f"Generate a tailored resume for application {application_id}.\n\n"
+            f"## Job description\n{jd or '[empty - no JD saved for this application]'}"
+        )
     # A 429 can surface from any model request inside this multi-step run
     # (not just the narrative sub-agent's own calls), and nothing is
     # persisted until .run() returns, so retrying the whole call is safe.
@@ -226,11 +234,15 @@ async def run_company_turn(
     fetch_job_description.
     """
     deps = ResuDeps(api_base_url=api_base_url)
-    prompt = (
-        user_reply
-        if message_history
-        else f"Generate one common resume covering all applications at {company}."
-    )
+    if message_history:
+        prompt = user_reply
+    else:
+        found = await fetch_company_job_descriptions(SimpleNamespace(deps=deps), company)
+        jds = "\n\n---\n\n".join(found["jds"]) or "[none saved]"
+        prompt = (
+            f"Generate one common resume covering all applications at {company}.\n\n"
+            f"## Job descriptions ({found['stage']} applications)\n{jds}"
+        )
     with run_scope():
         result = await retry_on_rate_limit(
             lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
