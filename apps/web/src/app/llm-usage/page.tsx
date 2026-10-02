@@ -11,13 +11,20 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { LlmModelPrice } from '@job-tracker/shared-types';
+import type { LlmCall, LlmModelPrice } from '@job-tracker/shared-types';
 import { api } from '@/lib/api';
 
 const COLOR_COST = '#2a78d6'; // slot 1: blue, same as the dashboard's primary series
 const GRID_COLOR = 'rgba(128,128,128,0.2)';
 
 const usd = (v: number) => `$${v.toFixed(v < 0.01 && v > 0 ? 4 : 2)}`;
+
+// What this call would have cost on another model, from its own token counts.
+function costOn(c: LlmCall, p: LlmModelPrice): number {
+  return ((c.inputTokens - c.cachedTokens) * p.inputPer1M + c.cachedTokens * p.cachedInputPer1M + c.outputTokens * p.outputPer1M) / 1_000_000;
+}
+
+const signedUsd = (v: number) => `${v < 0 ? '-' : '+'}${usd(Math.abs(v))}`;
 
 const PRICE_KEYS = ['inputPer1M', 'cachedInputPer1M', 'outputPer1M'] as const;
 
@@ -30,6 +37,7 @@ export default function LlmUsagePage() {
   });
 
   const [budget, setBudget] = useState('');
+  const [altModel, setAltModel] = useState<Record<string, string>>({});
   const [newPrice, setNewPrice] = useState({ model: '', inputPer1M: '', cachedInputPer1M: '', outputPer1M: '' });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['llm-usage'] });
@@ -57,6 +65,12 @@ export default function LlmUsagePage() {
   const fraction = cap > 0 ? today / cap : 0;
   const blocked = data !== undefined && today >= cap;
   const barColor = blocked ? '#d03b3b' : fraction >= 0.8 ? '#e0a020' : '#1baf7a';
+  const priceByModel = new Map(data?.prices.map((p) => [p.model, p]));
+  const totalImpact = (data?.calls ?? []).reduce((sum, c) => {
+    const alt = priceByModel.get(altModel[c.id]);
+    return alt ? sum + costOn(c, alt) - c.costUsd : sum;
+  }, 0);
+  const anyAlt = Object.values(altModel).some(Boolean);
   const pricedModels = new Set(data?.prices.map((p) => p.model));
   const unpriced = Array.from(new Set(data?.calls.map((c) => c.model))).filter((m) => !pricedModels.has(m));
 
@@ -194,7 +208,18 @@ export default function LlmUsagePage() {
       </section>
 
       <section className="border rounded p-4 flex flex-col gap-2 overflow-x-auto">
-        <h2 className="text-sm font-medium">Calls</h2>
+        <h2 className="text-sm font-medium">
+          Calls
+          {anyAlt && (
+            <span className="ml-3 font-normal opacity-70">
+              What-if total impact of the selected models: {signedUsd(totalImpact)}
+            </span>
+          )}
+        </h2>
+        <p className="text-xs opacity-60">
+          Pick another model on a row to see what that call would have cost with it (same token counts; nothing is
+          actually switched).
+        </p>
         <table className="text-sm whitespace-nowrap">
           <thead>
             <tr className="text-left opacity-60">
@@ -206,11 +231,17 @@ export default function LlmUsagePage() {
               <th className="pr-4">Output tok</th>
               <th className="pr-4">Input cost</th>
               <th className="pr-4">Output cost</th>
-              <th>Total</th>
+              <th className="pr-4">Total</th>
+              <th className="pr-4">Try model</th>
+              <th className="pr-4">Cost on it</th>
+              <th>Impact</th>
             </tr>
           </thead>
           <tbody>
-            {data?.calls.map((c) => (
+            {data?.calls.map((c) => {
+              const alt = priceByModel.get(altModel[c.id]);
+              const altCost = alt ? costOn(c, alt) : 0;
+              return (
               <tr key={c.id}>
                 <td className="py-1 pr-4">{new Date(c.createdAt).toLocaleString()}</td>
                 <td className="pr-4">{c.agent}</td>
@@ -220,9 +251,39 @@ export default function LlmUsagePage() {
                 <td className="pr-4">{c.outputTokens.toLocaleString()}</td>
                 <td className="pr-4">{usd(c.inputCostUsd)}</td>
                 <td className="pr-4">{usd(c.outputCostUsd)}</td>
-                <td>{usd(c.costUsd)}</td>
+                <td className="pr-4">{usd(c.costUsd)}</td>
+                <td className="pr-4">
+                  <select
+                    className="border rounded px-2 py-1 bg-transparent"
+                    value={altModel[c.id] ?? ''}
+                    onChange={(e) => setAltModel({ ...altModel, [c.id]: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {data.prices
+                      .filter((p) => p.model !== c.model)
+                      .map((p) => (
+                        <option key={p.model} value={p.model}>
+                          {p.model}
+                        </option>
+                      ))}
+                  </select>
+                </td>
+                {alt ? (
+                  <>
+                    <td className="pr-4">{usd(altCost)}</td>
+                    <td className={altCost <= c.costUsd ? 'text-green-600' : 'text-red-600'}>
+                      {signedUsd(altCost - c.costUsd)} ({(((altCost - c.costUsd) / c.costUsd) * 100).toFixed(0)}%)
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="pr-4 opacity-40">—</td>
+                    <td className="opacity-40">—</td>
+                  </>
+                )}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {data && data.calls.length === 0 && <p className="text-sm opacity-60">No LLM calls recorded yet.</p>}
