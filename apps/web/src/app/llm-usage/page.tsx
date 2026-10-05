@@ -62,7 +62,7 @@ export default function LlmUsagePage() {
   const unpriced = Array.from(new Set(data?.calls.map((c) => c.model))).filter((m) => !pricedModels.has(m));
 
   return (
-    <div className="max-w-5xl mx-auto flex flex-col gap-8">
+    <div className="w-full mx-auto flex flex-col gap-8">
       <h1 className="text-xl font-semibold">LLM Usage</h1>
 
       <section className="grid grid-cols-3 gap-4">
