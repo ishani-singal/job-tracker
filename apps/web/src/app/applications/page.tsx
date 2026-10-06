@@ -6,6 +6,8 @@ import { api } from '@/lib/api';
 import { AddApplicationDialog } from '@/components/add-application-dialog';
 import { ApplicationRow } from '@/components/application-row';
 import {
+  HIDE_DUPLICATE_TITLE_KEY,
+  hasApplicationWithSameTitle,
   COMPANY_FILTER_KEY,
   matchesCompanyFilter,
   usePersistedString,
@@ -70,6 +72,7 @@ export default function ApplicationsPage() {
   const [locationFilterOn, setLocationFilterOn] = usePersistedToggle(LOCATION_FILTER_KEY, true);
   const [experienceFilterOn, setExperienceFilterOn] = usePersistedToggle(EXPERIENCE_FILTER_KEY, true);
   const [companyFilter, setCompanyFilter] = usePersistedString(COMPANY_FILTER_KEY);
+  const [hideDuplicateTitleOn, setHideDuplicateTitleOn] = usePersistedToggle(HIDE_DUPLICATE_TITLE_KEY, true);
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
   // Both filters below are persisted server-side (AppSettings) so they
   // survive a page reload — initialized from settings once loaded, then
@@ -159,7 +162,8 @@ export default function ApplicationsPage() {
       (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
       matchesExcludeKeywordsFilter(r, excludeKeywords) &&
       matchesLocationTextFilter(r, locationTextFilter) &&
-      matchesCompanyFilter(r.company.name, companyFilter),
+      matchesCompanyFilter(r.company.name, companyFilter) &&
+      (!hideDuplicateTitleOn || !hasApplicationWithSameTitle(r, applications ?? [])),
   );
   const { data: selectedRolesRaw } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
@@ -340,6 +344,17 @@ export default function ApplicationsPage() {
                   onChange={(e) => handleHideInvalidConditionRolesFilterChange(e.target.checked)}
                 />
                 Hide roles with invalid conditions
+              </label>
+              <label
+                className="flex items-center gap-1.5 text-xs opacity-70 cursor-pointer"
+                title="Hide open roles whose title matches an application you already have at that company"
+              >
+                <input
+                  type="checkbox"
+                  checked={hideDuplicateTitleOn}
+                  onChange={(e) => setHideDuplicateTitleOn(e.target.checked)}
+                />
+                Hide titles I already have
               </label>
             </div>
           </div>

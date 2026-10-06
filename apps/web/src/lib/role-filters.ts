@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
+import type { Application, DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
 
 /** Page-local filter toggles (location / experience) aren't saved server-side;
  * persisting them in localStorage lets the referral picker mirror whatever
@@ -8,6 +8,19 @@ export const LOCATION_FILTER_KEY = 'roleFilter.location';
 export const EXPERIENCE_FILTER_KEY = 'roleFilter.experience';
 
 export const COMPANY_FILTER_KEY = 'roleFilter.company';
+export const HIDE_DUPLICATE_TITLE_KEY = 'roleFilter.hideDuplicateTitle';
+
+/** True when the user already has an application at the same company with the
+ * same title (ignoring the " — locations" suffix) as this open role. Companies
+ * often post one title as several requisitions (different IDs/locations), so a
+ * URL match can't catch these — they're hidden from the open list instead. */
+export function hasApplicationWithSameTitle(role: DiscoveredRole, applications: Application[]): boolean {
+  const title = role.title.split(' — ')[0].trim().toLowerCase();
+  const company = role.company.name.trim().toLowerCase();
+  return applications.some(
+    (a) => !!a.role && a.company.trim().toLowerCase() === company && a.role.trim().toLowerCase() === title,
+  );
+}
 
 /** Same idea as usePersistedToggle, for a text filter. */
 export function usePersistedString(key: string, initial = ''): [string, (value: string) => void] {

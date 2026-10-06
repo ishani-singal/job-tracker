@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 import {
+  HIDE_DUPLICATE_TITLE_KEY,
+  hasApplicationWithSameTitle,
   EXPERIENCE_FILTER_KEY,
   LOCATION_FILTER_KEY,
   usePersistedToggle,
@@ -358,6 +360,7 @@ function ReferralDialog({
   // Same location/experience toggles the Applications page has on.
   const [locationFilterOn] = usePersistedToggle(LOCATION_FILTER_KEY, true);
   const [experienceFilterOn] = usePersistedToggle(EXPERIENCE_FILTER_KEY, true);
+  const [hideDuplicateTitleOn] = usePersistedToggle(HIDE_DUPLICATE_TITLE_KEY, true);
 
   const { data: allRoles } = useQuery({
     queryKey: ['discovered-roles', 'all'],
@@ -365,6 +368,7 @@ function ReferralDialog({
   });
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: api.getProfile });
+  const { data: applications } = useQuery({ queryKey: ['applications'], queryFn: api.listApplications });
   // Same saved "Location contains" filter as the Applications page; edits here
   // write through to it. Held locally while typing so the list responds at once.
   const [locationText, setLocationText] = useState<string | null>(null);
@@ -389,7 +393,7 @@ function ReferralDialog({
   // Applications only through the posted-date filter, as there. A discarded
   // role scores 0 and is always dropped, whichever filters are on.
   const filtered = useMemo(() => {
-    if (!allRoles || !settings || !profile) return null;
+    if (!allRoles || !settings || !profile || !applications) return null;
     const excludeKeywords = settings.excludeKeywordsFilter
       .split(',')
       .map((k) => k.trim())
@@ -401,6 +405,7 @@ function ReferralDialog({
       const dateOk = !settings.postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), withinDays);
       const locationTextOk = matchesLocationTextFilter(r, locationTextValue);
       if (r.applicationId) return dateOk && locationTextOk;
+      if (hideDuplicateTitleOn && hasApplicationWithSameTitle(r, applications)) return false;
       return (
         dateOk &&
         (minScore == null || r.atsScore === null || r.atsScore >= minScore) &&
@@ -411,7 +416,7 @@ function ReferralDialog({
         locationTextOk
       );
     });
-  }, [allRoles, settings, profile, company.id, locationFilterOn, experienceFilterOn, locationTextValue]);
+  }, [allRoles, settings, profile, applications, company.id, locationFilterOn, experienceFilterOn, hideDuplicateTitleOn, locationTextValue]);
 
   const visible = useMemo(() => {
     if (!filtered) return [];
