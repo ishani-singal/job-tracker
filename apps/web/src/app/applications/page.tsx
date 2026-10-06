@@ -11,6 +11,7 @@ import {
   usePersistedToggle,
   effectivePostedDate,
   hasInvalidCondition,
+  invalidConditionReasons,
   isBeforeCutoff,
   matchesExcludeKeywordsFilter,
   matchesExperienceFilter,
@@ -21,12 +22,18 @@ import type { Application, AppSettings, DiscoveredRole, ResumeProfile } from '@j
 
 function AtsScoreBadge({
   score,
-  invalid,
+  invalidReasons,
 }: {
   score: number | null;
-  invalid?: boolean;
+  invalidReasons?: string[];
 }) {
-  if (invalid) return <span className="text-xs font-medium text-red-600">Conditions not valid</span>;
+  if (invalidReasons && invalidReasons.length > 0) {
+    return (
+      <span className="text-xs font-medium text-red-600">
+        Conditions not valid: {invalidReasons.join('; ')}
+      </span>
+    );
+  }
   if (score === null) return <span className="text-xs opacity-40">Not scored</span>;
   const color =
     score >= 75 ? 'text-green-600' : score >= 50 ? 'text-amber-600' : 'text-red-600';
@@ -372,7 +379,7 @@ export default function ApplicationsPage() {
                     <div className="px-4">
                       <AtsScoreBadge
                         score={roleByApplicationId.get(app.id)?.atsScore ?? null}
-                        invalid={hasInvalidCondition(roleByApplicationId.get(app.id)!, profile)}
+                        invalidReasons={invalidConditionReasons(roleByApplicationId.get(app.id)!, profile)}
                       />
                     </div>
                   )}
@@ -431,7 +438,7 @@ function DiscoveredRoleRow({
         </span>
         <RoleLocation role={role} />
         <RoleExperience role={role} />
-        <AtsScoreBadge score={role.atsScore} invalid={hasInvalidCondition(role, profile)} />
+        <AtsScoreBadge score={role.atsScore} invalidReasons={invalidConditionReasons(role, profile)} />
       </div>
       <div className="flex flex-col gap-1 shrink-0">
         <button

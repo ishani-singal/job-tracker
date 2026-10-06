@@ -59,20 +59,35 @@ export function matchesExperienceFilter(role: DiscoveredRole, profile: ResumePro
   return role.roleMinYearsExperience <= profile.maxYearsExperience;
 }
 
-/** True when a role fails a hard disqualifying condition — a literal 0%
- * score, a location or experience mismatch, or the JD containing one of the
- * candidate's disqualifierKeywords — in which case its numeric score isn't
- * a meaningful match signal and shouldn't be shown as one. */
-export function hasInvalidCondition(role: DiscoveredRole, profile: ResumeProfile | undefined): boolean {
-  if (role.atsScore === 0) return true;
-  if (role.locationMismatch) return true;
-  if (role.experienceMismatch) return true;
-  const keywords = profile?.disqualifierKeywords ?? [];
-  if (keywords.length > 0 && role.jdText) {
-    const jdLower = role.jdText.toLowerCase();
-    if (keywords.some((k) => k.trim() && jdLower.includes(k.trim().toLowerCase()))) return true;
+/** Why a role fails a hard disqualifying condition — a literal 0% score
+ * (also what Discard sets), a location or experience mismatch, or the JD
+ * containing one of the candidate's disqualifierKeywords. Empty when none
+ * apply. When any apply, the role's numeric score isn't a meaningful match
+ * signal and shouldn't be shown as one. */
+export function invalidConditionReasons(role: DiscoveredRole, profile: ResumeProfile | undefined): string[] {
+  const reasons: string[] = [];
+  if (role.atsScore === 0) reasons.push('scored 0% (or was discarded)');
+  if (role.locationMismatch) {
+    const where = [role.roleCity, role.roleState, role.roleCountry].filter(Boolean).join(', ');
+    reasons.push(
+      role.roleIsRemote
+        ? `remote only for ${where || 'a region'} you're not in, or you're not open to remote`
+        : `location${where ? ` (${where})` : ''} is outside your location preferences`,
+    );
   }
-  return false;
+  if (role.experienceMismatch) {
+    reasons.push(
+      `requires ${role.roleMinYearsExperience ?? '?'}+ yrs, above your max of ${profile?.maxYearsExperience ?? '?'}`,
+    );
+  }
+  const jdLower = role.jdText?.toLowerCase() ?? '';
+  const hits = (profile?.disqualifierKeywords ?? []).filter((k) => k.trim() && jdLower.includes(k.trim().toLowerCase()));
+  if (hits.length > 0) reasons.push(`JD mentions disqualifier keyword${hits.length > 1 ? 's' : ''}: ${hits.join(', ')}`);
+  return reasons;
+}
+
+export function hasInvalidCondition(role: DiscoveredRole, profile: ResumeProfile | undefined): boolean {
+  return invalidConditionReasons(role, profile).length > 0;
 }
 
 /** True when none of the user-entered exclude keywords (e.g. "Software
