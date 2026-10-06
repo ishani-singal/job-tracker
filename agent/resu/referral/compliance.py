@@ -44,25 +44,52 @@ def _entry_key(group: str, e: dict) -> str:
     return e.get("company") or ""
 
 
-def _match_entry(resume_name: str, entries: dict) -> tuple[str, dict] | None:
+def _match_entry(
+    resume_name: str,
+    entries: dict,
+    subtitle: str | None = None,
+    used: set[str] | None = None,
+) -> tuple[str, dict] | None:
+    """The Resume-tab entry a resume entry corresponds to. The same company can
+    appear twice (a full-time role AND an MBA internship at Dell), so a name
+    match alone is ambiguous: the title (the subtitle may add words or be
+    retitled) and an MBA/intern hint break the tie, and entries already claimed
+    by an earlier resume entry (`used`) are skipped."""
     rn = _norm(resume_name)
     if len(rn) < 3:
         return None
+    sub = _norm(subtitle)
+    hint = f"{resume_name} {subtitle or ''}".lower()
+    candidates: list[tuple[int, str, dict]] = []
     for group in ("workExperience", "internships", "projects", "education"):
         for e in entries.get(group, []):
+            if used is not None and e["id"] in used:
+                continue
             en = _norm(_entry_key(group, e))
             if len(en) >= 3 and (rn in en or en in rn):
-                return group, e
-    return None
+                score = 0
+                title = _norm(e.get("title"))
+                if title and title in sub:
+                    score += 2
+                if group == "internships" and re.search(r"mba|intern|consult", hint):
+                    score += 1
+                candidates.append((score, group, e))
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda c: c[0])  # max() keeps the first on ties
+    if used is not None:
+        used.add(best[2]["id"])
+    return best[1], best[2]
 
 
 def enforce_bullet_bounds(resume: StructuredResume, entries: dict) -> int:
     """Last-resort safety net: cut any entry over its own max bullets down to it
     (keeping the first bullets). Returns how many entries were trimmed."""
     trimmed = 0
+    used: set[str] = set()
     for section in resume.sections:
         for entry in section.entries:
-            found = _match_entry(entry.name, entries)
+            found = _match_entry(entry.name, entries, entry.subtitle, used)
             hi = found[1].get("maxBullets") if found else None
             if hi is not None and len(entry.bullets) > hi:
                 entry.bullets = entry.bullets[:hi]
@@ -96,11 +123,10 @@ def check_resume(resume: StructuredResume, entries: dict, profile: dict) -> list
                     if pattern.search(bullet):
                         problems.append(f"{label}: {why}")
 
-            found = _match_entry(entry.name, entries)
+            found = _match_entry(entry.name, entries, entry.subtitle, matched_ids)
             if not found:
                 continue
             group, e = found
-            matched_ids.add(e["id"])
             n = len(entry.bullets)
             lo, hi = e.get("minBullets"), e.get("maxBullets")
             if hi is not None and n > hi:

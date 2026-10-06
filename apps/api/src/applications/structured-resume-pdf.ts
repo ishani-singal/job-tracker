@@ -170,8 +170,12 @@ function measureHeight(
   doc.on('data', () => {});
   layoutResume(doc, content, fields, candidateName);
   const endY = doc.y;
+  // When content overflows, pdfkit silently starts a new page and doc.y resets
+  // to the top of it, which reads as "short" — so overflow has to be detected
+  // by page count (bufferPages is on), not by height alone.
+  const pages = doc.bufferedPageRange().count;
   doc.end();
-  return endY - fields.marginTop;
+  return pages > 1 ? Number.POSITIVE_INFINITY : endY - fields.marginTop;
 }
 
 async function renderAtFit(
