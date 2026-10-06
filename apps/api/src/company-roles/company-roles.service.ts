@@ -1437,11 +1437,15 @@ export class CompanyRolesService implements OnModuleDestroy {
     const MAX_ROLES = 5000;
 
     let finalUrl = listingUrl;
+    let linkHrefs: string[] = [];
     const browser = await this.getBrowser();
     const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)' });
     try {
       await this.gotoAndSettle(page, listingUrl);
       finalUrl = page.url();
+      linkHrefs = await page.evaluate(() =>
+        Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).map((a) => a.href),
+      );
     } catch {
       /* probe the listing URL's own origin below */
     } finally {
@@ -1450,7 +1454,19 @@ export class CompanyRolesService implements OnModuleDestroy {
 
     const registrable = (u: string) =>
       new URL(u).hostname.replace(/^(www|jobs|careers|explore)\./, '').split('.').slice(-2).join('.');
-    const origins = [...new Set([new URL(finalUrl).origin, new URL(listingUrl).origin])];
+    // The listing is often a marketing page whose "see jobs" link points at
+    // the real board's host (jobs.netflix.com -> explore.jobs.netflix.net), so
+    // job/career-style hosts that carry the company's name are probed too.
+    const companyLabel = registrable(listingUrl).split('.')[0];
+    const linkedOrigins = linkHrefs.flatMap((h) => {
+      try {
+        const u = new URL(h);
+        return u.hostname.includes(companyLabel) && /jobs|careers|explore/.test(u.hostname) ? [u.origin] : [];
+      } catch {
+        return [];
+      }
+    });
+    const origins = [...new Set([new URL(finalUrl).origin, new URL(listingUrl).origin, ...linkedOrigins])].slice(0, 6);
     const domains = [...new Set([registrable(listingUrl), registrable(finalUrl)])];
 
     type Position = { name?: string; posting_name?: string; location?: string; canonicalPositionUrl?: string; id?: number | string };
