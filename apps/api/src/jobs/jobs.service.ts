@@ -166,6 +166,7 @@ export class JobsService implements OnModuleDestroy {
     // Strip it anyway in case it's ever misconfigured with the suffix again.
     const baseEndpoint = endpoint.replace(/\/openai\/?$/, '');
     const url = `${baseEndpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+    await this.llmCalls.assertWithinBudget();
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': apiKey },

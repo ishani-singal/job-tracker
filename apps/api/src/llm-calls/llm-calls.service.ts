@@ -1,5 +1,17 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** Thrown before an API-side LLM call once today's spend has reached the
+ * daily cap — the same limit the agents enforce (agent/cost_guard.py). */
+export class BudgetExceededError extends HttpException {
+  constructor(spentUsd: number, capUsd: number) {
+    super(
+      `Daily LLM budget reached: $${spentUsd.toFixed(4)} spent of $${capUsd.toFixed(2)}. ` +
+        'Raise the cap on the LLM Usage page to continue.',
+      HttpStatus.PAYMENT_REQUIRED,
+    );
+  }
+}
 
 export interface RecordCallInput {
   agent: string;
@@ -36,6 +48,16 @@ export class LlmCallsService {
     return this.prisma.llmCall.create({
       data: { ...input, costUsd: input.inputCostUsd + input.outputCostUsd },
     });
+  }
+
+  /** Call before every LLM request the API makes itself: refuses once today's
+   * recorded spend has reached the daily cap, so "Blocked" on the usage page
+   * actually blocks these calls too (previously only the agents checked). */
+  async assertWithinBudget(): Promise<void> {
+    const [settings, todayUsd] = await Promise.all([this.getSettings(), this.todayUsd()]);
+    if (todayUsd >= settings.llmDailyBudgetUsd) {
+      throw new BudgetExceededError(todayUsd, settings.llmDailyBudgetUsd);
+    }
   }
 
   /** Logs a chat-completions call the API itself made straight to Azure (role

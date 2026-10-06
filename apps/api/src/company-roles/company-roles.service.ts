@@ -12,7 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ApplicationsService } from '../applications/applications.service';
 import { LocationsService } from '../locations/locations.service';
 import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service';
-import { LlmCallsService } from '../llm-calls/llm-calls.service';
+import { BudgetExceededError, LlmCallsService } from '../llm-calls/llm-calls.service';
 
 type ChatUsage = Parameters<LlmCallsService['recordAzureUsage']>[2];
 
@@ -656,7 +656,9 @@ export class CompanyRolesService implements OnModuleDestroy {
           ? await this.paginateRoles(firstPageRoles, nextPageUrl, url, knownRoleUrls, persistPage, stats)
           : await this.paginateWithClicks(firstPageRoles, url, knownRoleUrls, persistPage, stats);
         return { careerPageUrl: url, roles };
-      } catch {
+      } catch (err) {
+        // A spent daily budget isn't a bad URL — stop rather than retry every guess.
+        if (err instanceof BudgetExceededError) throw err;
         // Try the next candidate URL — a 404/timeout on one guess is expected.
         continue;
       }
@@ -763,7 +765,8 @@ export class CompanyRolesService implements OnModuleDestroy {
         // Falling out of the loop because there's no further link is the
         // natural end; reset in case a previous iteration set something else.
         stats.end = 'no-next-page';
-      } catch {
+      } catch (err) {
+        if (err instanceof BudgetExceededError) throw err;
         stats.end = 'error';
         break;
       }
@@ -895,6 +898,7 @@ export class CompanyRolesService implements OnModuleDestroy {
         }
       }
     } catch (err) {
+      if (err instanceof BudgetExceededError) throw err;
       stats.end = 'error';
       this.logger.warn(`Click-based pagination stopped early for ${url}: ${err}`);
     } finally {
@@ -1599,7 +1603,8 @@ export class CompanyRolesService implements OnModuleDestroy {
           // One card failing to click/resolve shouldn't abort the rest.
         }
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof BudgetExceededError) throw err;
       // Whole-page navigation/setup failed — return whatever was found
       // (likely nothing), same as any other candidate URL failing.
     } finally {
@@ -1729,6 +1734,8 @@ export class CompanyRolesService implements OnModuleDestroy {
    * retried since retrying won't fix them. */
   private async fetchWithRetry(url: string, init: RequestInit, maxRetries = 5): Promise<Response> {
     let lastResponse: Response | undefined;
+    // Every caller of this is an LLM request, so enforce the daily cap here.
+    await this.llmCalls.assertWithinBudget();
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const response = await fetch(url, { ...init, signal: this.killSwitch.signal });
       if (response.ok || (response.status < 500 && response.status !== 429)) return response;
