@@ -7,6 +7,40 @@ import type { DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
 export const LOCATION_FILTER_KEY = 'roleFilter.location';
 export const EXPERIENCE_FILTER_KEY = 'roleFilter.experience';
 
+export const COMPANY_FILTER_KEY = 'roleFilter.company';
+
+/** Same idea as usePersistedToggle, for a text filter. */
+export function usePersistedString(key: string, initial = ''): [string, (value: string) => void] {
+  const [value, setValue] = useState(initial);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored !== null) setValue(stored);
+    } catch {
+      /* storage unavailable — keep the default */
+    }
+  }, [key]);
+  const set = (next: string) => {
+    setValue(next);
+    try {
+      localStorage.setItem(key, next);
+    } catch {
+      /* ignore */
+    }
+  };
+  return [value, set];
+}
+
+/** True when the company name contains any of the comma-separated terms
+ * (case-insensitive). Empty text = no filter. */
+export function matchesCompanyFilter(company: string, text: string): boolean {
+  const terms = text
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  return terms.length === 0 || terms.some((t) => company.toLowerCase().includes(t));
+}
+
 export function usePersistedToggle(key: string, initial: boolean): [boolean, (value: boolean) => void] {
   const [value, setValue] = useState(initial);
   useEffect(() => {

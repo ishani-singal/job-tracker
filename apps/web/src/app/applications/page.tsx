@@ -6,6 +6,9 @@ import { api } from '@/lib/api';
 import { AddApplicationDialog } from '@/components/add-application-dialog';
 import { ApplicationRow } from '@/components/application-row';
 import {
+  COMPANY_FILTER_KEY,
+  matchesCompanyFilter,
+  usePersistedString,
   EXPERIENCE_FILTER_KEY,
   LOCATION_FILTER_KEY,
   usePersistedToggle,
@@ -66,6 +69,7 @@ export default function ApplicationsPage() {
   const queryClient = useQueryClient();
   const [locationFilterOn, setLocationFilterOn] = usePersistedToggle(LOCATION_FILTER_KEY, true);
   const [experienceFilterOn, setExperienceFilterOn] = usePersistedToggle(EXPERIENCE_FILTER_KEY, true);
+  const [companyFilter, setCompanyFilter] = usePersistedString(COMPANY_FILTER_KEY);
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
   // Both filters below are persisted server-side (AppSettings) so they
   // survive a page reload — initialized from settings once loaded, then
@@ -154,7 +158,8 @@ export default function ApplicationsPage() {
       (!locationFilterOn || matchesLocationFilter(r, profile)) &&
       (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
       matchesExcludeKeywordsFilter(r, excludeKeywords) &&
-      matchesLocationTextFilter(r, locationTextFilter),
+      matchesLocationTextFilter(r, locationTextFilter) &&
+      matchesCompanyFilter(r.company.name, companyFilter),
   );
   const { data: selectedRolesRaw } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
@@ -186,7 +191,12 @@ export default function ApplicationsPage() {
           .map((r) => r.applicationId as string)
       : [],
   );
-  const visibleApplications = (applications ?? []).filter((app) => !hiddenApplicationIds.has(app.id));
+  const visibleApplications = (applications ?? []).filter(
+    (app) => !hiddenApplicationIds.has(app.id) && matchesCompanyFilter(app.company, companyFilter),
+  );
+  const companyNames = [
+    ...new Set([...(applications ?? []).map((a) => a.company), ...(unselectedRolesRaw ?? []).map((r) => r.company.name)]),
+  ].sort((a, b) => a.localeCompare(b));
 
   const selectRole = useMutation({
     mutationFn: (id: string) => api.selectRole(id),
@@ -240,6 +250,28 @@ export default function ApplicationsPage() {
       </div>
 
       {isLoading && <p className="text-sm opacity-60">Loading...</p>}
+
+      <label className="flex items-center gap-1.5 text-xs opacity-70">
+        Company
+        <input
+          type="text"
+          list="company-filter-options"
+          placeholder="e.g. Meta, Amazon (any of) — filters Open Roles and Selected"
+          className="flex-1 min-w-0 border rounded px-1.5 py-0.5 bg-transparent"
+          value={companyFilter}
+          onChange={(e) => setCompanyFilter(e.target.value)}
+        />
+        <datalist id="company-filter-options">
+          {companyNames.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+        {companyFilter && (
+          <button className="px-1.5 py-0.5 rounded border" onClick={() => setCompanyFilter('')}>
+            Clear
+          </button>
+        )}
+      </label>
 
       <div className="grid grid-cols-2 gap-6">
         <div className="flex flex-col gap-2">
