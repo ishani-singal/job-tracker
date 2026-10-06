@@ -17,6 +17,7 @@ import {
   matchesLocationTextFilter,
 } from '@/lib/role-filters';
 import type {
+  AppSettings,
   CompanyContact,
   DiscoveredRole,
   ReferralChannel,
@@ -364,6 +365,14 @@ function ReferralDialog({
   });
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
   const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: api.getProfile });
+  // Same saved "Location contains" filter as the Applications page; edits here
+  // write through to it. Held locally while typing so the list responds at once.
+  const [locationText, setLocationText] = useState<string | null>(null);
+  const locationTextValue = locationText ?? settings?.locationTextFilter ?? '';
+  const updateSettings = useMutation({
+    mutationFn: (data: Partial<AppSettings>) => api.updateSettings(data),
+    onSuccess: (updated) => queryClient.setQueryData(['settings'], updated),
+  });
 
   const refreshRoles = () => queryClient.invalidateQueries({ queryKey: ['discovered-roles'] });
   const rescore = useMutation({ mutationFn: (id: string) => api.rescoreRole(id), onSuccess: refreshRoles });
@@ -390,7 +399,8 @@ function ReferralDialog({
     return allRoles.filter((r) => {
       if (r.companyId !== company.id || r.atsScore === 0) return false;
       const dateOk = !settings.postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), withinDays);
-      if (r.applicationId) return dateOk;
+      const locationTextOk = matchesLocationTextFilter(r, locationTextValue);
+      if (r.applicationId) return dateOk && locationTextOk;
       return (
         dateOk &&
         (minScore == null || r.atsScore === null || r.atsScore >= minScore) &&
@@ -398,10 +408,10 @@ function ReferralDialog({
         (!locationFilterOn || matchesLocationFilter(r, profile)) &&
         (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
         matchesExcludeKeywordsFilter(r, excludeKeywords) &&
-        matchesLocationTextFilter(r, settings.locationTextFilter ?? '')
+        locationTextOk
       );
     });
-  }, [allRoles, settings, profile, company.id, locationFilterOn, experienceFilterOn]);
+  }, [allRoles, settings, profile, company.id, locationFilterOn, experienceFilterOn, locationTextValue]);
 
   const visible = useMemo(() => {
     if (!filtered) return [];
@@ -462,6 +472,19 @@ function ReferralDialog({
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
+              <label className="flex items-center gap-1.5 text-xs opacity-70">
+                Location contains
+                <input
+                  type="text"
+                  placeholder="e.g. Seattle, Remote (any of); roles with no location still show"
+                  className="flex-1 min-w-0 border rounded px-1.5 py-0.5 bg-transparent"
+                  value={locationTextValue}
+                  onChange={(e) => {
+                    setLocationText(e.target.value);
+                    updateSettings.mutate({ locationTextFilter: e.target.value });
+                  }}
+                />
+              </label>
               <div className="border rounded max-h-96 overflow-y-auto divide-y">
                 {filtered === null && <p className="text-xs opacity-60 p-3">Loading roles...</p>}
                 {visible.map((r) => (
