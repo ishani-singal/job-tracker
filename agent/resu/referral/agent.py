@@ -26,6 +26,9 @@ from ..rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
 from ..stories.agent import _report_progress
 
 ATS_TARGET = 90
+# The caller may pass a pool larger than this; the weakest fits are dropped
+# (after the first scoring pass) until this many remain.
+FINAL_ROLES = 5
 # The first draft plus up to two ATS-feedback revisions.
 MAX_DRAFTS = 3
 
@@ -62,6 +65,8 @@ class RoleScore(BaseModel):
     title: str
     score: int
     missing: list[str]
+    # True for a role dropped from the final set to help the rest reach the target.
+    dropped: bool = False
 
 
 class ReferralResult(BaseModel):
@@ -170,6 +175,12 @@ async def _score_one(resume_text: str, role: RoleInput) -> RoleScore:
 
 
 def _first_draft_prompt(company: str, roles: list[RoleInput]) -> str:
+    pool_note = (
+        f" Only the best-fitting {FINAL_ROLES} of these roles will be kept — the rest are dropped "
+        "after an ATS check — so lead with what most of them share."
+        if len(roles) > FINAL_ROLES
+        else ""
+    )
     jds = "\n\n---\n\n".join(f"## Job description {i}: {r.title}\n{r.jd_text[:8000]}" for i, r in enumerate(roles, 1))
     return (
         f"Generate ONE resume for the candidate that is tailored to ALL {len(roles)} of the "
@@ -179,18 +190,26 @@ def _first_draft_prompt(company: str, roles: list[RoleInput]) -> str:
         "the skills and keywords the JDs share first, then each JD's specific ones, but only "
         "where the candidate's real background supports them — never fabricate experience. "
         "This is an automated run: if you would normally ask a clarifying question, make the "
-        "most reasonable assumption and finish with done=true.\n\n" + jds
+        "most reasonable assumption and finish with done=true." + pool_note + "\n\n" + jds
     )
 
 
-def _revision_prompt(scores: list[RoleScore]) -> str:
+def _revision_prompt(scores: list[RoleScore], dropped: list[RoleScore]) -> str:
+    dropped_note = (
+        "These roles were dropped from the target set — ignore them from now on: "
+        + ", ".join(d.title for d in dropped)
+        + ".\n\n"
+        if dropped
+        else ""
+    )
     lines = []
     for s in scores:
         gaps = ", ".join(s.missing) if s.missing else "none listed"
         flag = "OK" if s.score >= ATS_TARGET else "BELOW TARGET"
         lines.append(f"- {s.title}: {s.score}% ({flag}); missing/weak: {gaps}")
     return (
-        f"An independent ATS check of your last resume found:\n" + "\n".join(lines) + "\n\n"
+        dropped_note
+        + f"An independent ATS check of your last resume found:\n" + "\n".join(lines) + "\n\n"
         f"Revise the resume so EVERY job description reaches at least {ATS_TARGET}%. Work the "
         "missing keywords and requirements in only where the candidate's background genuinely "
         "supports them (reword bullets, reorder, surface relevant entries or projects) — never "
@@ -230,6 +249,8 @@ async def run_referral(
         await _report_progress(api_base_url, session_id, message)
 
     deps = ResuDeps(api_base_url=api_base_url)
+    active = list(roles)
+    dropped: list[RoleScore] = []
     best: tuple[StructuredResume, list[RoleScore]] | None = None
     stopped_early: str | None = None
     drafts_made = 0
@@ -245,17 +266,32 @@ async def run_referral(
             drafts_made = draft
             await say(f"Draft {draft}: checking ATS match against each job description...")
             try:
-                scores = list(await asyncio.gather(*(_score_one(resume_to_text(resume), r) for r in roles)))
+                scores = list(await asyncio.gather(*(_score_one(resume_to_text(resume), r) for r in active)))
             except BudgetExceededError as exc:
                 stopped_early = str(exc)
                 break
             for s in scores:
                 await say(f"  {s.title}: {s.score}%")
+
+            if len(active) > FINAL_ROLES:
+                # Drop the weakest fits so the rest can reach the target; ties
+                # drop the later-listed role.
+                ranked = sorted(enumerate(scores), key=lambda p: (p[1].score, -p[0]))
+                out = {i for i, _ in ranked[: len(active) - FINAL_ROLES]}
+                gone = [scores[i].model_copy(update={"dropped": True}) for i in sorted(out)]
+                dropped.extend(gone)
+                await say(
+                    f"Dropping the {len(gone)} weakest fit(s) to keep {FINAL_ROLES}: "
+                    + ", ".join(f"{g.title} ({g.score}%)" for g in gone)
+                )
+                active = [r for i, r in enumerate(active) if i not in out]
+                scores = [s for i, s in enumerate(scores) if i not in out]
+
             if best is None or quality(scores) > quality(best[1]):
                 best = (resume, scores)
 
             if all(s.score >= ATS_TARGET for s in scores):
-                await say(f"All {len(roles)} role(s) are at or above {ATS_TARGET}%.")
+                await say(f"All {len(active)} remaining role(s) are at or above {ATS_TARGET}%.")
                 break
             if draft == MAX_DRAFTS:
                 break
@@ -267,7 +303,7 @@ async def run_referral(
                 + "..."
             )
             try:
-                resume, history = await _generate(_revision_prompt(scores), history, deps)
+                resume, history = await _generate(_revision_prompt(scores, dropped), history, deps)
             except BudgetExceededError as exc:
                 stopped_early = str(exc)
                 break
@@ -285,31 +321,41 @@ async def run_referral(
                 f"Candidate (sender): {sender or '(name not set — sign off with just a thank you)'}\n"
                 f"Recipient: {contact_name}, who works at {company}\n\n"
                 "Roles and links to include:\n"
-                + "\n".join(f"- {r.title}: {r.url}" for r in roles)
+                + "\n".join(f"- {r.title}: {r.url}" for r in active)
                 + f"\n\nCandidate's resume (for truthful specifics only):\n{resume_to_text(best_resume)[:3500]}"
             )
         )
-        message = _ensure_links(written.output.body.strip(), roles)
+        message = _ensure_links(written.output.body.strip(), active)
         if channel == "email" and written.output.subject:
             message = f"Subject: {written.output.subject.strip()}\n\n{message}"
 
     target_met = all(s.score >= ATS_TARGET for s in best_scores)
-    note: str | None = None
+    notes: list[str] = []
+    if dropped:
+        notes.append(
+            f"Dropped {len(dropped)} role(s) to land on {len(active)}: "
+            + "; ".join(f"{d.title} ({d.score}%)" for d in dropped)
+            + "."
+        )
     if not target_met:
         below = "; ".join(
             f"{s.title}: {s.score}% (gaps: {', '.join(s.missing[:6]) or 'none listed'})"
             for s in best_scores
             if s.score < ATS_TARGET
         )
-        note = (
-            f"Couldn't reach {ATS_TARGET}% on every role after {drafts_made} draft(s) without "
+        notes.append(
+            f"Couldn't reach {ATS_TARGET}% on every remaining role after {drafts_made} draft(s) without "
             f"claiming experience your background doesn't show. Below target — {below}. The "
             "closest resume is attached; consider picking roles that overlap more, or add the "
             "missing skills to your entries if you genuinely have them."
         )
         if stopped_early:
-            note += f" (Stopped early: {stopped_early}.)"
+            notes.append(f"(Stopped early: {stopped_early}.)")
     await say("Done.")
     return ReferralResult(
-        message=message, resume=best_resume, scores=best_scores, target_met=target_met, note=note
+        message=message,
+        resume=best_resume,
+        scores=best_scores + dropped,
+        target_met=target_met,
+        note=" ".join(notes) or None,
     )

@@ -240,6 +240,8 @@ export interface ReferralRoleScore {
   title: string;
   score: number;
   missing: string[];
+  /** Dropped from the final role set to help the rest reach the ATS target. */
+  dropped?: boolean;
 }
 
 export interface ReferralRequest {

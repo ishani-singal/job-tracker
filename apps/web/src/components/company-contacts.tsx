@@ -23,6 +23,7 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 const MAX_ROLES = 7;
+const FINAL_ROLES = 5;
 const MAX_LISTED_ROLES = 100;
 const TONES: { value: ReferralTone; label: string; hint: string }[] = [
   { value: 'friend', label: 'Friend', hint: 'Warm and casual' },
@@ -277,11 +278,15 @@ export function ScoreChips({ scores }: { scores: ReferralRequest['scores'] }) {
         <span
           key={s.roleId}
           className={`text-xs rounded px-1.5 py-0.5 border ${
-            s.score >= 90 ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400'
+            s.dropped
+              ? 'opacity-50 line-through'
+              : s.score >= 90
+                ? 'text-green-700 dark:text-green-400'
+                : 'text-amber-700 dark:text-amber-400'
           }`}
-          title={s.missing.length ? `Gaps: ${s.missing.join(', ')}` : undefined}
+          title={s.dropped ? 'Dropped from the final set' : s.missing.length ? `Gaps: ${s.missing.join(', ')}` : undefined}
         >
-          {s.title}: {s.score}%
+          {s.title}: {s.score}%{s.dropped ? ' (dropped)' : ''}
         </span>
       ))}
     </div>
@@ -299,8 +304,10 @@ function ReferralHistoryItem({ referral }: { referral: ReferralRequest }) {
         <span>· {referral.roles.length} role(s)</span>
       </div>
       <ScoreChips scores={referral.scores} />
-      {!referral.targetMet && referral.note && (
-        <p className="text-xs text-amber-700 dark:text-amber-400">{referral.note}</p>
+      {referral.note && (
+        <p className={`text-xs ${referral.targetMet ? 'opacity-70' : 'text-amber-700 dark:text-amber-400'}`}>
+          {referral.note}
+        </p>
       )}
       <pre className="whitespace-pre-wrap text-sm border rounded p-2 font-sans">{referral.message}</pre>
       <div className="flex items-center gap-2">
@@ -436,7 +443,7 @@ function ReferralDialog({
             <div className="p-4 flex flex-col gap-2 overflow-y-auto">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs font-medium uppercase opacity-60">
-                  Pick the roles to link (up to {MAX_ROLES}) — {chosen.length} selected
+                  Pick up to {MAX_ROLES} roles — {chosen.length} selected
                 </div>
                 <input
                   className="border rounded px-2 py-1 text-xs bg-transparent"
@@ -474,8 +481,9 @@ function ReferralDialog({
                 </p>
               )}
               <p className="text-xs opacity-60">
-                Same filters as the Applications page. Unscored roles can be scored here; discard removes a role
-                you don&apos;t want.
+                The final message links {FINAL_ROLES} roles. Pick up to {MAX_ROLES} and the weakest fits are dropped
+                automatically after the ATS check to help the rest reach 90%. Same filters as the Applications page;
+                unscored roles can be scored here, and discard removes a role you don&apos;t want.
               </p>
             </div>
             <div className="border-t p-3 flex items-center gap-2">
@@ -542,7 +550,11 @@ function ReferralDialog({
               </div>
 
               <div className="flex flex-col gap-1">
-                <div className="text-xs font-medium uppercase opacity-60">Linking {chosen.length} role(s)</div>
+                <div className="text-xs font-medium uppercase opacity-60">
+                  {chosen.length > FINAL_ROLES
+                    ? `${chosen.length} candidate roles — the weakest ${chosen.length - FINAL_ROLES} will be dropped`
+                    : `Linking ${chosen.length} role(s)`}
+                </div>
                 <ul className="text-sm list-disc pl-5">
                   {chosen.map((r) => (
                     <li key={r.id}>{r.title}</li>
@@ -551,8 +563,8 @@ function ReferralDialog({
               </div>
 
               <p className="text-xs opacity-60">
-                One resume will be generated to cover every selected role and checked against each job description
-                for a 90% ATS match. If that isn&apos;t reachable you&apos;ll be told which roles fall short.
+                One resume will be generated for these roles and checked against each job description for a 90% ATS
+                match. If that isn&apos;t reachable you&apos;ll be told which roles fall short.
                 Progress shows in the chat panel.
               </p>
             </div>

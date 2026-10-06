@@ -398,10 +398,15 @@ function ReferralResult({ content }: { content: string }) {
       </button>
       <div className="text-xs font-medium uppercase opacity-60 mt-1">ATS match of the attached resume</div>
       <ScoreChips scores={parsed.scores} />
-      {parsed.targetMet ? (
-        <div className="text-xs text-green-700 dark:text-green-400">Every role is at or above 90%.</div>
-      ) : (
-        <div className="text-xs text-amber-700 dark:text-amber-400">{parsed.note}</div>
+      {parsed.targetMet && (
+        <div className="text-xs text-green-700 dark:text-green-400">Every linked role is at or above 90%.</div>
+      )}
+      {parsed.note && (
+        <div
+          className={`text-xs ${parsed.targetMet ? 'opacity-70' : 'text-amber-700 dark:text-amber-400'}`}
+        >
+          {parsed.note}
+        </div>
       )}
       <div className="flex items-center gap-2">
         <a href={`${API_BASE}/referrals/${parsed.referralId}/resume.pdf`} className="px-2 py-1 text-xs rounded border">

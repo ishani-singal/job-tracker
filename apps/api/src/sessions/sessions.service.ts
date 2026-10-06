@@ -107,7 +107,7 @@ interface EntryDocumentRunTurnResponse {
 interface ReferralRunResponse {
   message: string;
   resume: StructuredResume;
-  scores: { role_id: string; title: string; score: number; missing: string[] }[];
+  scores: { role_id: string; title: string; score: number; missing: string[]; dropped?: boolean }[];
   target_met: boolean;
   note: string | null;
 }
@@ -664,12 +664,15 @@ export class SessionsService {
     if (!response.ok) throw new Error(`Agent referral run failed: ${response.status} ${await response.text()}`);
     const result = (await response.json()) as ReferralRunResponse;
 
-    const rolesJson = roles.map((r) => ({ id: r.id, title: r.title, url: r.url }));
+    // Roles the agent dropped to reach the final set aren't linked in the message.
+    const droppedIds = new Set(result.scores.filter((s) => s.dropped).map((s) => s.role_id));
+    const rolesJson = roles.filter((r) => !droppedIds.has(r.id)).map((r) => ({ id: r.id, title: r.title, url: r.url }));
     const scores = result.scores.map((s) => ({
       roleId: s.role_id,
       title: s.title,
       score: s.score,
       missing: s.missing,
+      dropped: !!s.dropped,
     }));
     const referral = await this.prisma.referralRequest.create({
       data: {
