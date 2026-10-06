@@ -92,13 +92,19 @@ export function matchesExcludeKeywordsFilter(role: DiscoveredRole, keywords: str
 /** True when the role mentions at least one of the user's location terms
  * (comma-separated, case-insensitive) in its title or extracted location —
  * the title carries the listed locations for roles scanned or scored since
- * that was added, the extracted fields cover the rest. Empty text = no filter. */
+ * that was added, the extracted fields cover the rest. Empty text = no filter.
+ * A role with no location information at all (nothing extracted, not remote,
+ * and no " — location" suffix in its title) always passes: unknown isn't a
+ * mismatch, same rule as the other location filter. */
 export function matchesLocationTextFilter(role: DiscoveredRole, text: string): boolean {
   const terms = text
     .split(',')
     .map((t) => t.trim().toLowerCase())
     .filter(Boolean);
   if (terms.length === 0) return true;
+  const hasNoLocation =
+    !role.roleCity && !role.roleState && !role.roleCountry && !role.roleIsRemote && !role.title.includes(' — ');
+  if (hasNoLocation) return true;
   const haystack = [role.title, role.roleCity, role.roleState, role.roleCountry, role.roleIsRemote ? 'remote' : '']
     .filter(Boolean)
     .join(' ')
