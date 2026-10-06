@@ -5,5 +5,6 @@ import { LlmCallsService } from './llm-calls.service';
 @Module({
   controllers: [LlmCallsController],
   providers: [LlmCallsService],
+  exports: [LlmCallsService],
 })
 export class LlmCallsModule {}

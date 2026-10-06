@@ -4,9 +4,10 @@ import { CompanyRolesService } from './company-roles.service';
 import { ApplicationsModule } from '../applications/applications.module';
 import { LocationsModule } from '../locations/locations.module';
 import { LlmKillSwitchModule } from '../llm-kill-switch/llm-kill-switch.module';
+import { LlmCallsModule } from '../llm-calls/llm-calls.module';
 
 @Module({
-  imports: [forwardRef(() => ApplicationsModule), LocationsModule, LlmKillSwitchModule],
+  imports: [forwardRef(() => ApplicationsModule), LocationsModule, LlmKillSwitchModule, LlmCallsModule],
   controllers: [CompanyRolesController],
   providers: [CompanyRolesService],
   exports: [CompanyRolesService],

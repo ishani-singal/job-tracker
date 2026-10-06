@@ -12,6 +12,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ApplicationsService } from '../applications/applications.service';
 import { LocationsService } from '../locations/locations.service';
 import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service';
+import { LlmCallsService } from '../llm-calls/llm-calls.service';
+
+type ChatUsage = Parameters<LlmCallsService['recordAzureUsage']>[2];
 
 /** Roles posted before this many days ago are dropped during discovery —
  * stale postings clutter the candidate pool and are usually already filled
@@ -225,6 +228,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     private readonly applications: ApplicationsService,
     private readonly locations: LocationsService,
     private readonly killSwitch: LlmKillSwitchService,
+    private readonly llmCalls: LlmCallsService,
   ) {}
 
   async onModuleDestroy() {
@@ -1178,7 +1182,8 @@ export class CompanyRolesService implements OnModuleDestroy {
     });
     if (!response.ok) throw new Error(`Role extraction request failed: ${response.status}`);
 
-    const data = (await response.json()) as { choices: { message: { content: string } }[] };
+    const data = (await response.json()) as { choices: { message: { content: string } }[]; usage?: ChatUsage };
+    await this.llmCalls.recordAzureUsage('role-scan', deployment, data.usage);
     const raw = data.choices[0]?.message?.content ?? '{"roles":[]}';
     const parsed = JSON.parse(raw) as { roles?: DiscoveredRoleDto[]; nextPageUrl?: string | null };
 
@@ -1219,7 +1224,8 @@ export class CompanyRolesService implements OnModuleDestroy {
     });
     if (!response.ok) throw new Error(`Title extraction request failed: ${response.status}`);
 
-    const data = (await response.json()) as { choices: { message: { content: string } }[] };
+    const data = (await response.json()) as { choices: { message: { content: string } }[]; usage?: ChatUsage };
+    await this.llmCalls.recordAzureUsage('role-scan', deployment, data.usage);
     const raw = data.choices[0]?.message?.content ?? '{"titles":[]}';
     const parsed = JSON.parse(raw) as { titles?: string[] };
     return (parsed.titles ?? []).filter((t) => typeof t === 'string' && t.trim());
@@ -1578,7 +1584,8 @@ export class CompanyRolesService implements OnModuleDestroy {
     });
     if (!response.ok) return empty;
 
-    const data = (await response.json()) as { choices: { message: { content: string } }[] };
+    const data = (await response.json()) as { choices: { message: { content: string } }[]; usage?: ChatUsage };
+    await this.llmCalls.recordAzureUsage('role-scan', deployment, data.usage);
     const raw = data.choices[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw) as {
       score?: number;

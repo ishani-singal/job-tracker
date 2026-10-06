@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import { Browser, chromium } from 'playwright';
+import { LlmCallsService } from '../llm-calls/llm-calls.service';
 
 export interface ParsedJob {
   company?: string;
@@ -83,6 +84,8 @@ deadline countdown), salaryRange (string), experienceLevel (string, e.g. "5+ yea
 export class JobsService implements OnModuleDestroy {
   private readonly logger = new Logger(JobsService.name);
   private browser: Browser | null = null;
+
+  constructor(private readonly llmCalls: LlmCallsService) {}
 
   async onModuleDestroy() {
     await this.browser?.close();
@@ -182,7 +185,9 @@ export class JobsService implements OnModuleDestroy {
 
     const data = (await response.json()) as {
       choices: { message: { content: string } }[];
+      usage?: Parameters<LlmCallsService['recordAzureUsage']>[2];
     };
+    await this.llmCalls.recordAzureUsage('job-parse', deployment, data.usage);
     const raw = data.choices[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw);
 

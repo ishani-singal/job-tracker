@@ -38,6 +38,31 @@ export class LlmCallsService {
     });
   }
 
+  /** Logs a chat-completions call the API itself made straight to Azure (role
+   * scan / ATS scoring / job-URL parse), so it shows on the usage page and
+   * counts toward the daily cap like the agents' calls do. Never throws —
+   * a failed usage write must not fail the scan. */
+  async recordAzureUsage(
+    agent: string,
+    model: string,
+    usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } },
+  ) {
+    if (!usage) return;
+    try {
+      const inputTokens = usage.prompt_tokens ?? 0;
+      const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? 0;
+      const outputTokens = usage.completion_tokens ?? 0;
+      const price = await this.prisma.llmModelPrice.findUnique({ where: { model } });
+      const inputCostUsd = price
+        ? ((inputTokens - cachedTokens) * price.inputPer1M + cachedTokens * price.cachedInputPer1M) / 1_000_000
+        : 0;
+      const outputCostUsd = price ? (outputTokens * price.outputPer1M) / 1_000_000 : 0;
+      await this.record({ agent, model, inputTokens, cachedTokens, outputTokens, inputCostUsd, outputCostUsd });
+    } catch {
+      /* best-effort */
+    }
+  }
+
   private async getSettings() {
     return (
       (await this.prisma.appSettings.findFirst()) ??
