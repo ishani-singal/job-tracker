@@ -6,6 +6,8 @@ import { api } from '@/lib/api';
 import { AddApplicationDialog } from '@/components/add-application-dialog';
 import { ApplicationRow } from '@/components/application-row';
 import {
+  CANADA_REMOTE_KEY,
+  canAllowCanadaRemote,
   HIDE_DUPLICATE_TITLE_KEY,
   hasApplicationWithSameTitle,
   COMPANY_FILTER_KEY,
@@ -152,13 +154,16 @@ export default function ApplicationsPage() {
     queryKey: ['discovered-roles', 'unselected'],
     queryFn: () => api.listDiscoveredRoles('unselected'),
   });
+  const [canadaRemoteOn, setCanadaRemoteOn] = usePersistedToggle(CANADA_REMOTE_KEY, false);
+  const canadaRemoteAvailable = canAllowCanadaRemote(profile);
+  const allowCanadaRemote = canadaRemoteAvailable && canadaRemoteOn;
   const minScore = minScoreFilter === '' ? null : Number(minScoreFilter);
   const unselectedRoles = unselectedRolesRaw?.filter(
     (r) =>
       (minScore === null || r.atsScore === null || r.atsScore >= minScore) &&
       (!postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), postedWithinDays)) &&
-      (!hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
-      (!locationFilterOn || matchesLocationFilter(r, profile)) &&
+      (!hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile, allowCanadaRemote)) &&
+      (!locationFilterOn || matchesLocationFilter(r, profile, allowCanadaRemote)) &&
       (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
       matchesExcludeKeywordsFilter(r, excludeKeywords) &&
       matchesLocationTextFilter(r, locationTextFilter) &&
@@ -245,7 +250,7 @@ export default function ApplicationsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto flex flex-col gap-4">
+    <div className="w-full flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Applications</h1>
         <AddApplicationDialog
@@ -356,6 +361,19 @@ export default function ApplicationsPage() {
                 />
                 Hide titles I already have
               </label>
+              {canadaRemoteAvailable && (
+                <label
+                  className="flex items-center gap-1.5 text-xs opacity-70 cursor-pointer"
+                  title="You're open to US remote — also include roles whose remote eligibility is Canada"
+                >
+                  <input
+                    type="checkbox"
+                    checked={canadaRemoteOn}
+                    onChange={(e) => setCanadaRemoteOn(e.target.checked)}
+                  />
+                  Include Canada remote
+                </label>
+              )}
             </div>
           </div>
           <label className="flex items-center gap-1.5 text-xs opacity-70">
@@ -384,6 +402,7 @@ export default function ApplicationsPage() {
                 key={role.id}
                 role={role}
                 profile={profile}
+                allowCanadaRemote={allowCanadaRemote}
                 onSelect={() => selectRole.mutate(role.id)}
                 selecting={selectRole.isPending}
                 onScore={() => rescoreRole.mutate(role.id)}
@@ -426,7 +445,7 @@ export default function ApplicationsPage() {
                     <div className="px-4">
                       <AtsScoreBadge
                         score={roleByApplicationId.get(app.id)?.atsScore ?? null}
-                        invalidReasons={invalidConditionReasons(roleByApplicationId.get(app.id)!, profile)}
+                        invalidReasons={invalidConditionReasons(roleByApplicationId.get(app.id)!, profile, allowCanadaRemote)}
                       />
                     </div>
                   )}
@@ -451,6 +470,7 @@ export default function ApplicationsPage() {
 function DiscoveredRoleRow({
   role,
   profile,
+  allowCanadaRemote,
   onSelect,
   selecting,
   onScore,
@@ -460,6 +480,7 @@ function DiscoveredRoleRow({
 }: {
   role: DiscoveredRole;
   profile: ResumeProfile | undefined;
+  allowCanadaRemote: boolean;
   onSelect: () => void;
   selecting: boolean;
   onScore: () => void;
@@ -485,7 +506,7 @@ function DiscoveredRoleRow({
         </span>
         <RoleLocation role={role} />
         <RoleExperience role={role} />
-        <AtsScoreBadge score={role.atsScore} invalidReasons={invalidConditionReasons(role, profile)} />
+        <AtsScoreBadge score={role.atsScore} invalidReasons={invalidConditionReasons(role, profile, allowCanadaRemote)} />
       </div>
       <div className="flex flex-col gap-1 shrink-0">
         <button

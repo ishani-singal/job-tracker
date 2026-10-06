@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 import {
+  CANADA_REMOTE_KEY,
+  canAllowCanadaRemote,
   HIDE_DUPLICATE_TITLE_KEY,
   hasApplicationWithSameTitle,
   EXPERIENCE_FILTER_KEY,
@@ -361,6 +363,7 @@ function ReferralDialog({
   const [locationFilterOn] = usePersistedToggle(LOCATION_FILTER_KEY, true);
   const [experienceFilterOn] = usePersistedToggle(EXPERIENCE_FILTER_KEY, true);
   const [hideDuplicateTitleOn] = usePersistedToggle(HIDE_DUPLICATE_TITLE_KEY, true);
+  const [canadaRemoteOn] = usePersistedToggle(CANADA_REMOTE_KEY, false);
 
   const { data: allRoles } = useQuery({
     queryKey: ['discovered-roles', 'all'],
@@ -394,6 +397,7 @@ function ReferralDialog({
   // role scores 0 and is always dropped, whichever filters are on.
   const filtered = useMemo(() => {
     if (!allRoles || !settings || !profile || !applications) return null;
+    const allowCanadaRemote = canadaRemoteOn && canAllowCanadaRemote(profile);
     const excludeKeywords = settings.excludeKeywordsFilter
       .split(',')
       .map((k) => k.trim())
@@ -409,14 +413,14 @@ function ReferralDialog({
       return (
         dateOk &&
         (minScore == null || r.atsScore === null || r.atsScore >= minScore) &&
-        (!settings.hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
-        (!locationFilterOn || matchesLocationFilter(r, profile)) &&
+        (!settings.hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile, allowCanadaRemote)) &&
+        (!locationFilterOn || matchesLocationFilter(r, profile, allowCanadaRemote)) &&
         (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
         matchesExcludeKeywordsFilter(r, excludeKeywords) &&
         locationTextOk
       );
     });
-  }, [allRoles, settings, profile, applications, company.id, locationFilterOn, experienceFilterOn, hideDuplicateTitleOn, locationTextValue]);
+  }, [allRoles, settings, profile, applications, company.id, locationFilterOn, experienceFilterOn, hideDuplicateTitleOn, canadaRemoteOn, locationTextValue]);
 
   const visible = useMemo(() => {
     if (!filtered) return [];

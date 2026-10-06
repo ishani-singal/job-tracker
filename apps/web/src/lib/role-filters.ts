@@ -8,6 +8,18 @@ export const LOCATION_FILTER_KEY = 'roleFilter.location';
 export const EXPERIENCE_FILTER_KEY = 'roleFilter.experience';
 
 export const COMPANY_FILTER_KEY = 'roleFilter.company';
+export const CANADA_REMOTE_KEY = 'roleFilter.canadaRemote';
+
+/** Roles whose remote eligibility is restricted to Canada. */
+export function isCanadaRemote(role: DiscoveredRole): boolean {
+  return !!role.roleIsRemote && role.roleCountry?.trim().toLowerCase() === 'canada';
+}
+
+/** The "Canada remote" option only makes sense for a US-based candidate who is
+ * already open to US remote roles. */
+export function canAllowCanadaRemote(profile: ResumeProfile | undefined): boolean {
+  return !!profile?.openToRemote && profile.locationCountry === 'US';
+}
 export const HIDE_DUPLICATE_TITLE_KEY = 'roleFilter.hideDuplicateTitle';
 
 /** True when the user already has an application at the same company with the
@@ -85,7 +97,14 @@ export function usePersistedToggle(key: string, initial: boolean): [boolean, (va
  * location couldn't be determined at all (never hide a role just because
  * scoring hasn't run/found a location signal yet — that's not the same as
  * "doesn't match"). */
-export function matchesLocationFilter(role: DiscoveredRole, profile: ResumeProfile | undefined): boolean {
+export function matchesLocationFilter(
+  role: DiscoveredRole,
+  profile: ResumeProfile | undefined,
+  allowCanadaRemote = false,
+): boolean {
+  // For a US-based, remote-open candidate, Canada-only remote roles are in or
+  // out as a group, per the "Canada remote" checkbox.
+  if (canAllowCanadaRemote(profile) && isCanadaRemote(role)) return allowCanadaRemote;
   if (role.roleIsRemote && profile?.openToRemote) return true;
   if (!profile?.locationCountry) return true; // no profile location set — filter is a no-op
   if (role.roleCountry === null && role.roleState === null) return true; // unknown location
@@ -111,10 +130,15 @@ export function matchesExperienceFilter(role: DiscoveredRole, profile: ResumePro
  * containing one of the candidate's disqualifierKeywords. Empty when none
  * apply. When any apply, the role's numeric score isn't a meaningful match
  * signal and shouldn't be shown as one. */
-export function invalidConditionReasons(role: DiscoveredRole, profile: ResumeProfile | undefined): string[] {
+export function invalidConditionReasons(
+  role: DiscoveredRole,
+  profile: ResumeProfile | undefined,
+  allowCanadaRemote = false,
+): string[] {
   const reasons: string[] = [];
   if (role.atsScore === 0) reasons.push('scored 0% (or was discarded)');
-  if (role.locationMismatch) {
+  const canadaRemoteAllowed = allowCanadaRemote && canAllowCanadaRemote(profile) && isCanadaRemote(role);
+  if (role.locationMismatch && !canadaRemoteAllowed) {
     const where = [role.roleCity, role.roleState, role.roleCountry].filter(Boolean).join(', ');
     reasons.push(
       role.roleIsRemote
@@ -133,8 +157,12 @@ export function invalidConditionReasons(role: DiscoveredRole, profile: ResumePro
   return reasons;
 }
 
-export function hasInvalidCondition(role: DiscoveredRole, profile: ResumeProfile | undefined): boolean {
-  return invalidConditionReasons(role, profile).length > 0;
+export function hasInvalidCondition(
+  role: DiscoveredRole,
+  profile: ResumeProfile | undefined,
+  allowCanadaRemote = false,
+): boolean {
+  return invalidConditionReasons(role, profile, allowCanadaRemote).length > 0;
 }
 
 /** True when none of the user-entered exclude keywords (e.g. "Software
