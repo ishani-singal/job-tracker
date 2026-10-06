@@ -24,13 +24,14 @@ from ..agent import StructuredResume, _model as _resu_model, resu_agent
 from ..deps import ResuDeps
 from ..rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
 from ..stories.agent import _report_progress
+from .compliance import check_resume, expected_contact_line
 
 ATS_TARGET = 90
 # The caller may pass a pool larger than this; the weakest fits are dropped
 # (after the first scoring pass) until this many remain.
 FINAL_ROLES = 5
-# The first draft plus up to two ATS-feedback revisions.
-MAX_DRAFTS = 3
+# The first draft plus up to three revisions (ATS gaps and/or guideline violations).
+MAX_DRAFTS = 4
 
 Tone = Literal["friend", "colleague", "acquaintance", "mentor"]
 Channel = Literal["linkedin", "whatsapp", "text", "email"]
@@ -174,6 +175,18 @@ async def _score_one(resume_text: str, role: RoleInput) -> RoleScore:
     )
 
 
+_RULES_REMINDER = (
+    "The multi-JD goal changes only what you emphasise — every rule in your instructions and "
+    "the process template still applies exactly as for a single-application resume: follow the "
+    "process steps in order, the per-entry [BULLET COUNT] ceilings/minimums, every bullet 1-2 "
+    "lines (30 words or fewer) in the number-first STAR structure with contextualised metrics, "
+    "bold only newly incorporated keywords (or the whole bullet if regenerated), the dollar-figure "
+    "formatting rules (no '+', K/M/B shorthand, no '~'), the [RETITLE ALLOWED/NOT ALLOWED] tags "
+    "with only one title shown, all required entries included, the exact contact line, plain-text "
+    "bullets without a leading bullet character, and a one-page-fitting resume."
+)
+
+
 def _first_draft_prompt(company: str, roles: list[RoleInput]) -> str:
     pool_note = (
         f" Only the best-fitting {FINAL_ROLES} of these roles will be kept — the rest are dropped "
@@ -186,36 +199,47 @@ def _first_draft_prompt(company: str, roles: list[RoleInput]) -> str:
         f"Generate ONE resume for the candidate that is tailored to ALL {len(roles)} of the "
         f"following {company} job descriptions at once — a single resume that would score at "
         f"least {ATS_TARGET}% ATS match on EACH of them. For this run the ATS target is "
-        f"{ATS_TARGET}% on every JD (overriding any other target in your instructions). Cover "
-        "the skills and keywords the JDs share first, then each JD's specific ones, but only "
-        "where the candidate's real background supports them — never fabricate experience. "
-        "This is an automated run: if you would normally ask a clarifying question, make the "
-        "most reasonable assumption and finish with done=true." + pool_note + "\n\n" + jds
+        f"{ATS_TARGET}% on every JD. Cover the skills and keywords the JDs share first, then each "
+        "JD's specific ones, but only where the candidate's real background supports them — never "
+        "fabricate experience. " + _RULES_REMINDER + " This is an automated run: if you would "
+        "normally ask a clarifying question, make the most reasonable assumption and finish with "
+        "done=true." + pool_note + "\n\n" + jds
     )
 
 
-def _revision_prompt(scores: list[RoleScore], dropped: list[RoleScore]) -> str:
-    dropped_note = (
-        "These roles were dropped from the target set — ignore them from now on: "
-        + ", ".join(d.title for d in dropped)
-        + ".\n\n"
-        if dropped
-        else ""
-    )
+def _revision_prompt(scores: list[RoleScore], dropped: list[RoleScore], violations: list[str]) -> str:
+    parts: list[str] = []
+    if dropped:
+        parts.append(
+            "These roles were dropped from the target set — ignore them from now on: "
+            + ", ".join(d.title for d in dropped)
+            + "."
+        )
     lines = []
-    for s in scores:
-        gaps = ", ".join(s.missing) if s.missing else "none listed"
-        flag = "OK" if s.score >= ATS_TARGET else "BELOW TARGET"
-        lines.append(f"- {s.title}: {s.score}% ({flag}); missing/weak: {gaps}")
-    return (
-        dropped_note
-        + f"An independent ATS check of your last resume found:\n" + "\n".join(lines) + "\n\n"
-        f"Revise the resume so EVERY job description reaches at least {ATS_TARGET}%. Work the "
-        "missing keywords and requirements in only where the candidate's background genuinely "
-        "supports them (reword bullets, reorder, surface relevant entries or projects) — never "
-        "invent experience. Keep the scores that are already OK from dropping. Return the "
-        "complete revised resume with done=true."
-    )
+    for s_ in scores:
+        gaps = ", ".join(s_.missing) if s_.missing else "none listed"
+        flag = "OK" if s_.score >= ATS_TARGET else "BELOW TARGET"
+        lines.append(f"- {s_.title}: {s_.score}% ({flag}); missing/weak: {gaps}")
+    parts.append("An independent ATS check of your last resume found:\n" + "\n".join(lines))
+    if violations:
+        parts.append(
+            "It also breaks these resume guidelines — fix every one:\n" + "\n".join(f"- {v}" for v in violations)
+        )
+    below = any(s_.score < ATS_TARGET for s_ in scores)
+    if below:
+        parts.append(
+            f"Revise the resume so EVERY job description reaches at least {ATS_TARGET}%. Work the "
+            "missing keywords and requirements in only where the candidate's background genuinely "
+            "supports them (reword bullets, reorder, surface relevant entries or projects) — never "
+            "invent experience. Keep the scores that are already OK from dropping."
+        )
+    else:
+        parts.append(
+            f"The ATS scores are at or above {ATS_TARGET}% — fix only the guideline violations "
+            "without lowering them."
+        )
+    parts.append(_RULES_REMINDER + " Return the complete revised resume with done=true.")
+    return "\n\n".join(parts)
 
 
 def _ensure_links(body: str, roles: list[RoleInput]) -> str:
@@ -226,14 +250,14 @@ def _ensure_links(body: str, roles: list[RoleInput]) -> str:
     return f"{body.rstrip()}\n\n{extra}"
 
 
-async def _candidate_name(api_base_url: str) -> str:
+async def _get_json(api_base_url: str, path: str) -> dict:
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{api_base_url}/resumes/profile")
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(f"{api_base_url}{path}")
             resp.raise_for_status()
-            return resp.json().get("candidateName") or ""
+            return resp.json()
     except Exception:
-        return ""
+        return {}
 
 
 async def run_referral(
@@ -249,14 +273,39 @@ async def run_referral(
         await _report_progress(api_base_url, session_id, message)
 
     deps = ResuDeps(api_base_url=api_base_url)
+    profile = await _get_json(api_base_url, "/resumes/profile")
+    entries = await _get_json(api_base_url, "/entries")
+    contact_line = expected_contact_line(profile)
+
+    # The resume guidelines say to stop when a JD hits a disqualifier keyword —
+    # here that means leaving that one role out rather than the whole run.
+    keywords = [k.strip().lower() for k in (profile.get("disqualifierKeywords") or []) if k.strip()]
+    usable: list[RoleInput] = []
+    for r in roles:
+        hit = next((k for k in keywords if k in r.jd_text.lower()), None)
+        if hit:
+            await say(f"Skipping {r.title} — its job description contains your disqualifier keyword \"{hit}\"")
+        else:
+            usable.append(r)
+    if not usable:
+        raise RuntimeError("Every selected role's job description contains one of your disqualifier keywords")
+    roles = usable
+
     active = list(roles)
     dropped: list[RoleScore] = []
-    best: tuple[StructuredResume, list[RoleScore]] | None = None
+    best: tuple[StructuredResume, list[RoleScore], list[str]] | None = None
     stopped_early: str | None = None
     drafts_made = 0
 
-    def quality(scores: list[RoleScore]) -> tuple[int, float]:
-        return (min(s.score for s in scores), sum(s.score for s in scores) / len(scores))
+    def checked(resume: StructuredResume) -> list[str]:
+        # The contact line is fixed outright (the value is known exactly);
+        # everything else is reported for the model to fix.
+        if contact_line:
+            resume.contactLine = contact_line
+        return check_resume(resume, entries, profile)
+
+    def quality(scores: list[RoleScore], violations: list[str]) -> tuple[int, int, float]:
+        return (-len(violations), min(s.score for s in scores), sum(s.score for s in scores) / len(scores))
 
     with run_scope():
         await say(f"Building one resume for {len(roles)} role(s) — target {ATS_TARGET}% ATS on each...")
@@ -264,14 +313,17 @@ async def run_referral(
 
         for draft in range(1, MAX_DRAFTS + 1):
             drafts_made = draft
+            violations = checked(resume)
             await say(f"Draft {draft}: checking ATS match against each job description...")
             try:
                 scores = list(await asyncio.gather(*(_score_one(resume_to_text(resume), r) for r in active)))
             except BudgetExceededError as exc:
                 stopped_early = str(exc)
                 break
-            for s in scores:
-                await say(f"  {s.title}: {s.score}%")
+            for s_ in scores:
+                await say(f"  {s_.title}: {s_.score}%")
+            if violations:
+                await say(f"  {len(violations)} resume-guideline issue(s) found")
 
             if len(active) > FINAL_ROLES:
                 # Drop the weakest fits so the rest can reach the target; ties
@@ -285,35 +337,36 @@ async def run_referral(
                     + ", ".join(f"{g.title} ({g.score}%)" for g in gone)
                 )
                 active = [r for i, r in enumerate(active) if i not in out]
-                scores = [s for i, s in enumerate(scores) if i not in out]
+                scores = [s_ for i, s_ in enumerate(scores) if i not in out]
 
-            if best is None or quality(scores) > quality(best[1]):
-                best = (resume, scores)
+            if best is None or quality(scores, violations) > quality(best[1], best[2]):
+                best = (resume, scores, violations)
 
-            if all(s.score >= ATS_TARGET for s in scores):
-                await say(f"All {len(active)} remaining role(s) are at or above {ATS_TARGET}%.")
+            if all(s_.score >= ATS_TARGET for s_ in scores) and not violations:
+                await say(f"All {len(active)} remaining role(s) are at or above {ATS_TARGET}% and follow the guidelines.")
                 break
             if draft == MAX_DRAFTS:
                 break
 
-            gaps = sorted({k for s in scores if s.score < ATS_TARGET for k in s.missing})[:8]
-            await say(
-                f"Below {ATS_TARGET}% on at least one role — revising"
-                + (f" (gaps: {', '.join(gaps)})" if gaps else "")
-                + "..."
-            )
+            gaps = sorted({k for s_ in scores if s_.score < ATS_TARGET for k in s_.missing})[:8]
+            reasons = []
+            if any(s_.score < ATS_TARGET for s_ in scores):
+                reasons.append(f"below {ATS_TARGET}% on at least one role" + (f" (gaps: {', '.join(gaps)})" if gaps else ""))
+            if violations:
+                reasons.append(f"{len(violations)} guideline issue(s)")
+            await say("Revising — " + "; ".join(reasons) + "...")
             try:
-                resume, history = await _generate(_revision_prompt(scores, dropped), history, deps)
+                resume, history = await _generate(_revision_prompt(scores, dropped, violations), history, deps)
             except BudgetExceededError as exc:
                 stopped_early = str(exc)
                 break
 
         if best is None:
             raise RuntimeError(stopped_early or "Could not score the resume")
-        best_resume, best_scores = best
+        best_resume, best_scores, best_violations = best
 
         await say(f"Drafting the {tone} {channel} message...")
-        sender = await _candidate_name(api_base_url)
+        sender = profile.get("candidateName") or ""
         written = await retry_on_rate_limit(
             lambda: _writer.run(
                 f"Tone: {tone} — {_TONE_GUIDE[tone]}\n"
@@ -329,7 +382,7 @@ async def run_referral(
         if channel == "email" and written.output.subject:
             message = f"Subject: {written.output.subject.strip()}\n\n{message}"
 
-    target_met = all(s.score >= ATS_TARGET for s in best_scores)
+    target_met = all(s_.score >= ATS_TARGET for s_ in best_scores)
     notes: list[str] = []
     if dropped:
         notes.append(
@@ -339,9 +392,9 @@ async def run_referral(
         )
     if not target_met:
         below = "; ".join(
-            f"{s.title}: {s.score}% (gaps: {', '.join(s.missing[:6]) or 'none listed'})"
-            for s in best_scores
-            if s.score < ATS_TARGET
+            f"{s_.title}: {s_.score}% (gaps: {', '.join(s_.missing[:6]) or 'none listed'})"
+            for s_ in best_scores
+            if s_.score < ATS_TARGET
         )
         notes.append(
             f"Couldn't reach {ATS_TARGET}% on every remaining role after {drafts_made} draft(s) without "
@@ -349,8 +402,15 @@ async def run_referral(
             "closest resume is attached; consider picking roles that overlap more, or add the "
             "missing skills to your entries if you genuinely have them."
         )
-        if stopped_early:
-            notes.append(f"(Stopped early: {stopped_early}.)")
+    if best_violations:
+        notes.append(
+            "Resume-guideline checks still failing after the final draft — review before sending: "
+            + "; ".join(best_violations[:6])
+            + ("..." if len(best_violations) > 6 else "")
+            + "."
+        )
+    if stopped_early:
+        notes.append(f"(Stopped early: {stopped_early}.)")
     await say("Done.")
     return ReferralResult(
         message=message,

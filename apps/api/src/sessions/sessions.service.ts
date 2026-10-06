@@ -637,6 +637,15 @@ export class SessionsService {
     for (const roleId of roleIds) {
       const role = await this.prisma.discoveredRole.findUnique({ where: { id: roleId } });
       if (!role) continue;
+      // The resume guidelines say to stop when a JD exceeds the max-years
+      // cutoff — here that means leaving this one role out.
+      if (role.experienceMismatch) {
+        await this.progress(
+          sessionId,
+          `Skipping ${role.title} — it requires ${role.roleMinYearsExperience ?? 'more'}+ yrs, above your max experience`,
+        );
+        continue;
+      }
       if (!role.jdText) await this.progress(sessionId, `Fetching job description for ${role.title}...`);
       const jdText = await this.companyRoles.ensureRoleJd(roleId);
       if (!jdText) {
@@ -645,7 +654,7 @@ export class SessionsService {
       }
       roles.push({ id: role.id, title: role.title, url: role.roleUrl, jd_text: jdText });
     }
-    if (roles.length === 0) throw new Error('None of the selected roles had a readable job description');
+    if (roles.length === 0) throw new Error('None of the selected roles could be used (unreadable job description or above your max experience)');
 
     const response = await undiciFetch(`${AGENT_SERVICE_URL}/referral/run`, {
       method: 'POST',
