@@ -1781,6 +1781,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     return this.prisma.discoveredRole.update({
       where: { id: roleId },
       data: {
+        title: this.withLocationInTitle(role.title, result),
         jdText: role.jdText || jdText || undefined,
         atsScore: result.score,
         atsScoreComputedAt: new Date(),
@@ -1793,6 +1794,33 @@ export class CompanyRolesService implements OnModuleDestroy {
         experienceMismatch: this.computeExperienceMismatch(result.minYearsExperience, candidateMaxYears),
       },
     });
+  }
+
+  /** Roles pulled before the scan started putting the listing's location in the
+   * title have none; scoring knows the locations, so add them then. Titles that
+   * already carry a " — location" suffix (or the same text) are left alone. */
+  private withLocationInTitle(
+    title: string,
+    scored: {
+      isRemote: boolean | null;
+      locations: { country: string | null; state: string | null; city: string | null }[];
+    },
+  ): string {
+    if (title.includes(' — ')) return title;
+    const places = [
+      ...new Set(
+        scored.locations
+          .map((l) => (l.city || l.state ? [l.city, l.state].filter(Boolean).join(', ') : (l.country ?? '')))
+          .filter(Boolean),
+      ),
+    ].slice(0, 6);
+    const label = scored.isRemote
+      ? places.length
+        ? `Remote (${places.join(' · ')})`
+        : 'Remote'
+      : places.join(' · ');
+    if (!label || title.toLowerCase().includes(label.toLowerCase())) return title;
+    return `${title} — ${label}`;
   }
 
   /** The role's saved JD text, fetching and saving it first if the role has

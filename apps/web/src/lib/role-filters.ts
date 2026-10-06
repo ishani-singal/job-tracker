@@ -89,6 +89,23 @@ export function matchesExcludeKeywordsFilter(role: DiscoveredRole, keywords: str
   return !keywords.some((k) => k.trim() && title.includes(k.trim().toLowerCase()));
 }
 
+/** True when the role mentions at least one of the user's location terms
+ * (comma-separated, case-insensitive) in its title or extracted location —
+ * the title carries the listed locations for roles scanned or scored since
+ * that was added, the extracted fields cover the rest. Empty text = no filter. */
+export function matchesLocationTextFilter(role: DiscoveredRole, text: string): boolean {
+  const terms = text
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  if (terms.length === 0) return true;
+  const haystack = [role.title, role.roleCity, role.roleState, role.roleCountry, role.roleIsRemote ? 'remote' : '']
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return terms.some((t) => haystack.includes(t));
+}
+
 /** A role's "posted date" for filtering purposes: its real postedDate when
  * known, otherwise the date it was first discovered/pulled (createdAt) —
  * a role with no extracted posting date still has to sit somewhere on a

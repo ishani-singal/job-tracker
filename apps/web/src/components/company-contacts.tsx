@@ -14,6 +14,7 @@ import {
   matchesExcludeKeywordsFilter,
   matchesExperienceFilter,
   matchesLocationFilter,
+  matchesLocationTextFilter,
 } from '@/lib/role-filters';
 import type {
   CompanyContact,
@@ -396,7 +397,8 @@ function ReferralDialog({
         (!settings.hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
         (!locationFilterOn || matchesLocationFilter(r, profile)) &&
         (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
-        matchesExcludeKeywordsFilter(r, excludeKeywords)
+        matchesExcludeKeywordsFilter(r, excludeKeywords) &&
+        matchesLocationTextFilter(r, settings.locationTextFilter ?? '')
       );
     });
   }, [allRoles, settings, profile, company.id, locationFilterOn, experienceFilterOn]);

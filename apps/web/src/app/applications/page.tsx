@@ -15,6 +15,7 @@ import {
   matchesExcludeKeywordsFilter,
   matchesExperienceFilter,
   matchesLocationFilter,
+  matchesLocationTextFilter,
 } from '@/lib/role-filters';
 import type { Application, AppSettings, DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
 
@@ -69,12 +70,14 @@ export default function ApplicationsPage() {
   const [postedWithinDaysFilter, setPostedWithinDaysFilter] = useState('0');
   const [hideInvalidConditionRolesFilterOn, setHideInvalidConditionRolesFilterOn] = useState(false);
   const [excludeKeywordsFilter, setExcludeKeywordsFilter] = useState('');
+  const [locationTextFilter, setLocationTextFilter] = useState('');
   if (settings && !minScoreFilterInitialized) {
     setMinScoreFilter(settings.minMatchScoreFilter != null ? String(settings.minMatchScoreFilter) : '');
     setPostedBeforeTodayFilterOn(settings.postedBeforeTodayFilterOn);
     setPostedWithinDaysFilter(String(settings.postedWithinDaysFilter));
     setHideInvalidConditionRolesFilterOn(settings.hideInvalidConditionRolesFilterOn);
     setExcludeKeywordsFilter(settings.excludeKeywordsFilter);
+    setLocationTextFilter(settings.locationTextFilter ?? '');
     setMinScoreFilterInitialized(true);
   }
 
@@ -113,6 +116,11 @@ export default function ApplicationsPage() {
     updateSettings.mutate({ excludeKeywordsFilter: value });
   }
 
+  function handleLocationTextFilterChange(value: string) {
+    setLocationTextFilter(value);
+    updateSettings.mutate({ locationTextFilter: value });
+  }
+
   const excludeKeywords = excludeKeywordsFilter
     .split(',')
     .map((k) => k.trim())
@@ -138,7 +146,8 @@ export default function ApplicationsPage() {
       (!hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
       (!locationFilterOn || matchesLocationFilter(r, profile)) &&
       (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
-      matchesExcludeKeywordsFilter(r, excludeKeywords),
+      matchesExcludeKeywordsFilter(r, excludeKeywords) &&
+      matchesLocationTextFilter(r, locationTextFilter),
   );
   const { data: selectedRolesRaw } = useQuery({
     queryKey: ['discovered-roles', 'selected'],
@@ -303,6 +312,16 @@ export default function ApplicationsPage() {
               className="flex-1 min-w-0 border rounded px-1.5 py-0.5 bg-transparent"
               value={excludeKeywordsFilter}
               onChange={(e) => handleExcludeKeywordsFilterChange(e.target.value)}
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs opacity-70">
+            Location contains
+            <input
+              type="text"
+              placeholder="e.g. Seattle, Remote, New York (any of)"
+              className="flex-1 min-w-0 border rounded px-1.5 py-0.5 bg-transparent"
+              value={locationTextFilter}
+              onChange={(e) => handleLocationTextFilterChange(e.target.value)}
             />
           </label>
           <div className="flex flex-col gap-2">

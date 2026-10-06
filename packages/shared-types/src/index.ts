@@ -48,6 +48,7 @@ export interface AppSettings {
   postedWithinDaysFilter: number;
   hideInvalidConditionRolesFilterOn: boolean;
   excludeKeywordsFilter: string;
+  locationTextFilter: string;
   updatedAt: string;
 }
 

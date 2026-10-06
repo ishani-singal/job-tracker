@@ -9,6 +9,7 @@ export interface UpdateSettingsInput {
   postedWithinDaysFilter?: number;
   hideInvalidConditionRolesFilterOn?: boolean;
   excludeKeywordsFilter?: string;
+  locationTextFilter?: string;
 }
 
 @Injectable()
@@ -46,6 +47,9 @@ export class SettingsService {
         }),
         ...(input.excludeKeywordsFilter !== undefined && {
           excludeKeywordsFilter: input.excludeKeywordsFilter,
+        }),
+        ...(input.locationTextFilter !== undefined && {
+          locationTextFilter: input.locationTextFilter,
         }),
       },
     });

@@ -391,6 +391,9 @@ model AppSettings {
   // disqualifierKeywords (which marks a role "Conditions not valid" but
   // still shows it); this one removes the role from Open Roles entirely.
   excludeKeywordsFilter String @default("")
+  // Comma-separated free text; an open role must mention at least one of the
+  // terms in its title or location (empty = no location text filter).
+  locationTextFilter    String @default("")
 
   // Daily LLM spend cap in USD — the agent (agent/cost_guard.py) refuses new
   // requests once today's llm_calls total reaches it. Editable on /llm-usage.
