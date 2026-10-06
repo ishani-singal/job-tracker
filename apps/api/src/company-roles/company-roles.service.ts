@@ -666,8 +666,12 @@ export class CompanyRolesService implements OnModuleDestroy {
       const posted = new Date(r.postedDate);
       return !isNaN(posted.getTime()) && posted < cutoff;
     };
+    // Only trust "reached a known role" as the end of what's new when this
+    // page's roles are dated: it presumes a newest-first listing, which an
+    // undated board (e.g. Meta's job search) gives no evidence of — there,
+    // overlapping an earlier scan's roles says nothing about what's left.
     const hitsKnownRole = (pageRoles: DiscoveredRoleDto[]) =>
-      pageRoles.some((r) => knownRoleUrls.has(r.url));
+      pageRoles.some((r) => r.postedDate) && pageRoles.some((r) => knownRoleUrls.has(r.url));
 
     const allRoles = [...firstPageRoles];
     let currentNextUrl = nextPageUrl;
@@ -761,8 +765,12 @@ export class CompanyRolesService implements OnModuleDestroy {
       const posted = new Date(r.postedDate);
       return !isNaN(posted.getTime()) && posted < cutoff;
     };
+    // Only trust "reached a known role" as the end of what's new when this
+    // page's roles are dated: it presumes a newest-first listing, which an
+    // undated board (e.g. Meta's job search) gives no evidence of — there,
+    // overlapping an earlier scan's roles says nothing about what's left.
     const hitsKnownRole = (pageRoles: DiscoveredRoleDto[]) =>
-      pageRoles.some((r) => knownRoleUrls.has(r.url));
+      pageRoles.some((r) => r.postedDate) && pageRoles.some((r) => knownRoleUrls.has(r.url));
 
     const browser = await this.getBrowser();
     const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)' });
