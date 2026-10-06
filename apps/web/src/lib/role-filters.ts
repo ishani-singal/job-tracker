@@ -108,9 +108,12 @@ export function matchesLocationFilter(
   if (role.roleIsRemote && profile?.openToRemote) return true;
   if (!profile?.locationCountry) return true; // no profile location set — filter is a no-op
   if (role.roleCountry === null && role.roleState === null) return true; // unknown location
-  if (role.roleCountry !== profile.locationCountry) return false;
-  if (profile.locationState && role.roleState && role.roleState !== profile.locationState) return false;
-  return true;
+  // The profile stores codes ("US", "WA") while a role's extracted location is
+  // spelled out ("United States", "Washington"), so comparing them here never
+  // matched and hid every in-person role. Scoring already compared the two
+  // properly (names resolved, every listed location considered), so use its
+  // verdict: only an explicit mismatch fails.
+  return role.locationMismatch !== true;
 }
 
 /** A role passes the experience filter if the JD's required minimum years
