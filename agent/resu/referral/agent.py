@@ -30,12 +30,23 @@ ATS_TARGET = 90
 MAX_DRAFTS = 3
 
 Tone = Literal["friend", "colleague", "acquaintance", "mentor"]
+Channel = Literal["linkedin", "whatsapp", "text", "email"]
 
 _TONE_GUIDE: dict[str, str] = {
     "friend": "Warm, casual and personal — the way you'd text a friend. First name, relaxed phrasing, a touch of humour is fine.",
     "colleague": "Friendly but professional — someone you've worked alongside. Reference shared work context lightly; direct and efficient.",
     "acquaintance": "Polite and slightly formal — someone you know only a little. Briefly remind them how you're connected, keep it low-pressure and make it easy to say no.",
     "mentor": "Respectful and appreciative — someone who has guided you. Acknowledge their time and advice, and ask for a referral as a favour you'd understand them declining.",
+}
+
+
+# Chosen up front in the UI and put straight into the writer prompt, so there is
+# no back-and-forth (and no extra LLM call) to find out where the message goes.
+_CHANNEL_GUIDE: dict[str, str] = {
+    "linkedin": "A LinkedIn direct message. Conversational, under ~100 words, short paragraphs, no subject line and no formal letter sign-off. Say the resume is attached.",
+    "whatsapp": "A WhatsApp chat message. Short, chatty, under ~80 words, short lines; no formal sign-off block. Say you'll attach/send the resume.",
+    "text": "An SMS text message. Very short — under ~60 words, no greeting block or sign-off. SMS can't carry an attachment, so offer to send the resume instead of saying it's attached.",
+    "email": "An email. Put a short, specific subject line in `subject` (e.g. 'Referral request — <role> at <company>'). Under ~150 words with a greeting and a sign-off using the candidate's name. Say the resume is attached.",
 }
 
 
@@ -68,6 +79,8 @@ class AtsScore(BaseModel):
 
 class ReferralMessage(BaseModel):
     body: str
+    # Only for email; null for every other channel.
+    subject: str | None = None
 
 
 # Same underlying deployment as resume generation, but labelled "referral" on
@@ -94,12 +107,14 @@ _writer = Agent(
     output_type=ReferralMessage,
     system_prompt=(
         "You write short messages asking someone at a company for a job referral. Output the "
-        "complete message as plain text in `body` (no subject line, no markdown). Rules: open "
-        "with a greeting using the recipient's first name; keep it under ~150 words; say a "
-        "resume is attached; include EVERY job link given, verbatim, each on its own line; "
+        "complete message as plain text in `body` (no markdown); set `subject` only when the "
+        "channel guide asks for one, otherwise leave it null. Follow the channel guide for "
+        "format, length and how to mention the resume. Rules: use the recipient's first name; "
+        "include EVERY job link given, verbatim, each on its own line; "
         "make one or two specific, truthful points about why the candidate fits, drawn only "
         "from the resume text provided — never invent experience, employers, or relationships "
-        "or shared history; make a clear but easy-to-decline ask; end with the candidate's name. "
+        "or shared history; make a clear but easy-to-decline ask; sign off with the candidate's name unless the channel guide says "
+        "not to. "
         "Match the requested tone exactly."
     ),
 )
@@ -155,7 +170,7 @@ async def _score_one(resume_text: str, role: RoleInput) -> RoleScore:
 
 
 def _first_draft_prompt(company: str, roles: list[RoleInput]) -> str:
-    jds = "\n\n---\n\n".join(f"## Job description {i}: {r.title}\n{r.jd_text[:12000]}" for i, r in enumerate(roles, 1))
+    jds = "\n\n---\n\n".join(f"## Job description {i}: {r.title}\n{r.jd_text[:8000]}" for i, r in enumerate(roles, 1))
     return (
         f"Generate ONE resume for the candidate that is tailored to ALL {len(roles)} of the "
         f"following {company} job descriptions at once — a single resume that would score at "
@@ -208,6 +223,7 @@ async def run_referral(
     company: str,
     contact_name: str,
     tone: Tone,
+    channel: Channel,
     roles: list[RoleInput],
 ) -> ReferralResult:
     async def say(message: str) -> None:
@@ -260,11 +276,12 @@ async def run_referral(
             raise RuntimeError(stopped_early or "Could not score the resume")
         best_resume, best_scores = best
 
-        await say(f"Drafting the {tone} referral message...")
+        await say(f"Drafting the {tone} {channel} message...")
         sender = await _candidate_name(api_base_url)
         written = await retry_on_rate_limit(
             lambda: _writer.run(
                 f"Tone: {tone} — {_TONE_GUIDE[tone]}\n"
+                f"Channel: {channel} — {_CHANNEL_GUIDE[channel]}\n"
                 f"Candidate (sender): {sender or '(name not set — sign off with just a thank you)'}\n"
                 f"Recipient: {contact_name}, who works at {company}\n\n"
                 "Roles and links to include:\n"
@@ -273,6 +290,8 @@ async def run_referral(
             )
         )
         message = _ensure_links(written.output.body.strip(), roles)
+        if channel == "email" and written.output.subject:
+            message = f"Subject: {written.output.subject.strip()}\n\n{message}"
 
     target_met = all(s.score >= ATS_TARGET for s in best_scores)
     note: str | None = None

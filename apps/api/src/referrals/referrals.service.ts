@@ -5,8 +5,11 @@ import { SessionsService } from '../sessions/sessions.service';
 export const REFERRAL_TONES = ['friend', 'colleague', 'acquaintance', 'mentor'] as const;
 export type ReferralTone = (typeof REFERRAL_TONES)[number];
 
+export const REFERRAL_CHANNELS = ['linkedin', 'whatsapp', 'text', 'email'] as const;
+export type ReferralChannel = (typeof REFERRAL_CHANNELS)[number];
+
 /** One resume has to cover every selected JD, so the number of roles is capped. */
-export const MAX_REFERRAL_ROLES = 3;
+export const MAX_REFERRAL_ROLES = 7;
 
 export interface ContactInput {
   name?: string;
@@ -39,6 +42,7 @@ export class ReferralsService {
             id: true,
             contactId: true,
             tone: true,
+            channel: true,
             roles: true,
             message: true,
             scores: true,
@@ -96,9 +100,12 @@ export class ReferralsService {
 
   /** Validates the request and starts the REFERRAL chat session that fetches
    * the JDs, builds + ATS-checks the resume and drafts the message. */
-  async startReferral(contactId: string, tone: string, roleIds: string[]) {
+  async startReferral(contactId: string, tone: string, channel: string, roleIds: string[]) {
     if (!(REFERRAL_TONES as readonly string[]).includes(tone)) {
       throw new BadRequestException(`tone must be one of: ${REFERRAL_TONES.join(', ')}`);
+    }
+    if (!(REFERRAL_CHANNELS as readonly string[]).includes(channel)) {
+      throw new BadRequestException(`channel must be one of: ${REFERRAL_CHANNELS.join(', ')}`);
     }
     const ids = [...new Set(roleIds ?? [])];
     if (ids.length < 1 || ids.length > MAX_REFERRAL_ROLES) {
@@ -113,7 +120,7 @@ export class ReferralsService {
     if (roles.length !== ids.length) {
       throw new BadRequestException("Every selected role must belong to this contact's company");
     }
-    return this.sessions.startReferral(contactId, tone, ids);
+    return this.sessions.startReferral(contactId, tone, channel, ids);
   }
 
   async getReferral(id: string) {

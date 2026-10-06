@@ -233,6 +233,8 @@ export type ScanConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
 
 export type ReferralTone = 'friend' | 'colleague' | 'acquaintance' | 'mentor';
 
+export type ReferralChannel = 'linkedin' | 'whatsapp' | 'text' | 'email';
+
 export interface ReferralRoleScore {
   roleId: string;
   title: string;
@@ -244,6 +246,7 @@ export interface ReferralRequest {
   id: string;
   contactId: string;
   tone: ReferralTone;
+  channel: ReferralChannel | null;
   roles: { id: string; title: string; url: string }[];
   message: string;
   scores: ReferralRoleScore[];

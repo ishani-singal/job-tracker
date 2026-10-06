@@ -252,7 +252,7 @@ export class SessionsService {
 
   /** Starts an unattended REFERRAL session (see runReferralTurn) — the chat
    * shows its steps live; the result is saved as a ReferralRequest on finish. */
-  async startReferral(contactId: string, tone: string, roleIds: string[]) {
+  async startReferral(contactId: string, tone: string, channel: string, roleIds: string[]) {
     const contact = await this.prisma.companyContact.findUnique({
       where: { id: contactId },
       include: { company: true },
@@ -264,6 +264,7 @@ export class SessionsService {
         company: contact.company.name,
         contactId,
         referralTone: tone,
+        referralChannel: channel,
         referralRoleIds: roleIds,
         status: 'RUNNING',
       },
@@ -408,6 +409,7 @@ export class SessionsService {
       entryId: string | null;
       contactId?: string | null;
       referralTone?: string | null;
+      referralChannel?: string | null;
       referralRoleIds?: string[];
     },
     priorHistoryJson: string | null,
@@ -418,7 +420,13 @@ export class SessionsService {
       if (session.scope === 'LINKEDIN') {
         await this.runLinkedinTurn(session.id, priorHistoryJson, userReply);
       } else if (session.scope === 'REFERRAL') {
-        await this.runReferralTurn(session.id, session.contactId!, session.referralTone!, session.referralRoleIds ?? []);
+        await this.runReferralTurn(
+          session.id,
+          session.contactId!,
+          session.referralTone!,
+          session.referralChannel ?? 'email',
+          session.referralRoleIds ?? [],
+        );
       } else if (session.scope === 'COMPANY') {
         await this.runCompanyTurn(session.id, session.company!, priorHistoryJson, userReply);
       } else if (session.scope === 'ENTRY_DOCUMENT') {
@@ -610,14 +618,20 @@ export class SessionsService {
    * ReferralRequest and the session goes straight to ACCEPTED — there's
    * nothing to review-then-accept, and the user can simply run it again.
    */
-  private async runReferralTurn(sessionId: string, contactId: string, tone: string, roleIds: string[]) {
+  private async runReferralTurn(
+    sessionId: string,
+    contactId: string,
+    tone: string,
+    channel: string,
+    roleIds: string[],
+  ) {
     const contact = await this.prisma.companyContact.findUnique({
       where: { id: contactId },
       include: { company: true },
     });
     if (!contact) throw new Error('Contact no longer exists');
 
-    await this.progress(sessionId, `Referral for ${contact.name} at ${contact.company.name} — ${tone} tone, ${roleIds.length} role(s)`);
+    await this.progress(sessionId, `Referral for ${contact.name} at ${contact.company.name} — ${tone} tone via ${channel}, ${roleIds.length} role(s)`);
 
     const roles: { id: string; title: string; url: string; jd_text: string }[] = [];
     for (const roleId of roleIds) {
@@ -641,6 +655,7 @@ export class SessionsService {
         company: contact.company.name,
         contact_name: contact.name,
         tone,
+        channel,
         roles,
       }),
       signal: this.agentCallSignal(sessionId, 20 * 60 * 1000),
@@ -660,6 +675,7 @@ export class SessionsService {
       data: {
         contactId,
         tone,
+        channel,
         roles: rolesJson,
         message: result.message,
         resumeContent: result.resume as unknown as Prisma.InputJsonValue,

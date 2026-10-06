@@ -16,6 +16,7 @@ import type {
   LinkedinProfile,
   ParsedJob,
   ProjectEntry,
+  ReferralChannel,
   ReferralTone,
   ResumeProfile,
   ResumeTemplate,
@@ -289,10 +290,10 @@ export const api = {
     request<CompanyContact>(`/company-contacts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteCompanyContact: (id: string) =>
     request<{ deleted: boolean }>(`/company-contacts/${id}`, { method: 'DELETE' }),
-  startReferral: (contactId: string, tone: ReferralTone, roleIds: string[]) =>
+  startReferral: (contactId: string, tone: ReferralTone, channel: ReferralChannel, roleIds: string[]) =>
     request<GenerationSession>(`/company-contacts/${contactId}/referral`, {
       method: 'POST',
-      body: JSON.stringify({ tone, roleIds }),
+      body: JSON.stringify({ tone, channel, roleIds }),
     }),
   addTrackedCompanies: (companies: string) =>
     request<{ created: string[]; skipped: string[] }>('/tracked-companies', {

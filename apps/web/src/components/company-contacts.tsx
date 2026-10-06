@@ -4,20 +4,38 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
+import {
+  effectivePostedDate,
+  hasInvalidCondition,
+  isBeforeCutoff,
+  matchesExcludeKeywordsFilter,
+  matchesExperienceFilter,
+  matchesLocationFilter,
+} from '@/lib/role-filters';
 import type {
   CompanyContact,
+  DiscoveredRole,
+  ReferralChannel,
   ReferralRequest,
   ReferralTone,
   TrackedCompany,
 } from '@job-tracker/shared-types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
-const MAX_ROLES = 3;
+const MAX_ROLES = 7;
+const MAX_LISTED_ROLES = 100;
 const TONES: { value: ReferralTone; label: string; hint: string }[] = [
   { value: 'friend', label: 'Friend', hint: 'Warm and casual' },
   { value: 'colleague', label: 'Colleague', hint: 'Friendly but professional' },
   { value: 'acquaintance', label: 'Acquaintance', hint: 'Polite, low-pressure' },
   { value: 'mentor', label: 'Mentor', hint: 'Respectful, appreciative' },
+];
+
+const CHANNELS: { value: ReferralChannel; label: string; needs: 'linkedinUrl' | 'phone' | 'email'; missing: string }[] = [
+  { value: 'linkedin', label: 'LinkedIn', needs: 'linkedinUrl', missing: 'no LinkedIn saved' },
+  { value: 'whatsapp', label: 'WhatsApp', needs: 'phone', missing: 'no phone saved' },
+  { value: 'text', label: 'Text message', needs: 'phone', missing: 'no phone saved' },
+  { value: 'email', label: 'Email', needs: 'email', missing: 'no email saved' },
 ];
 
 type ContactDraft = { name: string; linkedinUrl: string; email: string; phone: string };
@@ -277,6 +295,7 @@ function ReferralHistoryItem({ referral }: { referral: ReferralRequest }) {
       <div className="flex items-center gap-2 text-xs opacity-70 flex-wrap">
         <span>{new Date(referral.createdAt).toLocaleString()}</span>
         <span>· {referral.tone} tone</span>
+        {referral.channel && <span>· {referral.channel}</span>}
         <span>· {referral.roles.length} role(s)</span>
       </div>
       <ScoreChips scores={referral.scores} />
@@ -318,7 +337,11 @@ function ReferralDialog({
 }) {
   const queryClient = useQueryClient();
   const { openPanel } = useSessionsPanel();
+  const [step, setStep] = useState<'roles' | 'details'>('roles');
   const [tone, setTone] = useState<ReferralTone>('colleague');
+  const [channel, setChannel] = useState<ReferralChannel>(
+    () => CHANNELS.find((c) => contact[c.needs])?.value ?? 'email',
+  );
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
 
@@ -326,18 +349,62 @@ function ReferralDialog({
     queryKey: ['discovered-roles', 'all'],
     queryFn: () => api.listDiscoveredRoles(),
   });
-  const roles = useMemo(() => (allRoles ?? []).filter((r) => r.companyId === company.id), [allRoles, company.id]);
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: api.getProfile });
+
+  const refreshRoles = () => queryClient.invalidateQueries({ queryKey: ['discovered-roles'] });
+  const rescore = useMutation({ mutationFn: (id: string) => api.rescoreRole(id), onSuccess: refreshRoles });
+  const discard = useMutation({
+    mutationFn: (id: string) => api.discardRole(id),
+    onSuccess: (_, id) => {
+      setSelected((cur) => cur.filter((x) => x !== id));
+      refreshRoles();
+    },
+  });
+
+  // The same list the Applications page shows under its current filters
+  // (selected and unselected roles alike); a discarded role scores 0 and is
+  // always dropped, whichever filters are on.
+  const filtered = useMemo(() => {
+    if (!allRoles || !settings || !profile) return null;
+    const excludeKeywords = settings.excludeKeywordsFilter
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean);
+    const minScore = settings.minMatchScoreFilter;
+    const withinDays = Math.max(0, settings.postedWithinDaysFilter);
+    return allRoles.filter(
+      (r) =>
+        r.companyId === company.id &&
+        r.atsScore !== 0 &&
+        (minScore == null || r.atsScore === null || r.atsScore >= minScore) &&
+        (!settings.postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), withinDays)) &&
+        (!settings.hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
+        matchesLocationFilter(r, profile) &&
+        matchesExperienceFilter(r, profile) &&
+        matchesExcludeKeywordsFilter(r, excludeKeywords),
+    );
+  }, [allRoles, settings, profile, company.id]);
 
   const visible = useMemo(() => {
+    if (!filtered) return [];
     const q = search.trim().toLowerCase();
-    const matches = roles.filter((r) => !q || r.title.toLowerCase().includes(q));
     // Selected roles stay pinned at the top, whatever the search says.
-    const pinned = roles.filter((r) => selected.includes(r.id));
-    return [...pinned, ...matches.filter((r) => !selected.includes(r.id)).slice(0, 50)];
-  }, [roles, search, selected]);
+    const pinned = filtered.filter((r) => selected.includes(r.id));
+    const rest = filtered.filter((r) => !selected.includes(r.id) && (!q || r.title.toLowerCase().includes(q)));
+    return [...pinned, ...rest.slice(0, MAX_LISTED_ROLES)];
+  }, [filtered, search, selected]);
+
+  const chosen = (filtered ?? []).filter((r) => selected.includes(r.id));
 
   const start = useMutation({
-    mutationFn: () => api.startReferral(contact.id, tone, selected),
+    mutationFn: () =>
+      api.startReferral(
+        contact.id,
+        tone,
+        channel,
+        chosen.map((r) => r.id),
+      ),
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['company-contacts', company.id] });
@@ -357,101 +424,213 @@ function ReferralDialog({
         <div className="flex items-center justify-between border-b p-3">
           <h2 className="text-sm font-medium">
             Referral message for {contact.name} at {company.name}
+            <span className="ml-2 text-xs opacity-60">Step {step === 'roles' ? 1 : 2} of 2</span>
           </h2>
           <button className="px-2 py-1 text-xs rounded border" onClick={onClose}>
             Close
           </button>
         </div>
 
-        <div className="p-4 flex flex-col gap-4 overflow-y-auto">
-          <div className="flex flex-col gap-1.5">
-            <div className="text-xs font-medium uppercase opacity-60">How do you know {contact.name.split(' ')[0]}?</div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {TONES.map((t) => (
-                <label
-                  key={t.value}
-                  className={`border rounded px-2 py-1.5 text-sm cursor-pointer ${
-                    tone === t.value ? 'border-black dark:border-white' : 'opacity-70'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="tone"
-                    className="mr-1.5"
-                    checked={tone === t.value}
-                    onChange={() => setTone(t.value)}
-                  />
-                  {t.label}
-                  <div className="text-xs opacity-60">{t.hint}</div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-medium uppercase opacity-60">
-                Roles to link (pick up to {MAX_ROLES}) — {selected.length} selected
+        {step === 'roles' ? (
+          <>
+            <div className="p-4 flex flex-col gap-2 overflow-y-auto">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium uppercase opacity-60">
+                  Pick the roles to link (up to {MAX_ROLES}) — {chosen.length} selected
+                </div>
+                <input
+                  className="border rounded px-2 py-1 text-xs bg-transparent"
+                  placeholder="Search roles..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
               </div>
-              <input
-                className="border rounded px-2 py-1 text-xs bg-transparent"
-                placeholder="Search roles..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <div className="border rounded max-h-64 overflow-y-auto divide-y">
-              {visible.map((r) => {
-                const checked = selected.includes(r.id);
-                return (
-                  <label
+              <div className="border rounded max-h-96 overflow-y-auto divide-y">
+                {filtered === null && <p className="text-xs opacity-60 p-3">Loading roles...</p>}
+                {visible.map((r) => (
+                  <RolePickRow
                     key={r.id}
-                    className={`flex items-start gap-2 px-2 py-1.5 text-sm cursor-pointer ${
-                      !checked && selected.length >= MAX_ROLES ? 'opacity-40' : ''
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={checked}
-                      disabled={!checked && selected.length >= MAX_ROLES}
-                      onChange={() => toggle(r.id)}
-                    />
-                    <span className="flex-1 min-w-0">
-                      <span className="block truncate">{r.title}</span>
-                      <span className="block text-xs opacity-60">
-                        {r.postedDate ? `Posted ${new Date(r.postedDate).toLocaleDateString()}` : 'No posting date'}
-                        {r.atsScore !== null && ` · ATS ${r.atsScore}%`}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
-              {visible.length === 0 && (
-                <p className="text-xs opacity-60 p-3">
-                  {roles.length === 0 ? `No open roles found for ${company.name} yet — run a scan first.` : 'No roles match.'}
+                    role={r}
+                    checked={selected.includes(r.id)}
+                    disabled={!selected.includes(r.id) && selected.length >= MAX_ROLES}
+                    onToggle={() => toggle(r.id)}
+                    onScore={() => rescore.mutate(r.id)}
+                    scoring={rescore.isPending && rescore.variables === r.id}
+                    onDiscard={() => discard.mutate(r.id)}
+                    discarding={discard.isPending && discard.variables === r.id}
+                  />
+                ))}
+                {filtered !== null && visible.length === 0 && (
+                  <p className="text-xs opacity-60 p-3">
+                    {filtered.length === 0
+                      ? `No open roles for ${company.name} pass your current filters — run a scan or loosen the filters on the Applications page.`
+                      : 'No roles match.'}
+                  </p>
+                )}
+              </div>
+              {(rescore.error || discard.error) && (
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  {(rescore.error ?? discard.error)?.message}
                 </p>
               )}
+              <p className="text-xs opacity-60">
+                Same filters as the Applications page. Unscored roles can be scored here; discard removes a role
+                you don&apos;t want.
+              </p>
             </div>
-          </div>
+            <div className="border-t p-3 flex items-center gap-2">
+              <button
+                className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black"
+                onClick={() => setStep('details')}
+                disabled={chosen.length === 0}
+              >
+                Next
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-4 flex flex-col gap-4 overflow-y-auto">
+              <div className="flex flex-col gap-1.5">
+                <div className="text-xs font-medium uppercase opacity-60">Where will you send it?</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {CHANNELS.map((c) => (
+                    <label
+                      key={c.value}
+                      className={`border rounded px-2 py-1.5 text-sm cursor-pointer ${
+                        channel === c.value ? 'border-black dark:border-white' : 'opacity-70'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="channel"
+                        className="mr-1.5"
+                        checked={channel === c.value}
+                        onChange={() => setChannel(c.value)}
+                      />
+                      {c.label}
+                      {!contact[c.needs] && <div className="text-xs opacity-60">{c.missing}</div>}
+                    </label>
+                  ))}
+                </div>
+              </div>
 
-          <p className="text-xs opacity-60">
-            One resume will be generated to cover every selected role and checked against each job description
-            for a 90% ATS match. If that isn&apos;t reachable you&apos;ll be told which role falls short. Progress
-            shows in the chat panel.
-          </p>
+              <div className="flex flex-col gap-1.5">
+                <div className="text-xs font-medium uppercase opacity-60">
+                  How do you know {contact.name.split(' ')[0]}?
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {TONES.map((t) => (
+                    <label
+                      key={t.value}
+                      className={`border rounded px-2 py-1.5 text-sm cursor-pointer ${
+                        tone === t.value ? 'border-black dark:border-white' : 'opacity-70'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="tone"
+                        className="mr-1.5"
+                        checked={tone === t.value}
+                        onChange={() => setTone(t.value)}
+                      />
+                      {t.label}
+                      <div className="text-xs opacity-60">{t.hint}</div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium uppercase opacity-60">Linking {chosen.length} role(s)</div>
+                <ul className="text-sm list-disc pl-5">
+                  {chosen.map((r) => (
+                    <li key={r.id}>{r.title}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <p className="text-xs opacity-60">
+                One resume will be generated to cover every selected role and checked against each job description
+                for a 90% ATS match. If that isn&apos;t reachable you&apos;ll be told which roles fall short.
+                Progress shows in the chat panel.
+              </p>
+            </div>
+            <div className="border-t p-3 flex items-center gap-2">
+              <button className="px-3 py-1.5 text-sm rounded border" onClick={() => setStep('roles')}>
+                Back
+              </button>
+              <button
+                className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black"
+                onClick={() => start.mutate()}
+                disabled={start.isPending || chosen.length === 0}
+              >
+                {start.isPending ? 'Starting...' : 'Generate referral message'}
+              </button>
+              {start.error && <span className="text-xs text-red-600 dark:text-red-400">{start.error.message}</span>}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RolePickRow({
+  role,
+  checked,
+  disabled,
+  onToggle,
+  onScore,
+  scoring,
+  onDiscard,
+  discarding,
+}: {
+  role: DiscoveredRole;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  onScore: () => void;
+  scoring: boolean;
+  onDiscard: () => void;
+  discarding: boolean;
+}) {
+  const location = [role.roleCity, role.roleState, role.roleCountry].filter(Boolean).join(', ');
+  const scoreColor =
+    role.atsScore === null
+      ? ''
+      : role.atsScore >= 75
+        ? 'text-green-600'
+        : role.atsScore >= 50
+          ? 'text-amber-600'
+          : 'text-red-600';
+  return (
+    <div className={`flex items-start gap-2 px-2 py-1.5 text-sm ${disabled ? 'opacity-40' : ''}`}>
+      <input type="checkbox" className="mt-1" checked={checked} disabled={disabled} onChange={onToggle} />
+      <div className="flex-1 min-w-0">
+        <div className="truncate">{role.title}</div>
+        <div className="text-xs opacity-60">
+          {role.applicationId ? 'In Applications · ' : ''}
+          {role.postedDate ? `Posted ${new Date(role.postedDate).toLocaleDateString()}` : 'No posting date'}
+          {role.roleIsRemote ? ' · Remote' : ''}
+          {location && ` · ${location}`}
         </div>
-
-        <div className="border-t p-3 flex items-center gap-2">
-          <button
-            className="px-3 py-1.5 text-sm rounded bg-black text-white dark:bg-white dark:text-black"
-            onClick={() => start.mutate()}
-            disabled={start.isPending || selected.length === 0}
-          >
-            {start.isPending ? 'Starting...' : 'Generate referral message'}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {role.atsScore !== null ? (
+          <span className={`text-xs font-medium ${scoreColor}`}>{role.atsScore}% match</span>
+        ) : (
+          <button className="px-2 py-0.5 text-xs rounded border" onClick={onScore} disabled={scoring}>
+            {scoring ? 'Scoring...' : 'Score'}
           </button>
-          {start.error && <span className="text-xs text-red-600 dark:text-red-400">{start.error.message}</span>}
-        </div>
+        )}
+        <button
+          className="px-2 py-0.5 text-xs rounded border text-red-600 dark:text-red-400"
+          onClick={onDiscard}
+          disabled={discarding}
+        >
+          {discarding ? '...' : 'Discard'}
+        </button>
       </div>
     </div>
   );

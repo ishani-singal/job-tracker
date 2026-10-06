@@ -9,7 +9,7 @@ import os
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from .agent import ReferralResult, RoleInput, Tone, run_referral
+from .agent import Channel, ReferralResult, RoleInput, Tone, run_referral
 
 router = APIRouter(prefix="/referral", tags=["referral"])
 
@@ -21,11 +21,12 @@ class RunReferralRequest(BaseModel):
     company: str
     contact_name: str
     tone: Tone
+    channel: Channel
     roles: list[RoleInput]
 
 
 @router.post("/run", response_model=ReferralResult)
 async def run_referral_endpoint(body: RunReferralRequest) -> ReferralResult:
     return await run_referral(
-        body.session_id, API_BASE_URL, body.company, body.contact_name, body.tone, body.roles
+        body.session_id, API_BASE_URL, body.company, body.contact_name, body.tone, body.channel, body.roles
     )

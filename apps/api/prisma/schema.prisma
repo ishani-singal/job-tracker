@@ -494,6 +494,7 @@ model GenerationSession {
   entryId       String?
   contactId       String?
   referralTone    String?
+  referralChannel String?
   referralRoleIds String[]                @default([])
   status        GenerationSessionStatus @default(RUNNING)
   errorMessage  String?
@@ -646,6 +647,8 @@ model ReferralRequest {
   contactId     String
   contact       CompanyContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
   tone          String
+  // linkedin | whatsapp | text | email — what the message was written for.
+  channel       String?
   // [{ id, title, url }] of the roles the message links to.
   roles         Json
   message       String
