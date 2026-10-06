@@ -6,6 +6,9 @@ import { api } from '@/lib/api';
 import { AddApplicationDialog } from '@/components/add-application-dialog';
 import { ApplicationRow } from '@/components/application-row';
 import {
+  EXPERIENCE_FILTER_KEY,
+  LOCATION_FILTER_KEY,
+  usePersistedToggle,
   effectivePostedDate,
   hasInvalidCondition,
   isBeforeCutoff,
@@ -53,8 +56,8 @@ function RoleExperience({ role }: { role: DiscoveredRole }) {
 
 export default function ApplicationsPage() {
   const queryClient = useQueryClient();
-  const [locationFilterOn, setLocationFilterOn] = useState(true);
-  const [experienceFilterOn, setExperienceFilterOn] = useState(true);
+  const [locationFilterOn, setLocationFilterOn] = usePersistedToggle(LOCATION_FILTER_KEY, true);
+  const [experienceFilterOn, setExperienceFilterOn] = usePersistedToggle(EXPERIENCE_FILTER_KEY, true);
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
   // Both filters below are persisted server-side (AppSettings) so they
   // survive a page reload — initialized from settings once loaded, then

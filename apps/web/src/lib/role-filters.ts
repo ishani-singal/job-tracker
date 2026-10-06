@@ -1,4 +1,32 @@
+import { useEffect, useState } from 'react';
 import type { DiscoveredRole, ResumeProfile } from '@job-tracker/shared-types';
+
+/** Page-local filter toggles (location / experience) aren't saved server-side;
+ * persisting them in localStorage lets the referral picker mirror whatever
+ * the Applications page currently has switched on. */
+export const LOCATION_FILTER_KEY = 'roleFilter.location';
+export const EXPERIENCE_FILTER_KEY = 'roleFilter.experience';
+
+export function usePersistedToggle(key: string, initial: boolean): [boolean, (value: boolean) => void] {
+  const [value, setValue] = useState(initial);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored !== null) setValue(stored === '1');
+    } catch {
+      /* storage unavailable — keep the default */
+    }
+  }, [key]);
+  const set = (next: boolean) => {
+    setValue(next);
+    try {
+      localStorage.setItem(key, next ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  };
+  return [value, set];
+}
 
 // Open-roles filter rules, shared by the Applications page and the referral
 // role picker so both show the same list.

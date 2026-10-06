@@ -5,6 +5,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 import {
+  EXPERIENCE_FILTER_KEY,
+  LOCATION_FILTER_KEY,
+  usePersistedToggle,
   effectivePostedDate,
   hasInvalidCondition,
   isBeforeCutoff,
@@ -24,7 +27,6 @@ import type {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 const MAX_ROLES = 7;
 const FINAL_ROLES = 5;
-const MAX_LISTED_ROLES = 100;
 const TONES: { value: ReferralTone; label: string; hint: string }[] = [
   { value: 'friend', label: 'Friend', hint: 'Warm and casual' },
   { value: 'colleague', label: 'Colleague', hint: 'Friendly but professional' },
@@ -351,6 +353,9 @@ function ReferralDialog({
   );
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
+  // Same location/experience toggles the Applications page has on.
+  const [locationFilterOn] = usePersistedToggle(LOCATION_FILTER_KEY, true);
+  const [experienceFilterOn] = usePersistedToggle(EXPERIENCE_FILTER_KEY, true);
 
   const { data: allRoles } = useQuery({
     queryKey: ['discovered-roles', 'all'],
@@ -369,9 +374,10 @@ function ReferralDialog({
     },
   });
 
-  // The same list the Applications page shows under its current filters
-  // (selected and unselected roles alike); a discarded role scores 0 and is
-  // always dropped, whichever filters are on.
+  // The same lists the Applications page shows under its current filters:
+  // open (unselected) roles go through every filter; roles already in
+  // Applications only through the posted-date filter, as there. A discarded
+  // role scores 0 and is always dropped, whichever filters are on.
   const filtered = useMemo(() => {
     if (!allRoles || !settings || !profile) return null;
     const excludeKeywords = settings.excludeKeywordsFilter
@@ -380,18 +386,20 @@ function ReferralDialog({
       .filter(Boolean);
     const minScore = settings.minMatchScoreFilter;
     const withinDays = Math.max(0, settings.postedWithinDaysFilter);
-    return allRoles.filter(
-      (r) =>
-        r.companyId === company.id &&
-        r.atsScore !== 0 &&
+    return allRoles.filter((r) => {
+      if (r.companyId !== company.id || r.atsScore === 0) return false;
+      const dateOk = !settings.postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), withinDays);
+      if (r.applicationId) return dateOk;
+      return (
+        dateOk &&
         (minScore == null || r.atsScore === null || r.atsScore >= minScore) &&
-        (!settings.postedBeforeTodayFilterOn || !isBeforeCutoff(effectivePostedDate(r), withinDays)) &&
         (!settings.hideInvalidConditionRolesFilterOn || !hasInvalidCondition(r, profile)) &&
-        matchesLocationFilter(r, profile) &&
-        matchesExperienceFilter(r, profile) &&
-        matchesExcludeKeywordsFilter(r, excludeKeywords),
-    );
-  }, [allRoles, settings, profile, company.id]);
+        (!locationFilterOn || matchesLocationFilter(r, profile)) &&
+        (!experienceFilterOn || matchesExperienceFilter(r, profile)) &&
+        matchesExcludeKeywordsFilter(r, excludeKeywords)
+      );
+    });
+  }, [allRoles, settings, profile, company.id, locationFilterOn, experienceFilterOn]);
 
   const visible = useMemo(() => {
     if (!filtered) return [];
@@ -399,7 +407,7 @@ function ReferralDialog({
     // Selected roles stay pinned at the top, whatever the search says.
     const pinned = filtered.filter((r) => selected.includes(r.id));
     const rest = filtered.filter((r) => !selected.includes(r.id) && (!q || r.title.toLowerCase().includes(q)));
-    return [...pinned, ...rest.slice(0, MAX_LISTED_ROLES)];
+    return [...pinned, ...rest];
   }, [filtered, search, selected]);
 
   const chosen = (filtered ?? []).filter((r) => selected.includes(r.id));
