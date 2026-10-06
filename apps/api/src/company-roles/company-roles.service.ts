@@ -213,6 +213,13 @@ links, benefits/culture content, and anything that isn't a specific job posting.
 clearly isn't a career/jobs listing page at all, return {"titles": []}.`;
 }
 
+/** On a re-scan, this many consecutive pages containing no role that wasn't
+ * already known ends pagination — the stop for undated boards (e.g. Meta's job
+ * search), where the "reached a known role" rule can't be trusted because
+ * there's no newest-first order to rely on. A first scan has no known roles,
+ * so it never triggers. */
+const KNOWN_PAGE_STREAK_STOP = 3;
+
 /** How a scan's pagination ended — 'no-next-page', 'known-role' (re-scan
  * reached already-captured roles) and 'stale' (reached roles past the age
  * cutoff) are natural stops; the rest mean the board may not have been read
@@ -220,9 +227,11 @@ clearly isn't a career/jobs listing page at all, return {"titles": []}.`;
 type ScanEnd = 'no-next-page' | 'known-role' | 'stale' | 'next-link-repeated' | 'empty-page' | 'error';
 
 interface ScanStats {
-  method: 'links' | 'click-cards';
+  method: 'links' | 'click-cards' | 'api';
   pages: number;
   end: ScanEnd | null;
+  /** Total the job API reported (method 'api' only). */
+  apiTotal?: number;
 }
 
 type ScanConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -236,6 +245,16 @@ function scanConfidence(
   datedRoles: number,
 ): { level: ScanConfidenceLevel; note: string } {
   if (rolesFound === 0) return { level: 'LOW', note: 'No roles were extracted from the career page.' };
+  if (stats.method === 'api') {
+    // A job API lists everything with a total to check against, so it's the
+    // most certain method (it just doesn't carry posting dates).
+    return stats.end === 'no-next-page'
+      ? { level: 'HIGH', note: `Read all ${rolesFound} roles from the board's job API.` }
+      : {
+          level: 'MEDIUM',
+          note: `The board's job API reported ${stats.apiTotal ?? '?'} roles but only ${rolesFound} were read.`,
+        };
+  }
   if (stats.method === 'click-cards') {
     return { level: 'LOW', note: 'Fell back to clicking job cards (capped per scan) — likely incomplete.' };
   }
@@ -620,6 +639,8 @@ export class CompanyRolesService implements OnModuleDestroy {
           // candidate; a genuinely job-less page still correctly returns
           // nothing from the title extraction either way.
           if (pageText.length > 500) {
+            const apiRoles = await this.discoverRolesViaEightfoldApi(url, stats, persistPage);
+            if (apiRoles.length > 0) return { careerPageUrl: url, roles: apiRoles };
             const clickedRoles = await this.discoverRolesByClickingCards(url);
             if (clickedRoles.length > 0) {
               stats.method = 'click-cards';
@@ -678,6 +699,8 @@ export class CompanyRolesService implements OnModuleDestroy {
     let previousUrl = firstPageUrl;
     let pageCount = 1;
     stats.pages = 1;
+    const allKnown = (pageRoles: DiscoveredRoleDto[]) => pageRoles.every((r) => knownRoleUrls.has(r.url));
+    let knownStreak = allKnown(firstPageRoles) ? 1 : 0;
 
     if (hitsKnownRole(firstPageRoles)) {
       stats.end = 'known-role';
@@ -727,6 +750,11 @@ export class CompanyRolesService implements OnModuleDestroy {
         }
         if (pageRoles.every(isStale)) {
           stats.end = 'stale';
+          break;
+        }
+        knownStreak = allKnown(pageRoles) ? knownStreak + 1 : 0;
+        if (knownStreak >= KNOWN_PAGE_STREAK_STOP) {
+          stats.end = 'known-role';
           break;
         }
 
@@ -779,6 +807,8 @@ export class CompanyRolesService implements OnModuleDestroy {
     const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)' });
     const allRoles = [...firstPageRoles];
     stats.pages = 1;
+    const allKnown = (pageRoles: DiscoveredRoleDto[]) => pageRoles.every((r) => knownRoleUrls.has(r.url));
+    let knownStreak = allKnown(firstPageRoles) ? 1 : 0;
 
     if (hitsKnownRole(firstPageRoles)) {
       stats.end = 'known-role';
@@ -856,6 +886,11 @@ export class CompanyRolesService implements OnModuleDestroy {
         }
         if (pageRoles.every(isStale)) {
           stats.end = 'stale';
+          break;
+        }
+        knownStreak = allKnown(pageRoles) ? knownStreak + 1 : 0;
+        if (knownStreak >= KNOWN_PAGE_STREAK_STOP) {
+          stats.end = 'known-role';
           break;
         }
       }
@@ -1384,6 +1419,101 @@ export class CompanyRolesService implements OnModuleDestroy {
     const raw = data.choices[0]?.message?.content ?? '{"titles":[]}';
     const parsed = JSON.parse(raw) as { titles?: string[] };
     return (parsed.titles ?? []).filter((t) => typeof t === 'string' && t.trim());
+  }
+
+  /** Reads a board built on Eightfold (e.g. Netflix) straight from its public
+   * job API, which lists every open role with a real URL — far more complete
+   * than clicking cards one at a time. The board's own origin is found by
+   * loading the listing (these pages redirect client-side); the API's
+   * `domain` parameter is the company's website domain. Returns [] when the
+   * site doesn't expose that API, so callers fall back to other methods. The
+   * API returns 10 roles per request regardless of `num`. */
+  private async discoverRolesViaEightfoldApi(
+    listingUrl: string,
+    stats: ScanStats,
+    persistPage: (pageRoles: DiscoveredRoleDto[]) => Promise<void>,
+  ): Promise<DiscoveredRoleDto[]> {
+    const PAGE_SIZE = 10;
+    const MAX_ROLES = 5000;
+
+    let finalUrl = listingUrl;
+    const browser = await this.getBrowser();
+    const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)' });
+    try {
+      await this.gotoAndSettle(page, listingUrl);
+      finalUrl = page.url();
+    } catch {
+      /* probe the listing URL's own origin below */
+    } finally {
+      await page.close();
+    }
+
+    const registrable = (u: string) =>
+      new URL(u).hostname.replace(/^(www|jobs|careers|explore)\./, '').split('.').slice(-2).join('.');
+    const origins = [...new Set([new URL(finalUrl).origin, new URL(listingUrl).origin])];
+    const domains = [...new Set([registrable(listingUrl), registrable(finalUrl)])];
+
+    type Position = { name?: string; posting_name?: string; location?: string; canonicalPositionUrl?: string; id?: number | string };
+    type ApiPage = { positions?: Position[]; count?: number };
+    const fetchPage = async (origin: string, domain: string, start: number): Promise<ApiPage | null> => {
+      try {
+        const res = await fetch(
+          `${origin}/api/apply/v2/jobs?domain=${encodeURIComponent(domain)}&start=${start}&num=${PAGE_SIZE}`,
+          {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; job-tracker/0.1)' },
+            signal: AbortSignal.any([this.killSwitch.signal, AbortSignal.timeout(30_000)]),
+          },
+        );
+        if (!res.ok) return null;
+        return (await res.json()) as ApiPage;
+      } catch {
+        return null;
+      }
+    };
+
+    let found: { origin: string; domain: string; first: ApiPage } | null = null;
+    for (const origin of origins) {
+      for (const domain of domains) {
+        const first = await fetchPage(origin, domain, 0);
+        if (first && Array.isArray(first.positions) && typeof first.count === 'number' && first.count > 0) {
+          found = { origin, domain, first };
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (!found) return [];
+
+    const total = Math.min(found.first.count!, MAX_ROLES);
+    const roles: DiscoveredRoleDto[] = [];
+    const toRoles = (positions: Position[]): DiscoveredRoleDto[] =>
+      positions.flatMap((p) => {
+        const name = (p.posting_name || p.name || '').trim();
+        const url = p.canonicalPositionUrl || (p.id ? `${found!.origin}/careers/job/${p.id}` : '');
+        if (!name || !url) return [];
+        const location = p.location?.trim();
+        return [{ title: location ? `${name} — ${location}` : name, url }];
+      });
+
+    let failed = false;
+    for (let start = 0; start < total; start += PAGE_SIZE) {
+      const data = start === 0 ? found.first : await fetchPage(found.origin, found.domain, start);
+      if (!data?.positions) {
+        failed = true;
+        break;
+      }
+      if (data.positions.length === 0) break;
+      const pageRoles = toRoles(data.positions);
+      roles.push(...pageRoles);
+      await persistPage(pageRoles);
+      stats.pages = Math.floor(start / PAGE_SIZE) + 1;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    stats.method = 'api';
+    stats.apiTotal = found.first.count;
+    stats.end = failed || roles.length < total ? 'error' : 'no-next-page';
+    return roles;
   }
 
   /** Last-resort role discovery for boards with real job listings but zero
