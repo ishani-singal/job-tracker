@@ -20,7 +20,7 @@ type ChatUsage = Parameters<LlmCallsService['recordAzureUsage']>[2];
  * stale postings clutter the candidate pool and are usually already filled
  * or about to be. Undated roles (no postedDate could be extracted) are kept
  * since we can't tell either way. */
-const MAX_ROLE_AGE_DAYS = 30;
+const MAX_ROLE_AGE_DAYS = 15;
 
 /** Some career pages (e.g. Netflix's Eightfold-powered board) render a large
  * JSON app-state/theming blob as literal visible body text — real prose, not
@@ -190,7 +190,9 @@ the list, omit the role entirely rather than inventing one. If no links list is 
 a relative link against the page's own URL, and still omit the role if you cannot find a real
 URL for it), postedDate (ISO date string YYYY-MM-DD, or null — resolve relative phrasing like
 "Posted 3 days ago" or "2 weeks ago" against today's date; only null if there's truly no recency
-signal for that role). Only include actual open roles — skip navigation links, footer text, "view
+signal for that role), location (string, or null — the city/state/country or "Remote" shown for
+that role on the listing, copied as shown, e.g. "Seattle, WA"; if a role lists several locations
+keep them all in one string; null if the listing shows none for it). Only include actual open roles — skip navigation links, footer text, "view
 all jobs" links, benefits/culture content, and anything that isn't a specific job posting.
 nextPageUrl: the FULL absolute URL of a "Next page"/"Next"/pagination-forward link if this
 listing spans multiple pages and one is present (prefer picking it from the links list too, by
@@ -215,6 +217,8 @@ export interface DiscoveredRoleDto {
   title: string;
   url: string;
   postedDate?: string;
+  /** Listing's location text; folded into `title` at extraction time. */
+  location?: string | null;
 }
 
 @Injectable()
@@ -1196,7 +1200,15 @@ export class CompanyRolesService implements OnModuleDestroy {
     const knownHrefs = links.length > 0 ? new Set(links.map((l) => l.href)) : null;
 
     return {
-      roles: (parsed.roles ?? []).filter((r) => r.title && r.url && (!knownHrefs || knownHrefs.has(r.url))),
+      roles: (parsed.roles ?? [])
+        .filter((r) => r.title && r.url && (!knownHrefs || knownHrefs.has(r.url)))
+        .map(({ location, ...r }) => {
+          // Postings of one title are posted per location/team, so the
+          // location is what tells them apart in the open-roles list.
+          const loc = location?.trim();
+          const title = loc && !r.title.toLowerCase().includes(loc.toLowerCase()) ? `${r.title} — ${loc}` : r.title;
+          return { ...r, title };
+        }),
       nextPageUrl: parsed.nextPageUrl ?? undefined,
     };
   }
