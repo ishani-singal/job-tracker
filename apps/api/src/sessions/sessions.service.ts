@@ -5,6 +5,7 @@ import { GenerationSessionScope, MessageRole, Prisma, StoryEntryType } from '@pr
 import type { StructuredResume } from '@job-tracker/shared-types';
 import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service';
 import { StoriesService, sanitizeDocumentHtml } from '../stories/stories.service';
+import { CompanyRolesService } from '../company-roles/company-roles.service';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
@@ -103,6 +104,14 @@ interface EntryDocumentRunTurnResponse {
   question: string | null;
 }
 
+interface ReferralRunResponse {
+  message: string;
+  resume: StructuredResume;
+  scores: { role_id: string; title: string; score: number; missing: string[] }[];
+  target_met: boolean;
+  note: string | null;
+}
+
 /** ENTRY_DOCUMENT sessions have no real PydanticAI message history (the
  * agent side is a plain two-call orchestration, not a conversational
  * agent run — see agent/resu/stories/agent.py's run_entry_document_turn) —
@@ -133,6 +142,7 @@ export class SessionsService {
     private readonly prisma: PrismaService,
     private readonly killSwitch: LlmKillSwitchService,
     private readonly stories: StoriesService,
+    private readonly companyRoles: CompanyRolesService,
   ) {}
 
   /** Combines the manual global kill-switch signal, a per-session abort
@@ -237,6 +247,28 @@ export class SessionsService {
       data: { scope, applicationId, company, entryType, entryId, status: 'RUNNING' },
     });
     this.runTurnInBackground(session, null, null, entryLabel);
+    return session;
+  }
+
+  /** Starts an unattended REFERRAL session (see runReferralTurn) — the chat
+   * shows its steps live; the result is saved as a ReferralRequest on finish. */
+  async startReferral(contactId: string, tone: string, roleIds: string[]) {
+    const contact = await this.prisma.companyContact.findUnique({
+      where: { id: contactId },
+      include: { company: true },
+    });
+    if (!contact) throw new NotFoundException(`Contact ${contactId} not found`);
+    const session = await this.prisma.generationSession.create({
+      data: {
+        scope: 'REFERRAL',
+        company: contact.company.name,
+        contactId,
+        referralTone: tone,
+        referralRoleIds: roleIds,
+        status: 'RUNNING',
+      },
+    });
+    this.runTurnInBackground(session, null, null);
     return session;
   }
 
@@ -374,6 +406,9 @@ export class SessionsService {
       company: string | null;
       entryType: StoryEntryType | null;
       entryId: string | null;
+      contactId?: string | null;
+      referralTone?: string | null;
+      referralRoleIds?: string[];
     },
     priorHistoryJson: string | null,
     userReply: string | null,
@@ -382,6 +417,8 @@ export class SessionsService {
     try {
       if (session.scope === 'LINKEDIN') {
         await this.runLinkedinTurn(session.id, priorHistoryJson, userReply);
+      } else if (session.scope === 'REFERRAL') {
+        await this.runReferralTurn(session.id, session.contactId!, session.referralTone!, session.referralRoleIds ?? []);
       } else if (session.scope === 'COMPANY') {
         await this.runCompanyTurn(session.id, session.company!, priorHistoryJson, userReply);
       } else if (session.scope === 'ENTRY_DOCUMENT') {
@@ -563,6 +600,89 @@ export class SessionsService {
         messageHistoryJson: JSON.stringify(nextState),
       },
     });
+  }
+
+  /**
+   * REFERRAL scope: runs unattended start to finish. Fetches any missing JDs
+   * (progress lines go to the chat), then the agent builds one resume for all
+   * the selected roles, ATS-checks it against each JD (revising up to twice
+   * toward 90%), and drafts the message. The result is saved as a
+   * ReferralRequest and the session goes straight to ACCEPTED — there's
+   * nothing to review-then-accept, and the user can simply run it again.
+   */
+  private async runReferralTurn(sessionId: string, contactId: string, tone: string, roleIds: string[]) {
+    const contact = await this.prisma.companyContact.findUnique({
+      where: { id: contactId },
+      include: { company: true },
+    });
+    if (!contact) throw new Error('Contact no longer exists');
+
+    await this.progress(sessionId, `Referral for ${contact.name} at ${contact.company.name} — ${tone} tone, ${roleIds.length} role(s)`);
+
+    const roles: { id: string; title: string; url: string; jd_text: string }[] = [];
+    for (const roleId of roleIds) {
+      const role = await this.prisma.discoveredRole.findUnique({ where: { id: roleId } });
+      if (!role) continue;
+      if (!role.jdText) await this.progress(sessionId, `Fetching job description for ${role.title}...`);
+      const jdText = await this.companyRoles.ensureRoleJd(roleId);
+      if (!jdText) {
+        await this.progress(sessionId, `Couldn't read a job description for ${role.title} — leaving it out`);
+        continue;
+      }
+      roles.push({ id: role.id, title: role.title, url: role.roleUrl, jd_text: jdText });
+    }
+    if (roles.length === 0) throw new Error('None of the selected roles had a readable job description');
+
+    const response = await undiciFetch(`${AGENT_SERVICE_URL}/referral/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        company: contact.company.name,
+        contact_name: contact.name,
+        tone,
+        roles,
+      }),
+      signal: this.agentCallSignal(sessionId, 20 * 60 * 1000),
+      dispatcher: agentDispatcher,
+    });
+    if (!response.ok) throw new Error(`Agent referral run failed: ${response.status} ${await response.text()}`);
+    const result = (await response.json()) as ReferralRunResponse;
+
+    const rolesJson = roles.map((r) => ({ id: r.id, title: r.title, url: r.url }));
+    const scores = result.scores.map((s) => ({
+      roleId: s.role_id,
+      title: s.title,
+      score: s.score,
+      missing: s.missing,
+    }));
+    const referral = await this.prisma.referralRequest.create({
+      data: {
+        contactId,
+        tone,
+        roles: rolesJson,
+        message: result.message,
+        resumeContent: result.resume as unknown as Prisma.InputJsonValue,
+        scores,
+        targetMet: result.target_met,
+        note: result.note,
+      },
+    });
+
+    await this.prisma.sessionMessage.create({
+      data: {
+        sessionId,
+        role: MessageRole.ASSISTANT,
+        content: JSON.stringify({
+          referralId: referral.id,
+          message: result.message,
+          scores,
+          targetMet: result.target_met,
+          note: result.note,
+        }),
+      },
+    });
+    await this.prisma.generationSession.update({ where: { id: sessionId }, data: { status: 'ACCEPTED' } });
   }
 
   private async runLinkedinTurn(

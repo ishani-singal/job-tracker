@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
-import type { TrackedCompany } from '@job-tracker/shared-types';
+import { ContactsSection } from '@/components/company-contacts';
+import type { ScanConfidence, TrackedCompany } from '@job-tracker/shared-types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 
@@ -56,7 +57,7 @@ export default function CompanyResumesPage() {
   });
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col gap-4">
+    <div className="w-full flex flex-col gap-4">
       <div>
         <h1 className="text-xl font-semibold">Companies</h1>
         <p className="text-sm opacity-60">
@@ -151,6 +152,7 @@ function CompanyCard({
   const queryClient = useQueryClient();
   const { openPanel } = useSessionsPanel();
   const [editingUrl, setEditingUrl] = useState(false);
+  const [contactsOpen, setContactsOpen] = useState(false);
   const [urlDraft, setUrlDraft] = useState(company.careerPageUrl ?? '');
 
   const { data: resume } = useQuery({
@@ -190,7 +192,7 @@ function CompanyCard({
 
   return (
     <div className="border rounded">
-      <div className="flex items-center justify-between px-4 py-3 gap-3">
+      <div className="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
         <div className="flex-1 min-w-0">
           <button
             className="block w-full text-left"
@@ -198,11 +200,28 @@ function CompanyCard({
             disabled={!company.hasResume}
           >
             <div className="font-medium text-sm hover:underline truncate">{company.name}</div>
-            <div className="flex items-center gap-2 text-xs opacity-60 mt-0.5">
+            <div className="flex items-center gap-2 text-xs opacity-60 mt-0.5 flex-wrap">
               <StatusBadge status={company.discoveryStatus} />
               <span>{company._count?.roles ?? 0} open roles found</span>
             </div>
           </button>
+          <div className="flex items-center gap-2 text-xs mt-0.5 flex-wrap">
+            <span className="opacity-60">
+              Last scan:{' '}
+              {company.lastDiscoveredAt
+                ? new Date(company.lastDiscoveredAt).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })
+                : 'never'}
+            </span>
+            {company.lastScanConfidence && (
+              <ConfidenceBadge level={company.lastScanConfidence} note={company.lastScanConfidenceNote} />
+            )}
+          </div>
           {company.careerPageUrl && (
             <a
               href={company.careerPageUrl}
@@ -243,6 +262,9 @@ function CompanyCard({
               </a>
             </>
           )}
+          <button className="px-2 py-1 text-xs rounded border" onClick={() => setContactsOpen((v) => !v)}>
+            Contacts ({company._count?.contacts ?? 0})
+          </button>
           <button
             className="px-2 py-1 text-xs rounded border"
             onClick={() => rediscover.mutate(company.id)}
@@ -294,10 +316,24 @@ function CompanyCard({
           </button>
         </div>
       )}
+      {contactsOpen && <ContactsSection company={company} />}
       {expanded && resume && (
         <pre className="text-sm whitespace-pre-wrap border-t p-3">{resume.resumeContent}</pre>
       )}
     </div>
+  );
+}
+
+function ConfidenceBadge({ level, note }: { level: ScanConfidence; note: string | null }) {
+  const colors: Record<ScanConfidence, string> = {
+    HIGH: 'text-green-600',
+    MEDIUM: 'text-amber-600',
+    LOW: 'text-red-600',
+  };
+  return (
+    <span className={`${colors[level]} cursor-help`} title={note ?? undefined}>
+      Confidence: {level.toLowerCase()}
+    </span>
   );
 }
 

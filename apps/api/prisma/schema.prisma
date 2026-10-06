@@ -63,8 +63,13 @@ model TrackedCompany {
   discoveryStatus   CompanyDiscoveryStatus @default(PENDING)
   discoveryError    String?
   lastDiscoveredAt  DateTime?
+  // How trustworthy the last successful scan's coverage is: HIGH | MEDIUM | LOW,
+  // plus a one-line reason (see scanConfidence in company-roles.service.ts).
+  lastScanConfidence     String?
+  lastScanConfidenceNote String?
 
-  roles DiscoveredRole[]
+  roles    DiscoveredRole[]
+  contacts CompanyContact[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -459,6 +464,7 @@ enum GenerationSessionScope {
   LINKEDIN
   COMPANY
   ENTRY_DOCUMENT
+  REFERRAL
 }
 
 enum MessageRole {
@@ -476,6 +482,9 @@ enum MessageRole {
 // LINKEDIN       -> all null (whole-candidate scope)
 // COMPANY        -> company required, applicationId/entryType/entryId null
 // ENTRY_DOCUMENT -> entryType+entryId required, applicationId/company null
+// REFERRAL       -> contactId + referralTone + referralRoleIds required, company = the
+//                   contact's company name (label only); runs unattended and saves a
+//                   ReferralRequest itself on completion (no Accept step)
 model GenerationSession {
   id            String                  @id @default(cuid())
   scope         GenerationSessionScope  @default(APPLICATION)
@@ -483,6 +492,9 @@ model GenerationSession {
   company       String?
   entryType     StoryEntryType?
   entryId       String?
+  contactId       String?
+  referralTone    String?
+  referralRoleIds String[]                @default([])
   status        GenerationSessionStatus @default(RUNNING)
   errorMessage  String?
   // Opaque PydanticAI message-history JSON blob (from AgentRunResult.all_messages(),
@@ -605,4 +617,45 @@ model LinkedinMessageThread {
 
   @@index([importId])
   @@index([conversationId])
+}
+
+// Someone the user knows at a tracked company, who can be asked for a referral.
+model CompanyContact {
+  id          String         @id @default(cuid())
+  companyId   String
+  company     TrackedCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  linkedinUrl String?
+  email       String?
+  phone       String?
+
+  referrals ReferralRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+// One generated referral ask for a contact: the message, the single resume
+// written to cover every selected role, and how that resume scored against each
+// role's JD. targetMet=false means the 90% ATS target wasn't reachable for at
+// least one JD (note says which and why).
+model ReferralRequest {
+  id            String         @id @default(cuid())
+  contactId     String
+  contact       CompanyContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tone          String
+  // [{ id, title, url }] of the roles the message links to.
+  roles         Json
+  message       String
+  resumeContent Json
+  // [{ roleId, title, score, missing: string[] }]
+  scores        Json
+  targetMet     Boolean
+  note          String?
+
+  createdAt DateTime @default(now())
+
+  @@index([contactId])
 }

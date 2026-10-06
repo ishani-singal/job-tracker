@@ -222,9 +222,46 @@ export interface TrackedCompany {
   discoveryStatus: CompanyDiscoveryStatus;
   discoveryError: string | null;
   lastDiscoveredAt: string | null;
+  lastScanConfidence: ScanConfidence | null;
+  lastScanConfidenceNote: string | null;
   createdAt: string;
   updatedAt: string;
-  _count?: { roles: number };
+  _count?: { roles: number; contacts?: number };
+}
+
+export type ScanConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export type ReferralTone = 'friend' | 'colleague' | 'acquaintance' | 'mentor';
+
+export interface ReferralRoleScore {
+  roleId: string;
+  title: string;
+  score: number;
+  missing: string[];
+}
+
+export interface ReferralRequest {
+  id: string;
+  contactId: string;
+  tone: ReferralTone;
+  roles: { id: string; title: string; url: string }[];
+  message: string;
+  scores: ReferralRoleScore[];
+  targetMet: boolean;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface CompanyContact {
+  id: string;
+  companyId: string;
+  name: string;
+  linkedinUrl: string | null;
+  email: string | null;
+  phone: string | null;
+  createdAt: string;
+  updatedAt: string;
+  referrals: ReferralRequest[];
 }
 
 export interface DiscoveredRole {
@@ -257,7 +294,12 @@ export type GenerationSessionStatus =
   | 'ACCEPTED'
   | 'ERROR';
 
-export type GenerationSessionScope = 'APPLICATION' | 'LINKEDIN' | 'COMPANY' | 'ENTRY_DOCUMENT';
+export type GenerationSessionScope =
+  | 'APPLICATION'
+  | 'LINKEDIN'
+  | 'COMPANY'
+  | 'ENTRY_DOCUMENT'
+  | 'REFERRAL';
 
 export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
 

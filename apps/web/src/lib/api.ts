@@ -3,6 +3,7 @@ import type {
   AnalyticsTimeseriesPoint,
   Application,
   AppSettings,
+  CompanyContact,
   CompanyResume,
   DiscoveredRole,
   EducationEntry,
@@ -15,6 +16,7 @@ import type {
   LinkedinProfile,
   ParsedJob,
   ProjectEntry,
+  ReferralTone,
   ResumeProfile,
   ResumeTemplate,
   LlmModelPrice,
@@ -270,6 +272,28 @@ export const api = {
     ),
 
   listTrackedCompanies: () => request<TrackedCompany[]>('/tracked-companies'),
+  listCompanyContacts: (companyId: string) =>
+    request<CompanyContact[]>(`/tracked-companies/${companyId}/contacts`),
+  createCompanyContact: (
+    companyId: string,
+    data: { name: string; linkedinUrl?: string; email?: string; phone?: string },
+  ) =>
+    request<CompanyContact>(`/tracked-companies/${companyId}/contacts`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCompanyContact: (
+    id: string,
+    data: { name?: string; linkedinUrl?: string | null; email?: string | null; phone?: string | null },
+  ) =>
+    request<CompanyContact>(`/company-contacts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteCompanyContact: (id: string) =>
+    request<{ deleted: boolean }>(`/company-contacts/${id}`, { method: 'DELETE' }),
+  startReferral: (contactId: string, tone: ReferralTone, roleIds: string[]) =>
+    request<GenerationSession>(`/company-contacts/${contactId}/referral`, {
+      method: 'POST',
+      body: JSON.stringify({ tone, roleIds }),
+    }),
   addTrackedCompanies: (companies: string) =>
     request<{ created: string[]; skipped: string[] }>('/tracked-companies', {
       method: 'POST',

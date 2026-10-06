@@ -11,6 +11,7 @@ import { SessionsModule } from './sessions/sessions.module';
 import { LocationsModule } from './locations/locations.module';
 import { LinkedinModule } from './linkedin/linkedin.module';
 import { CompanyResumesModule } from './company-resumes/company-resumes.module';
+import { ReferralsModule } from './referrals/referrals.module';
 import { LinkedinDataModule } from './linkedin-data/linkedin-data.module';
 import { CompanyRolesModule } from './company-roles/company-roles.module';
 import { StoriesModule } from './stories/stories.module';
@@ -31,6 +32,7 @@ import { LlmCallsModule } from './llm-calls/llm-calls.module';
     LocationsModule,
     LinkedinModule,
     CompanyResumesModule,
+    ReferralsModule,
     LinkedinDataModule,
     CompanyRolesModule,
     StoriesModule,

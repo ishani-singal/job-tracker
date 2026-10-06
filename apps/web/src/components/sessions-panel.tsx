@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
-import type { Application, GenerationSession } from '@job-tracker/shared-types';
+import { ScoreChips } from '@/components/company-contacts';
+import type { Application, GenerationSession, ReferralRoleScore } from '@job-tracker/shared-types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 
@@ -111,6 +112,7 @@ function sessionLabel(
 ): string {
   if (session.scope === 'LINKEDIN') return 'LinkedIn';
   if (session.scope === 'COMPANY') return session.company ?? 'Company';
+  if (session.scope === 'REFERRAL') return `Referral — ${session.company ?? ''}`;
   if (session.scope === 'ENTRY_DOCUMENT') {
     const typeLabel = session.entryType
       ? session.entryType.toLowerCase().replace(/_/g, ' ')
@@ -284,7 +286,9 @@ function SessionChat({ session }: { session: GenerationSession }) {
             >
               {message.role !== 'ASSISTANT'
                 ? message.content
-                : session.scope === 'LINKEDIN'
+                : session.scope === 'REFERRAL'
+                  ? <ReferralResult content={message.content} />
+                  : session.scope === 'LINKEDIN'
                   ? formatLinkedinMessage(message.content)
                   : session.scope === 'ENTRY_DOCUMENT'
                     ? formatEntryDocumentMessage(message.content)
@@ -338,7 +342,9 @@ function SessionChat({ session }: { session: GenerationSession }) {
 
       {session.status === 'ACCEPTED' && (
         <div className="border-t p-3 text-xs text-center opacity-60">
-          {session.scope === 'LINKEDIN'
+          {session.scope === 'REFERRAL'
+            ? 'Saved to the contact’s referral history on the Company Resumes page.'
+            : session.scope === 'LINKEDIN'
             ? 'Accepted — saved to your LinkedIn profile draft.'
             : session.scope === 'COMPANY'
               ? `Accepted — saved as the common resume for ${session.company}.`
@@ -354,6 +360,57 @@ function SessionChat({ session }: { session: GenerationSession }) {
           onClose={() => setPreviewApplicationId(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** Final message of a REFERRAL session: the drafted message, how the single
+ * resume scored against each role's JD (with a warning if 90% wasn't
+ * reachable), and downloads for that resume. */
+function ReferralResult({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  let parsed: {
+    referralId: string;
+    message: string;
+    scores: ReferralRoleScore[];
+    targetMet: boolean;
+    note: string | null;
+  };
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return <>{content}</>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-xs font-medium uppercase opacity-60">Referral message</div>
+      <div>{parsed.message}</div>
+      <button
+        className="px-2 py-1 text-xs rounded border w-fit"
+        onClick={() => {
+          navigator.clipboard?.writeText(parsed.message).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          });
+        }}
+      >
+        {copied ? 'Copied' : 'Copy message'}
+      </button>
+      <div className="text-xs font-medium uppercase opacity-60 mt-1">ATS match of the attached resume</div>
+      <ScoreChips scores={parsed.scores} />
+      {parsed.targetMet ? (
+        <div className="text-xs text-green-700 dark:text-green-400">Every role is at or above 90%.</div>
+      ) : (
+        <div className="text-xs text-amber-700 dark:text-amber-400">{parsed.note}</div>
+      )}
+      <div className="flex items-center gap-2">
+        <a href={`${API_BASE}/referrals/${parsed.referralId}/resume.pdf`} className="px-2 py-1 text-xs rounded border">
+          Resume PDF
+        </a>
+        <a href={`${API_BASE}/referrals/${parsed.referralId}/resume.docx`} className="px-2 py-1 text-xs rounded border">
+          Resume Word
+        </a>
+      </div>
     </div>
   );
 }

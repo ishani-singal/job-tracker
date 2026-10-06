@@ -213,6 +213,78 @@ links, benefits/culture content, and anything that isn't a specific job posting.
 clearly isn't a career/jobs listing page at all, return {"titles": []}.`;
 }
 
+/** How a scan's pagination ended — 'no-next-page', 'known-role' (re-scan
+ * reached already-captured roles) and 'stale' (reached roles past the age
+ * cutoff) are natural stops; the rest mean the board may not have been read
+ * to its end. */
+type ScanEnd = 'no-next-page' | 'known-role' | 'stale' | 'next-link-repeated' | 'empty-page' | 'error';
+
+interface ScanStats {
+  method: 'links' | 'click-cards';
+  pages: number;
+  end: ScanEnd | null;
+}
+
+type ScanConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';
+
+/** Grades how complete a scan's coverage of the board likely is, from how
+ * pagination ended and how many roles carried a posting date (undated roles
+ * defeat the stale-stop, so a mostly-undated board is less certain). */
+function scanConfidence(
+  stats: ScanStats,
+  rolesFound: number,
+  datedRoles: number,
+): { level: ScanConfidenceLevel; note: string } {
+  if (rolesFound === 0) return { level: 'LOW', note: 'No roles were extracted from the career page.' };
+  if (stats.method === 'click-cards') {
+    return { level: 'LOW', note: 'Fell back to clicking job cards (capped per scan) — likely incomplete.' };
+  }
+
+  let level: ScanConfidenceLevel;
+  let note: string;
+  switch (stats.end) {
+    case 'error':
+      level = stats.pages <= 1 ? 'LOW' : 'MEDIUM';
+      note = `Pagination stopped on an error after ${stats.pages} page${stats.pages === 1 ? '' : 's'}.`;
+      break;
+    case 'empty-page':
+      level = 'MEDIUM';
+      note = `A page came back empty after ${stats.pages} page${stats.pages === 1 ? '' : 's'} — the board may continue.`;
+      break;
+    case 'next-link-repeated':
+      level = 'MEDIUM';
+      note = 'The next-page link pointed back to a page already read, so pagination stopped.';
+      break;
+    case 'no-next-page':
+      if (stats.pages <= 1 && rolesFound >= 10) {
+        level = 'MEDIUM';
+        note = `Only one page was read (${rolesFound} roles) and no next page was found — the board may have more.`;
+      } else {
+        level = 'HIGH';
+        note = `Read to the end of the listing (${stats.pages} page${stats.pages === 1 ? '' : 's'}).`;
+      }
+      break;
+    case 'known-role':
+      level = 'HIGH';
+      note = `Reached roles already captured by an earlier scan (${stats.pages} page${stats.pages === 1 ? '' : 's'}).`;
+      break;
+    case 'stale':
+      level = 'HIGH';
+      note = `Read back to roles older than ${MAX_ROLE_AGE_DAYS} days (${stats.pages} page${stats.pages === 1 ? '' : 's'}).`;
+      break;
+    default:
+      level = 'MEDIUM';
+      note = 'Could not tell how the scan ended.';
+  }
+
+  if (datedRoles / rolesFound < 0.5) {
+    const pct = Math.round((datedRoles / rolesFound) * 100);
+    level = level === 'HIGH' ? 'MEDIUM' : 'LOW';
+    note += ` Only ${pct}% of roles had a posting date.`;
+  }
+  return { level, note };
+}
+
 export interface DiscoveredRoleDto {
   title: string;
   url: string;
@@ -281,7 +353,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     const [companies, resumes] = await Promise.all([
       this.prisma.trackedCompany.findMany({
         orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { roles: true } } },
+        include: { _count: { select: { roles: true, contacts: true } } },
       }),
       this.prisma.companyResume.findMany(),
     ]);
@@ -448,7 +520,15 @@ export class CompanyRolesService implements OnModuleDestroy {
         await this.persistRoles(company.id, pageRoles);
       };
 
-      const { careerPageUrl } = await this.findRolesForCompany(name, seedUrl, knownRoleUrls, persistPage);
+      const stats: ScanStats = { method: 'links', pages: 0, end: null };
+      const { careerPageUrl, roles } = await this.findRolesForCompany(
+        name,
+        seedUrl,
+        knownRoleUrls,
+        persistPage,
+        stats,
+      );
+      const confidence = scanConfidence(stats, roles.length, roles.filter((r) => r.postedDate).length);
 
       await this.prisma.trackedCompany.update({
         where: { id: company.id },
@@ -456,6 +536,8 @@ export class CompanyRolesService implements OnModuleDestroy {
           careerPageUrl,
           discoveryStatus: 'DONE',
           lastDiscoveredAt: new Date(),
+          lastScanConfidence: confidence.level,
+          lastScanConfidenceNote: confidence.note,
         },
       });
 
@@ -509,6 +591,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     seedUrl: string | undefined,
     knownRoleUrls: Set<string>,
     persistPage: (pageRoles: DiscoveredRoleDto[]) => Promise<void>,
+    stats: ScanStats,
   ): Promise<{ careerPageUrl?: string; roles: DiscoveredRoleDto[] }> {
     // A known-good URL (derived from a real job posting, or manually
     // entered) is tried before any guess — it's known to work for this
@@ -539,6 +622,7 @@ export class CompanyRolesService implements OnModuleDestroy {
           if (pageText.length > 500) {
             const clickedRoles = await this.discoverRolesByClickingCards(url);
             if (clickedRoles.length > 0) {
+              stats.method = 'click-cards';
               await persistPage(clickedRoles);
               return { careerPageUrl: url, roles: clickedRoles };
             }
@@ -548,8 +632,8 @@ export class CompanyRolesService implements OnModuleDestroy {
         await persistPage(firstPageRoles);
 
         const roles = nextPageUrl
-          ? await this.paginateRoles(firstPageRoles, nextPageUrl, url, knownRoleUrls, persistPage)
-          : await this.paginateWithClicks(firstPageRoles, url, knownRoleUrls, persistPage);
+          ? await this.paginateRoles(firstPageRoles, nextPageUrl, url, knownRoleUrls, persistPage, stats)
+          : await this.paginateWithClicks(firstPageRoles, url, knownRoleUrls, persistPage, stats);
         return { careerPageUrl: url, roles };
       } catch {
         // Try the next candidate URL — a 404/timeout on one guess is expected.
@@ -573,6 +657,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     firstPageUrl: string,
     knownRoleUrls: Set<string>,
     persistPage: (pageRoles: DiscoveredRoleDto[]) => Promise<void>,
+    stats: ScanStats,
   ): Promise<DiscoveredRoleDto[]> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
@@ -588,37 +673,63 @@ export class CompanyRolesService implements OnModuleDestroy {
     let currentNextUrl = nextPageUrl;
     let previousUrl = firstPageUrl;
     let pageCount = 1;
+    stats.pages = 1;
 
-    if (hitsKnownRole(firstPageRoles)) return allRoles;
+    if (hitsKnownRole(firstPageRoles)) {
+      stats.end = 'known-role';
+      return allRoles;
+    }
 
+    stats.end = 'no-next-page';
     while (currentNextUrl && pageCount < MAX_LISTING_PAGES) {
       // Guard against a broken pagination link that points back to a page
       // we've already fetched (would otherwise loop until the page cap).
-      if (currentNextUrl === previousUrl) break;
+      if (currentNextUrl === previousUrl) {
+        stats.end = 'next-link-repeated';
+        break;
+      }
 
       try {
         const { text: pageText, links } = await this.renderPageText(currentNextUrl, {
           expandShowMoreListing: true,
           includeLinks: true,
         });
-        if (!pageText || pageText.length < 200) break;
+        if (!pageText || pageText.length < 200) {
+          stats.end = 'empty-page';
+          break;
+        }
 
         const { roles: pageRoles, nextPageUrl: followingUrl } = await this.extractRolesWithLlm(
           pageText,
           currentNextUrl,
           links,
         );
-        if (pageRoles.length === 0) break;
+        if (pageRoles.length === 0) {
+          stats.end = 'empty-page';
+          break;
+        }
 
         allRoles.push(...pageRoles);
         await persistPage(pageRoles);
         pageCount += 1;
+        stats.pages = pageCount;
 
-        if (hitsKnownRole(pageRoles) || pageRoles.every(isStale)) break;
+        if (hitsKnownRole(pageRoles)) {
+          stats.end = 'known-role';
+          break;
+        }
+        if (pageRoles.every(isStale)) {
+          stats.end = 'stale';
+          break;
+        }
 
         previousUrl = currentNextUrl;
         currentNextUrl = followingUrl;
+        // Falling out of the loop because there's no further link is the
+        // natural end; reset in case a previous iteration set something else.
+        stats.end = 'no-next-page';
       } catch {
+        stats.end = 'error';
         break;
       }
     }
@@ -641,6 +752,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     url: string,
     knownRoleUrls: Set<string>,
     persistPage: (pageRoles: DiscoveredRoleDto[]) => Promise<void>,
+    stats: ScanStats,
   ): Promise<DiscoveredRoleDto[]> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - MAX_ROLE_AGE_DAYS);
@@ -655,12 +767,17 @@ export class CompanyRolesService implements OnModuleDestroy {
     const browser = await this.getBrowser();
     const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (compatible; job-tracker/0.1)' });
     const allRoles = [...firstPageRoles];
+    stats.pages = 1;
 
     if (hitsKnownRole(firstPageRoles)) {
+      stats.end = 'known-role';
       await page.close();
       return allRoles;
     }
 
+    // Overwritten below if the loop stops for any reason other than the
+    // "next" button being gone/disabled (the natural end).
+    stats.end = 'no-next-page';
     try {
       await this.gotoAndSettle(page, url);
       // This is a fresh page/navigation (separate from the one that found
@@ -708,16 +825,31 @@ export class CompanyRolesService implements OnModuleDestroy {
           .map((l) => ({ ...l, href: this.resolveUrl(l.href, currentUrl) }));
         $('script, style, noscript').remove();
         const pageText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 60000);
-        if (!pageText || pageText.length < 200 || looksLikeJsonDump(pageText)) break;
+        if (!pageText || pageText.length < 200 || looksLikeJsonDump(pageText)) {
+          stats.end = 'empty-page';
+          break;
+        }
 
         const { roles: pageRoles } = await this.extractRolesWithLlm(pageText, currentUrl, pageLinks);
-        if (pageRoles.length === 0) break;
+        if (pageRoles.length === 0) {
+          stats.end = 'empty-page';
+          break;
+        }
 
         allRoles.push(...pageRoles);
         await persistPage(pageRoles);
-        if (hitsKnownRole(pageRoles) || pageRoles.every(isStale)) break;
+        stats.pages = pageCount + 1;
+        if (hitsKnownRole(pageRoles)) {
+          stats.end = 'known-role';
+          break;
+        }
+        if (pageRoles.every(isStale)) {
+          stats.end = 'stale';
+          break;
+        }
       }
     } catch (err) {
+      stats.end = 'error';
       this.logger.warn(`Click-based pagination stopped early for ${url}: ${err}`);
     } finally {
       await page.close();
@@ -1489,6 +1621,17 @@ export class CompanyRolesService implements OnModuleDestroy {
         experienceMismatch: this.computeExperienceMismatch(result.minYearsExperience, candidateMaxYears),
       },
     });
+  }
+
+  /** The role's saved JD text, fetching and saving it first if the role has
+   * none yet. Returns '' when the posting page can't be read as a real JD. */
+  async ensureRoleJd(roleId: string): Promise<string> {
+    const role = await this.prisma.discoveredRole.findUnique({ where: { id: roleId } });
+    if (!role) throw new NotFoundException(`Role ${roleId} not found`);
+    if (role.jdText) return role.jdText;
+    const jdText = await this.fetchRoleJd(role.roleUrl);
+    if (jdText) await this.prisma.discoveredRole.update({ where: { id: roleId }, data: { jdText } });
+    return jdText;
   }
 
   private async fetchRoleJd(roleUrl: string): Promise<string> {

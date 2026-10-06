@@ -44,9 +44,11 @@ async def _budget_exceeded(_: Request, exc: BudgetExceededError) -> JSONResponse
 # uvicorn process, per the plan's "one Python process serves both agents".
 from linkedin.service import router as linkedin_router  # noqa: E402
 from .stories.service import router as stories_router
+from .referral.service import router as referral_router
 
 app.include_router(linkedin_router)
 app.include_router(stories_router)
+app.include_router(referral_router)
 
 API_BASE_URL = os.environ.get("JOB_TRACKER_API_URL", "http://localhost:4100")
 
