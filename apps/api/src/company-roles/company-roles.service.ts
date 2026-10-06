@@ -1766,9 +1766,17 @@ export class CompanyRolesService implements OnModuleDestroy {
         data: { atsScoreComputedAt: new Date() },
       });
     }
-    const result = await this.estimateAtsScore(jdText, profile, entries);
+    const result = await this.estimateAtsScore(jdText, profile, entries, role.title);
     const candidateLocation = this.extractCandidateLocation(profile);
     const candidateMaxYears = this.extractCandidateMaxYears(profile);
+
+    // A role listed in several places only mismatches if NONE of them fit:
+    // prefer a location that matches, then one we can't judge, else the first.
+    const evaluated = (result.locations.length ? result.locations : [{ country: null, state: null, city: null }]).map(
+      (loc) => ({ loc, mismatch: this.computeLocationMismatch({ isRemote: result.isRemote, ...loc }, candidateLocation) }),
+    );
+    const chosen =
+      evaluated.find((e) => e.mismatch === false) ?? evaluated.find((e) => e.mismatch === null) ?? evaluated[0];
 
     return this.prisma.discoveredRole.update({
       where: { id: roleId },
@@ -1777,10 +1785,10 @@ export class CompanyRolesService implements OnModuleDestroy {
         atsScore: result.score,
         atsScoreComputedAt: new Date(),
         roleIsRemote: result.isRemote,
-        roleCountry: result.country,
-        roleState: result.state,
-        roleCity: result.city,
-        locationMismatch: this.computeLocationMismatch(result, candidateLocation),
+        roleCountry: chosen.loc.country,
+        roleState: chosen.loc.state,
+        roleCity: chosen.loc.city,
+        locationMismatch: chosen.mismatch,
         roleMinYearsExperience: result.minYearsExperience,
         experienceMismatch: this.computeExperienceMismatch(result.minYearsExperience, candidateMaxYears),
       },
@@ -1834,20 +1842,17 @@ export class CompanyRolesService implements OnModuleDestroy {
     jdText: string,
     profile: unknown,
     entries: unknown,
+    title?: string,
   ): Promise<{
     score: number | null;
     isRemote: boolean | null;
-    country: string | null;
-    state: string | null;
-    city: string | null;
+    locations: { country: string | null; state: string | null; city: string | null }[];
     minYearsExperience: number | null;
   }> {
     const empty = {
       score: null,
       isRemote: null,
-      country: null,
-      state: null,
-      city: null,
+      locations: [],
       minYearsExperience: null,
     };
     if (!jdText) return empty;
@@ -1871,13 +1876,19 @@ export class CompanyRolesService implements OnModuleDestroy {
               'You estimate how well a candidate matches a job description for ATS/recruiter ' +
               'screening purposes, and extract the JD\'s work-location and experience-requirement ' +
               'signals. Return ONLY a JSON object: {"score": <integer 0-100>, "isRemote": ' +
-              'boolean|null, "country": string|null, "state": string|null, "city": string|null, ' +
-              '"minYearsExperience": integer|null}. score: base it on keyword/skill overlap, ' +
+              'boolean|null, "locations": [{"country": string|null, "state": string|null, "city": ' +
+              'string|null}], "minYearsExperience": integer|null}. score: base it on keyword/skill overlap, ' +
               "seniority match, and domain relevance between the candidate's background and the " +
               'JD\'s requirements. Be realistic, not generous. isRemote: true if the JD says the ' +
               'role is remote/work-from-home/distributed (even if restricted to certain ' +
               'locations), false if it explicitly requires onsite/hybrid office presence, null if ' +
-              'the JD says nothing about work location at all. country: full country name (e.g. ' +
+              'the JD says nothing about work location at all. locations: ONE entry for EVERY place the ' +
+              'role can be based — postings are often listed in several (e.g. "Menlo Park, CA +2 ' +
+              'locations", or a title/location line naming Menlo Park, Seattle and New York); the ' +
+              'role title below may carry the full list, so use it as well as the JD text. Never ' +
+              'keep only the first when more are given. For a remote role use a single entry for ' +
+              'the geography its remote eligibility is restricted to (or one entry of nulls if ' +
+              'unrestricted). Each entry\'s country: full country name (e.g. ' +
               '"United States") the role is based in, or — if remote — the country its remote ' +
               'eligibility is restricted to if the JD states one (e.g. "Remote (US only)" -> ' +
               '"United States"); null if unstated or remote with no country restriction. state: ' +
@@ -1894,7 +1905,7 @@ export class CompanyRolesService implements OnModuleDestroy {
           },
           {
             role: 'user',
-            content: `Candidate profile:\n${JSON.stringify(profile)}\n\nCandidate background:\n${JSON.stringify(entries)}\n\nJob description:\n${jdText.slice(0, 12000)}`,
+            content: `Candidate profile:\n${JSON.stringify(profile)}\n\nCandidate background:\n${JSON.stringify(entries)}\n\n${title ? `Role title (as listed, may include every location): ${title}\n\n` : ''}Job description:\n${jdText.slice(0, 12000)}`,
           },
         ],
         temperature: 0,
@@ -1909,17 +1920,17 @@ export class CompanyRolesService implements OnModuleDestroy {
     const parsed = JSON.parse(raw) as {
       score?: number;
       isRemote?: boolean | null;
-      country?: string | null;
-      state?: string | null;
-      city?: string | null;
+      locations?: { country?: string | null; state?: string | null; city?: string | null }[];
       minYearsExperience?: number | null;
     };
     return {
       score: typeof parsed.score === 'number' ? Math.max(0, Math.min(100, Math.round(parsed.score))) : null,
       isRemote: typeof parsed.isRemote === 'boolean' ? parsed.isRemote : null,
-      country: parsed.country || null,
-      state: parsed.state || null,
-      city: parsed.city || null,
+      locations: (Array.isArray(parsed.locations) ? parsed.locations : []).slice(0, 12).map((l) => ({
+        country: l?.country || null,
+        state: l?.state || null,
+        city: l?.city || null,
+      })),
       minYearsExperience:
         typeof parsed.minYearsExperience === 'number' ? Math.max(0, Math.round(parsed.minYearsExperience)) : null,
     };
