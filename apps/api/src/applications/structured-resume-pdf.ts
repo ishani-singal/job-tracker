@@ -24,6 +24,7 @@ export function renderStructuredResumePdf(
 
 const PAGE_HEIGHT = 792; // LETTER, points
 const PAGE_WIDTH = 612;
+const MEASURE_PAGE_HEIGHT = 20000; // taller than any resume, so measuring never page-breaks
 const BULLET_FONT_HARD_FLOOR = 9;
 
 function lerp(min: number, max: number, scale: number): number {
@@ -165,7 +166,15 @@ function fitsOnOnePage(
   return usedHeight <= available;
 }
 
-/** Lays the resume out on an off-screen doc and reads back doc.y to measure total height, without ever calling doc.end()/emitting bytes. */
+/**
+ * Lays the resume out on an off-screen doc and reads back doc.y to measure its
+ * total height, without ever emitting bytes. The doc is a single very tall page
+ * (same width, so line wrapping is identical): on a real LETTER page, overflow
+ * makes pdfkit start a new page and reset doc.y — which reads as "short" — and
+ * can leave a stray empty page that inflates a page-count based figure. One tall
+ * page gives the true content height, so "fits" and "overflows by N points" are
+ * both exact.
+ */
 function measureHeight(
   content: StructuredResume,
   template: ResumeTemplate,
@@ -180,21 +189,14 @@ function measureHeight(
       left: fields.marginLeft,
       right: fields.marginRight,
     },
-    size: 'LETTER',
-    bufferPages: true,
+    size: [PAGE_WIDTH, MEASURE_PAGE_HEIGHT],
   });
   // Nothing reads the output stream in measurement mode — just let chunks drop.
   doc.on('data', () => {});
   layoutResume(doc, content, fields, candidateName);
   const endY = doc.y;
-  // When content overflows, pdfkit silently starts a new page and doc.y resets
-  // to the top of it, which reads as "short" — so overflow has to be detected
-  // by page count (bufferPages is on), not by height alone.
-  const pages = doc.bufferedPageRange().count;
   doc.end();
-  // Total height used across pages, so an overflow reports how far over it is.
-  const contentHeight = PAGE_HEIGHT - fields.marginTop - fields.marginBottom;
-  return pages > 1 ? (pages - 1) * contentHeight + (endY - fields.marginTop) : endY - fields.marginTop;
+  return endY - fields.marginTop;
 }
 
 async function renderAtFit(
