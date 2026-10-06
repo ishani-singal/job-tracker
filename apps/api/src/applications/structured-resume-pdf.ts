@@ -136,6 +136,23 @@ export function findFit(
   return { scale: 0, marginCut: marginSpan, nameCut: Math.max(0, nameSpan) };
 }
 
+/**
+ * Whether the resume fits one page after the fit search has given every field
+ * all the room the template allows, and by how many points it overflows if not
+ * (the resume agent's pipeline uses this to tell the model to cut content).
+ */
+export function measureOverflow(
+  content: StructuredResume,
+  template: ResumeTemplate,
+  candidateName?: string | null,
+): { fits: boolean; overflowPoints: number; bulletFont: number } {
+  const fit = findFit(content, template, candidateName);
+  const fields = resolvedFields(template, fit);
+  const used = measureHeight(content, template, fit, candidateName);
+  const available = PAGE_HEIGHT - fields.marginTop - fields.marginBottom;
+  return { fits: used <= available, overflowPoints: Math.max(0, used - available), bulletFont: fields.bulletFont };
+}
+
 function fitsOnOnePage(
   content: StructuredResume,
   template: ResumeTemplate,
@@ -175,7 +192,9 @@ function measureHeight(
   // by page count (bufferPages is on), not by height alone.
   const pages = doc.bufferedPageRange().count;
   doc.end();
-  return pages > 1 ? Number.POSITIVE_INFINITY : endY - fields.marginTop;
+  // Total height used across pages, so an overflow reports how far over it is.
+  const contentHeight = PAGE_HEIGHT - fields.marginTop - fields.marginBottom;
+  return pages > 1 ? (pages - 1) * contentHeight + (endY - fields.marginTop) : endY - fields.marginTop;
 }
 
 async function renderAtFit(

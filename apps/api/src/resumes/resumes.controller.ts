@@ -10,6 +10,8 @@ import {
   Req,
 } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
+import type { StructuredResume } from '@job-tracker/shared-types';
+import { measureOverflow } from '../applications/structured-resume-pdf';
 import { MultipartValue } from '@fastify/multipart';
 import { ProfileFieldsInput, ResumeTemplateInput, ResumesService } from './resumes.service';
 import { StoryEntryType } from '@prisma/client';
@@ -106,6 +108,16 @@ export class ResumesController {
   @Get('template')
   getResumeTemplate() {
     return this.resumes.getResumeTemplate();
+  }
+
+  /** Does this structured resume fit one page under the current template (with
+   * every margin/font allowed to shrink to its minimum)? If not, by how many
+   * lines does it overflow. Used by the referral pipeline's guideline checks. */
+  @Post('fit-check')
+  async fitCheck(@Body() body: StructuredResume) {
+    const [template, profile] = await Promise.all([this.resumes.getResumeTemplate(), this.resumes.getProfile()]);
+    const { fits, overflowPoints, bulletFont } = measureOverflow(body, template, profile.candidateName);
+    return { fits, overflowLines: Math.ceil(overflowPoints / (bulletFont * 1.2)) };
   }
 
   @Patch('template')

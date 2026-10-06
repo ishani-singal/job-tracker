@@ -250,6 +250,17 @@ def _ensure_links(body: str, roles: list[RoleInput]) -> str:
     return f"{body.rstrip()}\n\n{extra}"
 
 
+async def _fit_check(api_base_url: str, resume: StructuredResume) -> dict | None:
+    """Asks the API's renderer whether the resume fits one page (None if unreachable)."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{api_base_url}/resumes/fit-check", json=resume.model_dump(mode="json"))
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        return None
+
+
 async def _get_json(api_base_url: str, path: str) -> dict:
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -297,12 +308,21 @@ async def run_referral(
     stopped_early: str | None = None
     drafts_made = 0
 
-    def checked(resume: StructuredResume) -> list[str]:
+    async def checked(resume: StructuredResume) -> list[str]:
         # The contact line is fixed outright (the value is known exactly);
         # everything else is reported for the model to fix.
         if contact_line:
             resume.contactLine = contact_line
-        return check_resume(resume, entries, profile)
+        problems = check_resume(resume, entries, profile)
+        fit = await _fit_check(api_base_url, resume)
+        if fit is not None and not fit["fits"]:
+            problems.append(
+                f"The resume does not fit ONE page: it overflows by about {fit['overflowLines']} lines even with the "
+                "template's margins and fonts at their minimums. Cut it down — drop optional entries "
+                "(projects, advisory/side roles) that matter least for these JDs and tighten bullets to a single "
+                "line where possible — while keeping every required entry and each entry's minimum bullets."
+            )
+        return problems
 
     def quality(scores: list[RoleScore], violations: list[str]) -> tuple[int, int, float]:
         return (-len(violations), min(s.score for s in scores), sum(s.score for s in scores) / len(scores))
@@ -313,7 +333,7 @@ async def run_referral(
 
         for draft in range(1, MAX_DRAFTS + 1):
             drafts_made = draft
-            violations = checked(resume)
+            violations = await checked(resume)
             await say(f"Draft {draft}: checking ATS match against each job description...")
             try:
                 scores = list(await asyncio.gather(*(_score_one(resume_to_text(resume), r) for r in active)))
@@ -367,7 +387,7 @@ async def run_referral(
         # The model was told each entry's bullet ceiling and given revisions to
         # meet it; anything still over is cut so the saved resume never exceeds it.
         if enforce_bullet_bounds(best_resume, entries):
-            best_violations = check_resume(best_resume, entries, profile)
+            best_violations = await checked(best_resume)
 
         await say(f"Drafting the {tone} {channel} message...")
         sender = profile.get("candidateName") or ""
