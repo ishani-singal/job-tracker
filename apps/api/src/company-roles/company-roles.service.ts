@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
   OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import { Browser, chromium, Page } from 'playwright';
@@ -213,6 +214,55 @@ links, benefits/culture content, and anything that isn't a specific job posting.
 clearly isn't a career/jobs listing page at all, return {"titles": []}.`;
 }
 
+/** A job URL reduced to what identifies the posting: host (no www), path
+ * (no trailing slash, lowercased) and query minus tracking params — so the same
+ * posting typed by hand with a trailing slash still equals the scanned one. */
+function normalizeJobUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    const query = [...u.searchParams.entries()]
+      .filter(([k]) => !/^utm_|^source$|^ref$/i.test(k))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}=${v}`)
+      .join('&');
+    return `${u.hostname.replace(/^www\./, '').toLowerCase()}${u.pathname.replace(/\/+$/, '').toLowerCase()}${query ? `?${query}` : ''}`;
+  } catch {
+    return raw.trim().toLowerCase().replace(/\/+$/, '');
+  }
+}
+
+/** A role's title without the " — locations" suffix scans/scoring add. */
+function baseRoleTitle(title: string): string {
+  return title.split(' — ')[0].trim();
+}
+
+interface ApplicationRef {
+  id: string;
+  role: string | null;
+  jobUrl: string | null;
+  jobId: string | null;
+}
+
+/** The existing Application that is the same posting as this role, if any:
+ * same job ID, same normalized URL, or — only when that application came from
+ * a different site (or has no URL), the one case where URL/ID can't match —
+ * the same company and title. Same-title roles on the same board are
+ * different locations/requisitions, so they never match on title alone. */
+function findMatchingApplication(
+  apps: ApplicationRef[],
+  role: { title: string; roleUrl: string; jobId?: string | null },
+): ApplicationRef | undefined {
+  const roleUrl = normalizeJobUrl(role.roleUrl);
+  const title = baseRoleTitle(role.title).toLowerCase();
+  const host = (u: string) => u.split('/')[0];
+  return apps.find((a) => {
+    if (role.jobId && a.jobId && role.jobId === a.jobId) return true;
+    if (a.jobUrl && normalizeJobUrl(a.jobUrl) === roleUrl) return true;
+    const sameBoard = a.jobUrl && host(normalizeJobUrl(a.jobUrl)) === host(roleUrl);
+    return !sameBoard && !!a.role && a.role.trim().toLowerCase() === title;
+  });
+}
+
 /** On a re-scan, this many consecutive pages containing no role that wasn't
  * already known ends pagination — the stop for undated boards (e.g. Meta's job
  * search), where the "reached a known role" rule can't be trusted because
@@ -313,7 +363,7 @@ export interface DiscoveredRoleDto {
 }
 
 @Injectable()
-export class CompanyRolesService implements OnModuleDestroy {
+export class CompanyRolesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CompanyRolesService.name);
   private browser: Browser | null = null;
 
@@ -325,6 +375,14 @@ export class CompanyRolesService implements OnModuleDestroy {
     private readonly killSwitch: LlmKillSwitchService,
     private readonly llmCalls: LlmCallsService,
   ) {}
+
+  /** Roles saved before scans checked Applications can sit in "open" next to
+   * the application they duplicate — link those up once at startup (idempotent). */
+  onModuleInit() {
+    this.backfillApplicationLinks().catch((err) =>
+      this.logger.warn(`Linking existing roles to applications failed: ${err}`),
+    );
+  }
 
   async onModuleDestroy() {
     await this.browser?.close();
@@ -588,8 +646,9 @@ export class CompanyRolesService implements OnModuleDestroy {
       return isNaN(posted.getTime()) || posted >= cutoff;
     });
 
+    const links = await this.applicationLinkContext(companyId);
     for (const role of kept) {
-      await this.prisma.discoveredRole.upsert({
+      const row = await this.prisma.discoveredRole.upsert({
         where: { companyId_roleUrl: { companyId, roleUrl: role.url } },
         update: {
           title: role.title,
@@ -602,7 +661,58 @@ export class CompanyRolesService implements OnModuleDestroy {
           postedDate: role.postedDate ? new Date(role.postedDate) : null,
         },
       });
+      // Already applied/saved under a different URL form (or typed in by hand)?
+      // Link instead of leaving a duplicate in the open list.
+      if (!row.applicationId && links) {
+        const match = findMatchingApplication(links.free(), { title: role.title, roleUrl: role.url });
+        if (match) {
+          await this.prisma.discoveredRole.update({ where: { id: row.id }, data: { applicationId: match.id } });
+          links.taken.add(match.id);
+        }
+      }
     }
+  }
+
+  /** The company's applications plus which are already linked to a role
+   * (DiscoveredRole.applicationId is unique, so one application links to one role). */
+  private async applicationLinkContext(companyId: string) {
+    const company = await this.prisma.trackedCompany.findUnique({ where: { id: companyId } });
+    if (!company) return null;
+    const apps = await this.prisma.application.findMany({
+      where: { company: { equals: company.name, mode: 'insensitive' } },
+      select: { id: true, role: true, jobUrl: true, jobId: true },
+    });
+    if (apps.length === 0) return null;
+    const linked = await this.prisma.discoveredRole.findMany({
+      where: { applicationId: { in: apps.map((a) => a.id) } },
+      select: { applicationId: true },
+    });
+    const taken = new Set(linked.map((r) => r.applicationId as string));
+    return { apps, taken, free: () => apps.filter((a) => !taken.has(a.id)) };
+  }
+
+  /** Links every unlinked role to the application it duplicates, across all
+   * companies. Returns how many were linked. */
+  async backfillApplicationLinks(): Promise<number> {
+    let linkedCount = 0;
+    const companies = await this.prisma.trackedCompany.findMany({ select: { id: true } });
+    for (const { id: companyId } of companies) {
+      const links = await this.applicationLinkContext(companyId);
+      if (!links) continue;
+      const unlinked = await this.prisma.discoveredRole.findMany({
+        where: { companyId, applicationId: null },
+        select: { id: true, title: true, roleUrl: true, jobId: true },
+      });
+      for (const role of unlinked) {
+        const match = findMatchingApplication(links.free(), role);
+        if (!match) continue;
+        await this.prisma.discoveredRole.update({ where: { id: role.id }, data: { applicationId: match.id } });
+        links.taken.add(match.id);
+        linkedCount += 1;
+      }
+    }
+    if (linkedCount > 0) this.logger.log(`Linked ${linkedCount} existing role(s) to their applications`);
+    return linkedCount;
   }
 
   private async findRolesForCompany(
@@ -1649,11 +1759,26 @@ export class CompanyRolesService implements OnModuleDestroy {
       return this.prisma.application.findUnique({ where: { id: role.applicationId } });
     }
 
+    // Reuse an application for the same posting (any URL form / board) rather
+    // than creating a near-duplicate; the matcher ignores the location suffix.
+    const existingApps = await this.prisma.application.findMany({
+      where: { company: { equals: role.company.name, mode: 'insensitive' } },
+      select: { id: true, role: true, jobUrl: true, jobId: true },
+    });
+    const existing = findMatchingApplication(existingApps, role);
+    if (existing) {
+      const linked = await this.prisma.discoveredRole.findFirst({ where: { applicationId: existing.id } });
+      if (!linked) {
+        await this.prisma.discoveredRole.update({ where: { id: roleId }, data: { applicationId: existing.id } });
+      }
+      return this.prisma.application.findUnique({ where: { id: existing.id } });
+    }
+
     let application;
     try {
       application = await this.applications.create({
         company: role.company.name,
-        role: role.title,
+        role: baseRoleTitle(role.title),
         jobUrl: role.roleUrl,
         jobId: role.jobId ?? undefined,
         jdText: role.jdText ?? undefined,
