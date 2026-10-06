@@ -8,11 +8,9 @@ import type { ResumeTemplate as SharedResumeTemplate, StructuredResume } from '@
 export type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
 
 /**
- * Renders a StructuredResume against a ResumeTemplate's min/max ranges,
- * picking the largest scale (1.0 = every field at its max, 0.0 = every field
- * at its min) that still fits the content on one LETTER page. Binary-searches
- * scale rather than measuring layout analytically, since PDFKit's own
- * line-wrapping (which depends on font size) is the thing being fit — the
+ * Renders a StructuredResume against a ResumeTemplate's min/max ranges, fitted
+ * to one LETTER page (see findFit for the order fields give way in). PDFKit's
+ * own line-wrapping (which depends on font size) is the thing being fit — the
  * only reliable way to know "does this fit" is to actually lay it out.
  */
 export function renderStructuredResumePdf(
@@ -20,8 +18,8 @@ export function renderStructuredResumePdf(
   template: ResumeTemplate,
   candidateName?: string | null,
 ): Promise<Buffer> {
-  const scale = findFittingScale(content, template, candidateName);
-  return renderAtScale(content, template, scale, candidateName, /* toBuffer */ true) as Promise<Buffer>;
+  const fit = findFit(content, template, candidateName);
+  return renderAtFit(content, template, fit, candidateName, /* toBuffer */ true) as Promise<Buffer>;
 }
 
 const PAGE_HEIGHT = 792; // LETTER, points
@@ -34,9 +32,32 @@ function lerp(min: number, max: number, scale: number): number {
 
 const POINTS_PER_INCH = 72;
 
-export function resolvedFields(template: ResumeTemplate, scale: number) {
+/**
+ * How far each field has been pushed from its template maximum toward its
+ * minimum. `scale` (1 = max, 0 = min) drives the body fields — bullet font,
+ * section header, spacing. Margins and the name font stay at their maximums
+ * until the body fields are already at their minimums: only then are margins
+ * cut by `marginCut` inches (each stopping at its own minimum) and the name
+ * font by `nameCut` points.
+ */
+export interface FitParams {
+  scale: number;
+  marginCut: number;
+  nameCut: number;
+}
+
+const MARGIN_STEP_INCHES = 0.01;
+const NAME_FONT_STEP_POINTS = 0.5;
+
+function cutMargin(min: number, max: number, cut: number): number {
+  return Math.max(min, max - cut);
+}
+
+export function resolvedFields(template: ResumeTemplate, fit: FitParams) {
+  const { scale } = fit;
   const bulletFont = Math.max(BULLET_FONT_HARD_FLOOR, lerp(template.bulletFontMin, template.bulletFontMax, scale));
-  const nameFont = bulletFont + lerp(template.nameFontOffsetMin, template.nameFontOffsetMax, scale);
+  const nameFont =
+    bulletFont + Math.max(template.nameFontOffsetMin, template.nameFontOffsetMax - fit.nameCut);
   const sectionHeaderFont = bulletFont + lerp(
     template.sectionHeaderFontOffsetMin,
     template.sectionHeaderFontOffsetMax,
@@ -46,10 +67,10 @@ export function resolvedFields(template: ResumeTemplate, scale: number) {
   // convert to points here, once, since everything downstream (pdfkit,
   // the docx renderer's pointsToTwips) works in points.
   return {
-    marginTop: lerp(template.marginTopMin, template.marginTopMax, scale) * POINTS_PER_INCH,
-    marginBottom: lerp(template.marginBottomMin, template.marginBottomMax, scale) * POINTS_PER_INCH,
-    marginLeft: lerp(template.marginLeftMin, template.marginLeftMax, scale) * POINTS_PER_INCH,
-    marginRight: lerp(template.marginRightMin, template.marginRightMax, scale) * POINTS_PER_INCH,
+    marginTop: cutMargin(template.marginTopMin, template.marginTopMax, fit.marginCut) * POINTS_PER_INCH,
+    marginBottom: cutMargin(template.marginBottomMin, template.marginBottomMax, fit.marginCut) * POINTS_PER_INCH,
+    marginLeft: cutMargin(template.marginLeftMin, template.marginLeftMax, fit.marginCut) * POINTS_PER_INCH,
+    marginRight: cutMargin(template.marginRightMin, template.marginRightMax, fit.marginCut) * POINTS_PER_INCH,
     bulletFont,
     nameFont,
     sectionHeaderFont,
@@ -60,43 +81,69 @@ export function resolvedFields(template: ResumeTemplate, scale: number) {
   };
 }
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 /**
- * Binary search over scale in [0, 1]: higher scale means larger/looser
- * (may overflow), lower scale means smaller/tighter (always fits, since
- * scale=0 uses every field's MIN). 12 iterations gets well under 1/1000
- * granularity between min and max, plenty for point-sized font/spacing steps.
+ * Finds how much each field has to give to fit one page, in this order:
+ *  1. Margins and the name font stay at their maximums while everything else
+ *     (bullet font, section header, spacing) is binary-searched on `scale`.
+ *  2. Only if the page still overflows with all of that at its minimum, margins
+ *     are cut — as a last step — in 0.01" increments, each down to its own
+ *     minimum.
+ *  3. If it still overflows with margins at their minimums, the name font is
+ *     reduced in 0.5pt increments down to its minimum.
+ * If nothing fits even then, the all-minimums layout is returned.
  *
  * Exported so the Word renderer (structured-resume-docx.ts) can reuse the
- * same pdfkit-measured fitting scale rather than re-implementing layout
- * measurement in the `docx` library, which has no equivalent of reading back
- * a measured height before committing to a page.
+ * same pdfkit-measured fit rather than re-implementing layout measurement in
+ * the `docx` library, which has no equivalent of reading back a measured
+ * height before committing to a page.
  */
-export function findFittingScale(
+export function findFit(
   content: StructuredResume,
   template: ResumeTemplate,
   candidateName?: string | null,
-): number {
-  let low = 0;
-  let high = 1;
-  for (let i = 0; i < 12; i++) {
-    const mid = (low + high) / 2;
-    if (fitsOnOnePage(content, template, mid, candidateName)) {
-      low = mid;
-    } else {
-      high = mid;
+): FitParams {
+  const fits = (fit: FitParams) => fitsOnOnePage(content, template, fit, candidateName);
+
+  if (fits({ scale: 0, marginCut: 0, nameCut: 0 })) {
+    let low = 0;
+    let high = 1;
+    for (let i = 0; i < 12; i++) {
+      const mid = (low + high) / 2;
+      if (fits({ scale: mid, marginCut: 0, nameCut: 0 })) low = mid;
+      else high = mid;
     }
+    return { scale: low, marginCut: 0, nameCut: 0 };
   }
-  return low;
+
+  const marginSpan = Math.max(
+    template.marginTopMax - template.marginTopMin,
+    template.marginBottomMax - template.marginBottomMin,
+    template.marginLeftMax - template.marginLeftMin,
+    template.marginRightMax - template.marginRightMin,
+  );
+  for (let cut = MARGIN_STEP_INCHES; cut < marginSpan + MARGIN_STEP_INCHES / 2; cut = round2(cut + MARGIN_STEP_INCHES)) {
+    const marginCut = Math.min(cut, marginSpan);
+    if (fits({ scale: 0, marginCut, nameCut: 0 })) return { scale: 0, marginCut, nameCut: 0 };
+  }
+
+  const nameSpan = template.nameFontOffsetMax - template.nameFontOffsetMin;
+  for (let cut = NAME_FONT_STEP_POINTS; cut < nameSpan + NAME_FONT_STEP_POINTS / 2; cut += NAME_FONT_STEP_POINTS) {
+    const nameCut = Math.min(cut, nameSpan);
+    if (fits({ scale: 0, marginCut: marginSpan, nameCut })) return { scale: 0, marginCut: marginSpan, nameCut };
+  }
+  return { scale: 0, marginCut: marginSpan, nameCut: Math.max(0, nameSpan) };
 }
 
 function fitsOnOnePage(
   content: StructuredResume,
   template: ResumeTemplate,
-  scale: number,
+  fit: FitParams,
   candidateName?: string | null,
 ): boolean {
-  const usedHeight = measureHeight(content, template, scale, candidateName);
-  const fields = resolvedFields(template, scale);
+  const usedHeight = measureHeight(content, template, fit, candidateName);
+  const fields = resolvedFields(template, fit);
   const available = PAGE_HEIGHT - fields.marginTop - fields.marginBottom;
   return usedHeight <= available;
 }
@@ -105,10 +152,10 @@ function fitsOnOnePage(
 function measureHeight(
   content: StructuredResume,
   template: ResumeTemplate,
-  scale: number,
+  fit: FitParams,
   candidateName?: string | null,
 ): number {
-  const fields = resolvedFields(template, scale);
+  const fields = resolvedFields(template, fit);
   const doc = new PDFDocument({
     margins: {
       top: fields.marginTop,
@@ -127,14 +174,14 @@ function measureHeight(
   return endY - fields.marginTop;
 }
 
-async function renderAtScale(
+async function renderAtFit(
   content: StructuredResume,
   template: ResumeTemplate,
-  scale: number,
+  fit: FitParams,
   candidateName: string | null | undefined,
   toBuffer: boolean,
 ): Promise<Buffer | void> {
-  const fields = resolvedFields(template, scale);
+  const fields = resolvedFields(template, fit);
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       margins: {
@@ -187,9 +234,25 @@ function layoutResume(
     doc.moveDown(fields.spacingAfterSection / fields.bulletFont);
 
     for (const entry of section.entries) {
-      layoutEntry(doc, entry, fields);
+      layoutEntry(doc, entry, fields, isPlainEntry(entry, section.heading));
     }
   }
+}
+
+/**
+ * A Skills-style entry: no name of its own (or one that just repeats the
+ * section heading), no subtitle/dates/link. Its lines ("Technical Skills: …",
+ * "Core Skills: …") are plain labelled text, so they render flush left with no
+ * header line, bullet glyph or indent — not as bullets under an empty header.
+ * Exported for the Word renderer.
+ */
+export function isPlainEntry(
+  entry: StructuredResume['sections'][number]['entries'][number],
+  sectionHeading: string,
+): boolean {
+  const name = entry.name.trim().toLowerCase();
+  const blankOrHeading = name === '' || name === sectionHeading.trim().toLowerCase();
+  return blankOrHeading && !entry.subtitle && !entry.dateRange && !entry.url;
 }
 
 const LINK_COLOR = '#0563C1'; // Word's standard hyperlink blue, matched here for consistency
@@ -265,7 +328,22 @@ function layoutEntry(
   doc: PDFKit.PDFDocument,
   entry: StructuredResume['sections'][number]['entries'][number],
   fields: ResolvedFields,
+  plain = false,
 ): void {
+  if (plain) {
+    const left = doc.page.margins.left;
+    const width = doc.page.width - doc.page.margins.right - left;
+    for (const line of entry.bullets) {
+      doc.font('Helvetica').fontSize(fields.bulletFont);
+      doc.x = left;
+      layoutBoldedText(doc, line, fields.bulletFont, width);
+      doc.moveDown(fields.spacingBetweenBullets / fields.bulletFont);
+    }
+    doc.x = left;
+    doc.moveDown(fields.spacingAfterSection / fields.bulletFont / 2);
+    return;
+  }
+
   // Header line: "COMPANY (ALL CAPS) | Subtitle" on the left, bold, sized to
   // match the bullet font (not the larger nameFont — entry headers read at
   // the same size as the body text, just bold, per the current template),

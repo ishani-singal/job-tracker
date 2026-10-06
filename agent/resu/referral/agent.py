@@ -24,7 +24,7 @@ from ..agent import StructuredResume, _model as _resu_model, resu_agent
 from ..deps import ResuDeps
 from ..rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
 from ..stories.agent import _report_progress
-from .compliance import check_resume, expected_contact_line
+from .compliance import check_resume, enforce_bullet_bounds, expected_contact_line
 
 ATS_TARGET = 90
 # The caller may pass a pool larger than this; the weakest fits are dropped
@@ -364,6 +364,10 @@ async def run_referral(
         if best is None:
             raise RuntimeError(stopped_early or "Could not score the resume")
         best_resume, best_scores, best_violations = best
+        # The model was told each entry's bullet ceiling and given revisions to
+        # meet it; anything still over is cut so the saved resume never exceeds it.
+        if enforce_bullet_bounds(best_resume, entries):
+            best_violations = check_resume(best_resume, entries, profile)
 
         await say(f"Drafting the {tone} {channel} message...")
         sender = profile.get("candidateName") or ""

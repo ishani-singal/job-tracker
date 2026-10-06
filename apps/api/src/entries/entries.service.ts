@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface DateRangeFields {
@@ -51,8 +51,29 @@ export interface ProjectInput extends DateRangeFields, BulletBoundsFields {
 }
 
 @Injectable()
-export class EntriesService {
+export class EntriesService implements OnModuleInit {
+  private readonly logger = new Logger(EntriesService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /** Projects saved before repo visibility was resolved have isRepoPublic null,
+   * which the resume agent treats as "not public" and drops the project's link
+   * for — resolve those once at startup (idempotent; only fills nulls). */
+  onModuleInit() {
+    this.backfillRepoVisibility().catch((err) => this.logger.warn(`Repo visibility backfill failed: ${err}`));
+  }
+
+  async backfillRepoVisibility(): Promise<void> {
+    const pending = await this.prisma.projectEntry.findMany({
+      where: { isRepoPublic: null, repoUrl: { not: null } },
+      select: { id: true, repoUrl: true },
+    });
+    for (const p of pending) {
+      const isRepoPublic = await this.resolveRepoVisibility(p.repoUrl ?? undefined);
+      if (isRepoPublic !== null) await this.prisma.projectEntry.update({ where: { id: p.id }, data: { isRepoPublic } });
+    }
+    if (pending.length > 0) this.logger.log(`Resolved repo visibility for ${pending.length} project(s)`);
+  }
 
   /**
    * Resolves whether a GitHub repo URL is public via an unauthenticated API

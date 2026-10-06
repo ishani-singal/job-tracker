@@ -6,6 +6,7 @@ import type { StructuredResume } from '@job-tracker/shared-types';
 import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service';
 import { StoriesService, sanitizeDocumentHtml } from '../stories/stories.service';
 import { CompanyRolesService } from '../company-roles/company-roles.service';
+import { enforceBulletBounds } from '../applications/resume-bounds';
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
@@ -323,7 +324,8 @@ export class SessionsService {
     }
 
     if (session.scope === 'APPLICATION') {
-      const resumeContent = this.parseStructuredResume(lastAssistantMessage.content);
+      const parsedResume = this.parseStructuredResume(lastAssistantMessage.content);
+      const resumeContent = parsedResume ? await enforceBulletBounds(this.prisma, parsedResume) : null;
       await this.prisma.application.update({
         where: { id: session.applicationId! },
         data: {
@@ -332,8 +334,10 @@ export class SessionsService {
         },
       });
     } else if (session.scope === 'COMPANY') {
-      const resumeContent = (this.parseStructuredResume(lastAssistantMessage.content) ??
-        {}) as Prisma.InputJsonValue;
+      const parsedCompanyResume = this.parseStructuredResume(lastAssistantMessage.content);
+      const resumeContent = (parsedCompanyResume
+        ? await enforceBulletBounds(this.prisma, parsedCompanyResume)
+        : {}) as unknown as Prisma.InputJsonValue;
       await this.prisma.companyResume.upsert({
         where: { company: session.company! },
         create: { company: session.company!, resumeContent },

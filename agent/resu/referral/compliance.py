@@ -56,6 +56,20 @@ def _match_entry(resume_name: str, entries: dict) -> tuple[str, dict] | None:
     return None
 
 
+def enforce_bullet_bounds(resume: StructuredResume, entries: dict) -> int:
+    """Last-resort safety net: cut any entry over its own max bullets down to it
+    (keeping the first bullets). Returns how many entries were trimmed."""
+    trimmed = 0
+    for section in resume.sections:
+        for entry in section.entries:
+            found = _match_entry(entry.name, entries)
+            hi = found[1].get("maxBullets") if found else None
+            if hi is not None and len(entry.bullets) > hi:
+                entry.bullets = entry.bullets[:hi]
+                trimmed += 1
+    return trimmed
+
+
 def check_resume(resume: StructuredResume, entries: dict, profile: dict) -> list[str]:
     """Violations of the checkable guidelines; empty when the resume complies."""
     problems: list[str] = []

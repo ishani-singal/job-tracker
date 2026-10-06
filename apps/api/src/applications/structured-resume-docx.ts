@@ -11,7 +11,8 @@ import {
 } from 'docx';
 import type { StructuredResume } from '@job-tracker/shared-types';
 import {
-  findFittingScale,
+  findFit,
+  isPlainEntry,
   resolvedFields,
   type ResolvedFields,
   type ResumeTemplate,
@@ -21,8 +22,8 @@ import {
 const pt = (points: number) => Math.round(points * 2);
 
 /**
- * Renders a StructuredResume as a .docx, using the exact same fitting scale
- * pdfkit would compute for the PDF (findFittingScale/resolvedFields) so the
+ * Renders a StructuredResume as a .docx, using the exact same fit
+ * pdfkit would compute for the PDF (findFit/resolvedFields) so the
  * two renderers stay visually consistent — pdfkit is kept around purely as a
  * layout-measurement tool (it can read back a measured height before
  * committing to a page; `docx` has no equivalent), never to emit bytes here.
@@ -32,8 +33,8 @@ export async function renderStructuredResumeDocx(
   template: ResumeTemplate,
   candidateName?: string | null,
 ): Promise<Buffer> {
-  const scale = findFittingScale(content, template, candidateName);
-  const fields = resolvedFields(template, scale);
+  const fit = findFit(content, template, candidateName);
+  const fields = resolvedFields(template, fit);
   const doc = buildDocument(content, fields, candidateName);
   return Packer.toBuffer(doc);
 }
@@ -78,7 +79,7 @@ function buildDocument(content: StructuredResume, fields: ResolvedFields, candid
     );
 
     for (const entry of section.entries) {
-      children.push(...layoutEntry(entry, fields, contentWidthTwips, tabStopTwips));
+      children.push(...layoutEntry(entry, fields, contentWidthTwips, tabStopTwips, isPlainEntry(entry, section.heading)));
     }
   }
 
@@ -140,8 +141,20 @@ function layoutEntry(
   fields: ResolvedFields,
   contentWidthTwips: number,
   tabStopTwips: number,
+  plain = false,
 ): Paragraph[] {
   const paragraphs: Paragraph[] = [];
+
+  // Skills-style entry: labelled plain lines — no header, bullet or indent.
+  if (plain) {
+    return entry.bullets.map(
+      (line) =>
+        new Paragraph({
+          spacing: { after: pointsToTwips(fields.spacingBetweenBullets) },
+          children: layoutBoldedRuns(line, fields.bulletFont),
+        }),
+    );
+  }
 
   const headerText = [entry.name.toUpperCase(), entry.subtitle].filter(Boolean).join(' | ');
   const trailing = entry.dateRange ?? '';
