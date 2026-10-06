@@ -694,20 +694,23 @@ export class CompanyRolesService implements OnModuleDestroy {
       }
 
       try {
-        const { text: pageText, links } = await this.renderPageText(currentNextUrl, {
-          expandShowMoreListing: true,
-          includeLinks: true,
-        });
-        if (!pageText || pageText.length < 200) {
-          stats.end = 'empty-page';
-          break;
+        // A blank/failed render or an extraction that finds nothing is often
+        // transient on a deep page, so try the page once more before treating
+        // it as the end of the listing.
+        let pageRoles: DiscoveredRoleDto[] = [];
+        let followingUrl: string | undefined;
+        for (let attempt = 0; attempt < 2 && pageRoles.length === 0; attempt++) {
+          const { text: pageText, links } = await this.renderPageText(currentNextUrl, {
+            expandShowMoreListing: true,
+            includeLinks: true,
+          });
+          if (!pageText || pageText.length < 200) continue;
+          ({ roles: pageRoles, nextPageUrl: followingUrl } = await this.extractRolesWithLlm(
+            pageText,
+            currentNextUrl,
+            links,
+          ));
         }
-
-        const { roles: pageRoles, nextPageUrl: followingUrl } = await this.extractRolesWithLlm(
-          pageText,
-          currentNextUrl,
-          links,
-        );
         if (pageRoles.length === 0) {
           stats.end = 'empty-page';
           break;
