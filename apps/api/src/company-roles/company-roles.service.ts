@@ -1585,7 +1585,7 @@ export class CompanyRolesService implements OnModuleDestroy {
     if (!response.ok) return empty;
 
     const data = (await response.json()) as { choices: { message: { content: string } }[]; usage?: ChatUsage };
-    await this.llmCalls.recordAzureUsage('role-scan', deployment, data.usage);
+    await this.llmCalls.recordAzureUsage('role-score', deployment, data.usage);
     const raw = data.choices[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw) as {
       score?: number;
