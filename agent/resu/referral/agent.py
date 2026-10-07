@@ -296,6 +296,10 @@ async def run_referral(
     async def say(message: str) -> None:
         await _report_progress(api_base_url, session_id, message)
 
+    if uploaded_resume and len(roles) > FINAL_ROLES:
+        # A final draft is for the roles the earlier result kept — never the wider pool.
+        raise RuntimeError(f"A final draft covers at most {FINAL_ROLES} roles, got {len(roles)}")
+
     deps = ResuDeps(api_base_url=api_base_url)
     profile = await _get_json(api_base_url, "/resumes/profile")
     entries = await _get_json(api_base_url, "/entries")

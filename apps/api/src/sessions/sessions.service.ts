@@ -9,6 +9,9 @@ import { CompanyRolesService } from '../company-roles/company-roles.service';
 import { enforceBulletBounds } from '../applications/resume-bounds';
 import { extractTextFromBuffer } from '../resumes/extract-text';
 
+/** How many roles a referral's final result links (matches FINAL_ROLES in agent/resu/referral/agent.py). */
+const FINAL_REFERRAL_ROLES = 5;
+
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 /** Browsers often send .docx/.pdf as application/octet-stream — trust the extension. */
@@ -672,15 +675,19 @@ export class SessionsService {
     roleIds: string[],
     uploadedResume?: string,
   ) {
-    // A final draft from an uploaded resume targets the roles the latest result
-    // actually kept (the first run may have dropped some of the original pool).
+    // A final draft from an uploaded resume targets ONLY the roles the latest
+    // result kept (at most FINAL_REFERRAL_ROLES) — never the original, larger
+    // pool, which would re-score and re-drop roles already decided and cost more.
     if (uploadedResume) {
       const latest = await this.prisma.referralRequest.findFirst({
         where: { sessionId },
         orderBy: { createdAt: 'desc' },
       });
       const keptIds = ((latest?.roles ?? []) as { id: string }[]).map((r) => r.id);
-      if (keptIds.length > 0) roleIds = keptIds;
+      if (keptIds.length === 0) {
+        throw new Error('No earlier result was found for this chat, so there are no kept roles to build the final draft for');
+      }
+      roleIds = keptIds.slice(0, FINAL_REFERRAL_ROLES);
     }
     const contact = await this.prisma.companyContact.findUnique({
       where: { id: contactId },
