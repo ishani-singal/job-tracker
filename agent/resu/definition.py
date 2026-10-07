@@ -57,7 +57,13 @@ INSTRUCTIONS = (
     "invent facts not grounded in that entry's own Story.\n\n"
     "Education entries: NEVER write bullets under an education entry unless that "
     "education is currently active (its end date is Present). A completed degree is "
-    "only its school, degree/field, location and dates — leave its bullets list empty."
+    "only its school, degree/field, location and dates — leave its bullets list empty.\n\n"
+    "Project entries (the candidate's own projects from the Projects list — NOT internships, jobs or "
+    "consulting engagements, whose subtitle stays the job title): set each project entry's `subtitle` to a 3-4 word plain-language "
+    "description of what the project is, drawn from that project's own Story — it is shown "
+    "right after the project name, e.g. \"AI-Native predictive maintenance for Manufacturers\". "
+    "Name the product or domain, not the work done: no verbs like \"built\" or \"developed\", no "
+    "tech-stack lists, and no more than 4-5 words."
 )
 
 

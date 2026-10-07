@@ -164,23 +164,28 @@ function layoutEntry(
     );
   }
 
-  const headerText = [entry.name.toUpperCase(), entry.subtitle].filter(Boolean).join(' | ');
   const trailing = entry.dateRange ?? '';
-  const headerRun = entry.url
+  // Only the name is the hyperlink; the " | description/title" after it stays
+  // plain bold text, so a project's short description isn't underlined as a link.
+  const nameRun = entry.url
     ? new TextRun({
-        text: headerText,
+        text: entry.name.toUpperCase(),
         bold: true,
         size: pt(fields.bulletFont),
         color: '0563C1',
         underline: {},
       })
-    : new TextRun({ text: headerText, bold: true, size: pt(fields.bulletFont) });
+    : new TextRun({ text: entry.name.toUpperCase(), bold: true, size: pt(fields.bulletFont) });
+  const restRun = entry.subtitle
+    ? new TextRun({ text: ` | ${entry.subtitle}`, bold: true, size: pt(fields.bulletFont) })
+    : null;
   paragraphs.push(
     new Paragraph({
       spacing: { before, after: pointsToTwips(fields.spacingAfterEntryHeader) },
       tabStops: [{ type: TabStopType.RIGHT, position: contentWidthTwips }],
       children: [
-        entry.url ? new ExternalHyperlink({ link: entry.url, children: [headerRun] }) : headerRun,
+        entry.url ? new ExternalHyperlink({ link: entry.url, children: [nameRun] }) : nameRun,
+        ...(restRun ? [restRun] : []),
         ...(trailing ? [new TextRun({ text: `\t${trailing}`, size: pt(fields.bulletFont) })] : []),
       ],
     }),

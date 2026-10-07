@@ -144,6 +144,15 @@ def check_resume(resume: StructuredResume, entries: dict, profile: dict) -> list
                 if entry.bullets and not e.get("isPresent"):
                     problems.append(f"{label}: education has bullets but is not currently active — leave its bullets empty")
                 continue
+            if group == "projects":
+                words = len((entry.subtitle or "").split())
+                if words == 0:
+                    problems.append(
+                        f"{label}: add a 3-4 word description of the project in its subtitle "
+                        '(e.g. "AI-Native predictive maintenance for Manufacturers")'
+                    )
+                elif words > 6:
+                    problems.append(f'{label}: the project description in its subtitle is {words} words — keep it to 3-4')
             n = len(entry.bullets)
             lo, hi = e.get("minBullets"), e.get("maxBullets")
             if hi is not None and n > hi:
