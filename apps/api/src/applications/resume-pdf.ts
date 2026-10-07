@@ -4,12 +4,36 @@ import type { ResumeTemplate as SharedResumeTemplate } from '@job-tracker/shared
 import type { StructuredResume } from '@job-tracker/shared-types';
 import { isStructuredResume } from './structured-resume-content';
 import { renderStructuredResumeDocx } from './structured-resume-docx';
+import { HEIGHT_SAFETY } from './structured-resume-pdf';
 import { convertDocxToPdf } from './docx-to-pdf';
 
 // Callers pass either Prisma's raw ResumeTemplate row (updatedAt: Date) or
 // the API's serialized shape (updatedAt: string) — the renderer only reads
 // the numeric range fields, so both are accepted here.
 type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
+
+/**
+ * Builds the Word document and PDF and VERIFIES they are one page. The fit is measured with pdfkit,
+ * which tracks Word/LibreOffice layout closely but not exactly, so a resume it calls "fits" can still
+ * tip a few lines onto page 2. The real converted PDF is the judge: if it has more than one page the
+ * fit is redone with a tighter height allowance (smaller fonts/spacing, then margins) and tried again.
+ * The Word file returned is the very one that produced the one-page PDF.
+ */
+async function renderVerified(
+  content: StructuredResume,
+  template: ResumeTemplate,
+  candidateName?: string | null,
+): Promise<{ docx: Buffer; pdf: Buffer }> {
+  const pdfParse = (await import('pdf-parse')).default;
+  let last: { docx: Buffer; pdf: Buffer } | null = null;
+  for (const factor of [1, 0.97, 0.94, 0.91, 0.88]) {
+    const docx = await renderStructuredResumeDocx(content, template, candidateName, HEIGHT_SAFETY * factor);
+    const pdf = await convertDocxToPdf(docx);
+    last = { docx, pdf };
+    if ((await pdfParse(pdf)).numpages <= 1) return last;
+  }
+  return last!;
+}
 
 /** Swaps in the live contact line (see contact-line.ts) when one is given. */
 function withContactLine(content: StructuredResume, contactLine?: string): StructuredResume {
@@ -33,7 +57,13 @@ export function renderResumeDocx(
   if (!isStructuredResume(content)) {
     throw new Error('renderResumeDocx requires structured resume content');
   }
-  return renderStructuredResumeDocx(withContactLine(content, contactLine), template, candidateName);
+  // Word needs the same one-page guarantee as the PDF: use the layout that converted to one page.
+  // If the converter isn't available, fall back to the measured fit rather than failing the download.
+  const prepared = withContactLine(content, contactLine);
+  return renderVerified(prepared, template, candidateName).then(
+    (r) => r.docx,
+    () => renderStructuredResumeDocx(prepared, template, candidateName),
+  );
 }
 
 /**
@@ -65,8 +95,7 @@ export async function renderResumePdf(
   contactLine?: string,
 ): Promise<Buffer> {
   if (isStructuredResume(content) && template) {
-    const docxBuffer = await renderStructuredResumeDocx(withContactLine(content, contactLine), template, candidateName);
-    return convertDocxToPdf(docxBuffer);
+    return (await renderVerified(withContactLine(content, contactLine), template, candidateName)).pdf;
   }
   const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
   return renderResumePdfFromText(candidateName ?? title, text);

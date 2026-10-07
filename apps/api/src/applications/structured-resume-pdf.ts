@@ -27,7 +27,9 @@ const PAGE_HEIGHT = 792; // LETTER, points
 const PAGE_WIDTH = 612;
 // Fit to this fraction of the page's content height, leaving slack for the small differences
 // between this measurement (pdfkit/Helvetica) and Word/LibreOffice (Arial) line layout.
-const HEIGHT_SAFETY = 0.985;
+export const HEIGHT_SAFETY = 0.98;
+// The Word document draws a 0.5pt rule 2pt under each section header; pdfkit's line takes no space.
+const SECTION_RULE_EXTRA = 2.5;
 const MEASURE_PAGE_HEIGHT = 20000; // taller than any resume, so measuring never page-breaks
 const BULLET_FONT_HARD_FLOOR = 9;
 
@@ -106,8 +108,9 @@ export function findFit(
   content: StructuredResume,
   template: ResumeTemplate,
   candidateName?: string | null,
+  safety: number = HEIGHT_SAFETY,
 ): FitParams {
-  const fits = (fit: FitParams) => fitsOnOnePage(content, template, fit, candidateName);
+  const fits = (fit: FitParams) => fitsOnOnePage(content, template, fit, candidateName, safety);
 
   if (fits({ scale: 0, marginCut: 0, nameCut: 0 })) {
     let low = 0;
@@ -172,10 +175,11 @@ function fitsOnOnePage(
   template: ResumeTemplate,
   fit: FitParams,
   candidateName?: string | null,
+  safety: number = HEIGHT_SAFETY,
 ): boolean {
   const usedHeight = measureHeight(content, template, fit, candidateName);
   const fields = resolvedFields(template, fit);
-  const available = (PAGE_HEIGHT - fields.marginTop - fields.marginBottom) * HEIGHT_SAFETY;
+  const available = (PAGE_HEIGHT - fields.marginTop - fields.marginBottom) * safety;
   return usedHeight <= available;
 }
 
@@ -269,6 +273,7 @@ function layoutResume(
       .lineTo(doc.page.width - doc.page.margins.right, doc.y)
       .lineWidth(0.5)
       .stroke();
+    doc.y += SECTION_RULE_EXTRA;
     doc.moveDown(fields.spacingAfterSection / fields.bulletFont);
 
     section.entries.forEach((entry, i) => {

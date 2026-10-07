@@ -33,8 +33,9 @@ export async function renderStructuredResumeDocx(
   content: StructuredResume,
   template: ResumeTemplate,
   candidateName?: string | null,
+  safety?: number,
 ): Promise<Buffer> {
-  const fit = findFit(content, template, candidateName);
+  const fit = findFit(content, template, candidateName, safety);
   const fields = resolvedFields(template, fit);
   const doc = buildDocument(content, fields, candidateName);
   return Packer.toBuffer(doc);
