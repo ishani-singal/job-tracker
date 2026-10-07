@@ -23,10 +23,12 @@ class RunReferralRequest(BaseModel):
     tone: Tone
     channel: Channel
     roles: list[RoleInput]
+    # Text of a resume the user uploaded in the chat — the base for a final draft.
+    uploaded_resume: str | None = None
 
 
 @router.post("/run", response_model=ReferralResult)
 async def run_referral_endpoint(body: RunReferralRequest) -> ReferralResult:
     return await run_referral(
-        body.session_id, API_BASE_URL, body.company, body.contact_name, body.tone, body.channel, body.roles
+        body.session_id, API_BASE_URL, body.company, body.contact_name, body.tone, body.channel, body.roles, body.uploaded_resume
     )

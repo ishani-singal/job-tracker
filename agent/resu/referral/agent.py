@@ -187,7 +187,7 @@ _RULES_REMINDER = (
 )
 
 
-def _first_draft_prompt(company: str, roles: list[RoleInput]) -> str:
+def _first_draft_prompt(company: str, roles: list[RoleInput], uploaded_resume: str | None = None) -> str:
     pool_note = (
         f" Only the best-fitting {FINAL_ROLES} of these roles will be kept — the rest are dropped "
         "after an ATS check — so lead with what most of them share."
@@ -195,6 +195,17 @@ def _first_draft_prompt(company: str, roles: list[RoleInput]) -> str:
         else ""
     )
     jds = "\n\n---\n\n".join(f"## Job description {i}: {r.title}\n{r.jd_text[:8000]}" for i, r in enumerate(roles, 1))
+    upload_note = (
+        "\n\nThe candidate has uploaded their OWN current resume, below as extracted text. Treat it as "
+        "the primary draft: keep their wording, bullets, entry choices and edits wherever they already "
+        "comply with the guidelines, and change only what is needed to (a) reach the ATS target on each "
+        "JD without inventing anything and (b) follow every resume guideline and the process template. "
+        "Their entries and Stories in your instructions stay the source of truth for facts — never add a "
+        "claim that neither the uploaded resume nor those support.\n\n## Uploaded resume\n"
+        + uploaded_resume[:15000]
+        if uploaded_resume
+        else ""
+    )
     return (
         f"Generate ONE resume for the candidate that is tailored to ALL {len(roles)} of the "
         f"following {company} job descriptions at once — a single resume that would score at "
@@ -203,7 +214,7 @@ def _first_draft_prompt(company: str, roles: list[RoleInput]) -> str:
         "JD's specific ones, but only where the candidate's real background supports them — never "
         "fabricate experience. " + _RULES_REMINDER + " This is an automated run: if you would "
         "normally ask a clarifying question, make the most reasonable assumption and finish with "
-        "done=true." + pool_note + "\n\n" + jds
+        "done=true." + pool_note + upload_note + "\n\n" + jds
     )
 
 
@@ -279,6 +290,7 @@ async def run_referral(
     tone: Tone,
     channel: Channel,
     roles: list[RoleInput],
+    uploaded_resume: str | None = None,
 ) -> ReferralResult:
     async def say(message: str) -> None:
         await _report_progress(api_base_url, session_id, message)
@@ -328,8 +340,15 @@ async def run_referral(
         return (-len(violations), min(s.score for s in scores), sum(s.score for s in scores) / len(scores))
 
     with run_scope():
-        await say(f"Building one resume for {len(roles)} role(s) — target {ATS_TARGET}% ATS on each...")
-        resume, history = await _generate(_first_draft_prompt(company, roles), None, deps)
+        await say(
+            (
+                f"Building the final draft from your uploaded resume for {len(roles)} role(s)"
+                if uploaded_resume
+                else f"Building one resume for {len(roles)} role(s)"
+            )
+            + f" — target {ATS_TARGET}% ATS on each..."
+        )
+        resume, history = await _generate(_first_draft_prompt(company, roles, uploaded_resume), None, deps)
 
         for draft in range(1, MAX_DRAFTS + 1):
             drafts_made = draft

@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { GenerationSessionScope, StoryEntryType } from '@prisma/client';
 import { SessionsService } from './sessions.service';
 
@@ -44,6 +45,16 @@ export class SessionsController {
   @Post(':id/reply')
   reply(@Param('id') id: string, @Body() body: { message: string }) {
     return this.sessions.reply(id, body.message);
+  }
+
+  /** REFERRAL sessions only: the user uploads their own (e.g. hand-edited)
+   * resume and gets one more final draft for the roles in the latest result. */
+  @Post(':id/upload-resume')
+  async uploadReferralResume(@Param('id') id: string, @Req() req: FastifyRequest) {
+    const file = await req.file();
+    if (!file) throw new BadRequestException('no file provided');
+    const buffer = await file.toBuffer();
+    return this.sessions.uploadReferralResume(id, file.filename, file.mimetype, buffer);
   }
 
   @Post(':id/accept')

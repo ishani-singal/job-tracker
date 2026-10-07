@@ -354,12 +354,47 @@ function SessionChat({ session }: { session: GenerationSession }) {
         </div>
       )}
 
+      {session.scope === 'REFERRAL' && session.status !== 'RUNNING' && (
+        <ReferralUpload sessionId={session.id} />
+      )}
+
       {previewApplicationId && (
         <ResumePreviewDialog
           applicationId={previewApplicationId}
           onClose={() => setPreviewApplicationId(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** Under a finished referral chat: upload your own (e.g. hand-edited) resume to
+ * get one more final draft — same roles, tone and channel — built from it. */
+function ReferralUpload({ sessionId }: { sessionId: string }) {
+  const queryClient = useQueryClient();
+  const upload = useMutation({
+    mutationFn: (file: File) => api.uploadReferralResume(sessionId, file),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+  });
+  return (
+    <div className="border-t p-3 flex flex-col gap-1.5">
+      <label className="text-xs opacity-70">
+        Edited the resume yourself? Upload it (.docx, .pdf or .txt) and I&apos;ll build one more final draft for
+        these roles from it.
+      </label>
+      <input
+        type="file"
+        accept=".docx,.pdf,.txt,.md"
+        className="text-xs"
+        disabled={upload.isPending}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) upload.mutate(file);
+          e.target.value = '';
+        }}
+      />
+      {upload.isPending && <span className="text-xs opacity-60">Uploading...</span>}
+      {upload.error && <span className="text-xs text-red-600 dark:text-red-400">{upload.error.message}</span>}
     </div>
   );
 }

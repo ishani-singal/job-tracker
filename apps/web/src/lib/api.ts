@@ -225,6 +225,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ scope: 'ENTRY_DOCUMENT', entryType, entryId, entryLabel }),
     }),
+  uploadReferralResume: async (id: string, file: File) => {
+    // Multipart — can't go through request(), which sets a JSON content type.
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/sessions/${id}/upload-resume`, { method: 'POST', body: form });
+    if (!res.ok) {
+      const body = await res.json().catch(() => undefined);
+      throw new ApiError((body as { message?: string })?.message ?? `Upload failed: ${res.status}`, res.status, body);
+    }
+    return (await res.json()) as GenerationSession;
+  },
   replyToSession: (id: string, message: string) =>
     request<GenerationSession>(`/sessions/${id}/reply`, {
       method: 'POST',

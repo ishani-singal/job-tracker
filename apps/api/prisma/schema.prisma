@@ -666,6 +666,9 @@ model ReferralRequest {
   id            String         @id @default(cuid())
   contactId     String
   contact       CompanyContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  // The REFERRAL chat session that produced it (a session can produce several:
+  // the first run, then a final draft per uploaded resume). Null on old rows.
+  sessionId     String?
   tone          String
   // linkedin | whatsapp | text | email — what the message was written for.
   channel       String?
@@ -681,4 +684,5 @@ model ReferralRequest {
   createdAt DateTime @default(now())
 
   @@index([contactId])
+  @@index([sessionId])
 }

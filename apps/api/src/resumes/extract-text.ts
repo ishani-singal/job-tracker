@@ -132,6 +132,12 @@ function extractXlsxText(buffer: Buffer): string {
  */
 export async function extractTextFromFile(storedPath: string, mimeType: string): Promise<string> {
   const buffer = await readFile(join(UPLOAD_DIR, storedPath));
+  return extractTextFromBuffer(buffer, mimeType);
+}
+
+/** Same extraction for a file that's only in memory (e.g. a one-off upload that
+ * shouldn't be stored as a Resume/Stories file). */
+export async function extractTextFromBuffer(buffer: Buffer, mimeType: string): Promise<string> {
 
   if (
     mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'

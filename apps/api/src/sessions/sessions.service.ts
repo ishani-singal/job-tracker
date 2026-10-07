@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import { PrismaService } from '../prisma/prisma.service';
 import { GenerationSessionScope, MessageRole, Prisma, StoryEntryType } from '@prisma/client';
@@ -7,6 +7,17 @@ import { LlmKillSwitchService } from '../llm-kill-switch/llm-kill-switch.service
 import { StoriesService, sanitizeDocumentHtml } from '../stories/stories.service';
 import { CompanyRolesService } from '../company-roles/company-roles.service';
 import { enforceBulletBounds } from '../applications/resume-bounds';
+import { extractTextFromBuffer } from '../resumes/extract-text';
+
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+/** Browsers often send .docx/.pdf as application/octet-stream — trust the extension. */
+function uploadMime(filename: string, mimetype: string): string {
+  const ext = filename.toLowerCase().split('.').pop();
+  if (ext === 'docx') return DOCX_MIME;
+  if (ext === 'pdf') return 'application/pdf';
+  return mimetype;
+}
 
 const AGENT_SERVICE_URL = process.env.RESU_AGENT_URL ?? 'http://localhost:8743';
 
@@ -274,6 +285,36 @@ export class SessionsService {
     return session;
   }
 
+  /**
+   * REFERRAL sessions: the user uploads their own resume (typically the generated
+   * one after hand edits) and gets one more final draft for the roles in the
+   * latest result. The file is only read for its text — it isn't stored as a
+   * Resume-tab file. The run continues in this same chat.
+   */
+  async uploadReferralResume(sessionId: string, filename: string, mimetype: string, buffer: Buffer) {
+    const session = await this.get(sessionId);
+    if (session.scope !== 'REFERRAL') {
+      throw new BadRequestException('Only referral sessions take an uploaded resume');
+    }
+    if (session.status === 'RUNNING') {
+      throw new BadRequestException('This session is still running — wait for it to finish first');
+    }
+    const text = (await extractTextFromBuffer(buffer, uploadMime(filename, mimetype))).trim();
+    if (text.length < 200) {
+      throw new BadRequestException("Couldn't read enough text from that file — upload a .docx, .pdf or .txt resume");
+    }
+    await this.prisma.sessionMessage.create({
+      data: { sessionId, role: MessageRole.USER, content: `Uploaded resume: ${filename}` },
+    });
+    await this.prisma.generationSession.update({
+      where: { id: sessionId },
+      data: { status: 'RUNNING', errorMessage: null },
+    });
+    // The upload text rides in `userReply` (this scope has no question/reply turns).
+    this.runTurnInBackground(session, null, text.slice(0, 20000));
+    return this.get(sessionId);
+  }
+
   /** User answering a question the agent asked — resumes the same conversation. */
   async reply(sessionId: string, userReply: string) {
     const session = await this.get(sessionId);
@@ -430,6 +471,7 @@ export class SessionsService {
           session.referralTone!,
           session.referralChannel ?? 'email',
           session.referralRoleIds ?? [],
+          userReply ?? undefined,
         );
       } else if (session.scope === 'COMPANY') {
         await this.runCompanyTurn(session.id, session.company!, priorHistoryJson, userReply);
@@ -628,14 +670,30 @@ export class SessionsService {
     tone: string,
     channel: string,
     roleIds: string[],
+    uploadedResume?: string,
   ) {
+    // A final draft from an uploaded resume targets the roles the latest result
+    // actually kept (the first run may have dropped some of the original pool).
+    if (uploadedResume) {
+      const latest = await this.prisma.referralRequest.findFirst({
+        where: { sessionId },
+        orderBy: { createdAt: 'desc' },
+      });
+      const keptIds = ((latest?.roles ?? []) as { id: string }[]).map((r) => r.id);
+      if (keptIds.length > 0) roleIds = keptIds;
+    }
     const contact = await this.prisma.companyContact.findUnique({
       where: { id: contactId },
       include: { company: true },
     });
     if (!contact) throw new Error('Contact no longer exists');
 
-    await this.progress(sessionId, `Referral for ${contact.name} at ${contact.company.name} — ${tone} tone via ${channel}, ${roleIds.length} role(s)`);
+    await this.progress(
+      sessionId,
+      uploadedResume
+        ? `Final draft for ${contact.name} at ${contact.company.name} from your uploaded resume — ${tone} tone via ${channel}, ${roleIds.length} role(s)`
+        : `Referral for ${contact.name} at ${contact.company.name} — ${tone} tone via ${channel}, ${roleIds.length} role(s)`,
+    );
 
     const roles: { id: string; title: string; url: string; jd_text: string }[] = [];
     for (const roleId of roleIds) {
@@ -670,6 +728,7 @@ export class SessionsService {
         tone,
         channel,
         roles,
+        uploaded_resume: uploadedResume ?? null,
       }),
       signal: this.agentCallSignal(sessionId, 20 * 60 * 1000),
       dispatcher: agentDispatcher,
@@ -690,6 +749,7 @@ export class SessionsService {
     const referral = await this.prisma.referralRequest.create({
       data: {
         contactId,
+        sessionId,
         tone,
         channel,
         roles: rolesJson,
@@ -697,7 +757,9 @@ export class SessionsService {
         resumeContent: result.resume as unknown as Prisma.InputJsonValue,
         scores,
         targetMet: result.target_met,
-        note: result.note,
+        note: uploadedResume
+          ? ['Final draft built from your uploaded resume.', result.note].filter(Boolean).join(' ')
+          : result.note,
       },
     });
 
