@@ -25,6 +25,9 @@ export function renderStructuredResumePdf(
 
 const PAGE_HEIGHT = 792; // LETTER, points
 const PAGE_WIDTH = 612;
+// Fit to this fraction of the page's content height, leaving slack for the small differences
+// between this measurement (pdfkit/Helvetica) and Word/LibreOffice (Arial) line layout.
+const HEIGHT_SAFETY = 0.985;
 const MEASURE_PAGE_HEIGHT = 20000; // taller than any resume, so measuring never page-breaks
 const BULLET_FONT_HARD_FLOOR = 9;
 
@@ -149,7 +152,7 @@ export function measureOverflow(
   const fit = findFit(content, template, candidateName);
   const fields = resolvedFields(template, fit);
   const used = measureHeight(content, template, fit, candidateName);
-  const available = PAGE_HEIGHT - fields.marginTop - fields.marginBottom;
+  const available = (PAGE_HEIGHT - fields.marginTop - fields.marginBottom) * HEIGHT_SAFETY;
   return { fits: used <= available, overflowPoints: Math.max(0, used - available), bulletFont: fields.bulletFont };
 }
 
@@ -161,7 +164,7 @@ function fitsOnOnePage(
 ): boolean {
   const usedHeight = measureHeight(content, template, fit, candidateName);
   const fields = resolvedFields(template, fit);
-  const available = PAGE_HEIGHT - fields.marginTop - fields.marginBottom;
+  const available = (PAGE_HEIGHT - fields.marginTop - fields.marginBottom) * HEIGHT_SAFETY;
   return usedHeight <= available;
 }
 

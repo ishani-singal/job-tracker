@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { isStructuredResume } from '../applications/structured-resume-content';
 import { enforceBulletBounds } from '../applications/resume-bounds';
+import { measureOverflow } from '../applications/structured-resume-pdf';
+import { buildContactLine } from '../applications/contact-line';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -128,9 +130,21 @@ export class ResumesService {
    * just before it's rendered, so every download (including resumes generated
    * before a rule or limit was set) follows them. Non-structured content passes
    * through untouched. */
-  async applyResumeRules(content: Prisma.JsonValue): Promise<Prisma.JsonValue> {
+  async applyResumeRules(
+    content: Prisma.JsonValue,
+    options: { trimToFit?: boolean } = { trimToFit: true },
+  ): Promise<Prisma.JsonValue> {
     if (!isStructuredResume(content)) return content;
-    return (await enforceBulletBounds(this.prisma, content)) as unknown as Prisma.JsonValue;
+    if (!options.trimToFit) return (await enforceBulletBounds(this.prisma, content)) as unknown as Prisma.JsonValue;
+
+    // Rendering path: the resume must come out as ONE page. Measure with the same contact line
+    // that will be printed, and cut the least valuable bullets only if it still overflows.
+    const [template, profile] = await Promise.all([this.getResumeTemplate(), this.getProfile()]);
+    const contactLine = buildContactLine(profile);
+    return (await enforceBulletBounds(this.prisma, content, {
+      overflowPoints: (r) =>
+        measureOverflow({ ...r, contactLine: contactLine || r.contactLine }, template, profile.candidateName).overflowPoints,
+    })) as unknown as Prisma.JsonValue;
   }
 
   async updateProfile(input: ProfileFieldsInput) {

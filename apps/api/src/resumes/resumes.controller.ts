@@ -118,7 +118,7 @@ export class ResumesController {
   async fitCheck(@Body() body: StructuredResume) {
     const [template, profile] = await Promise.all([this.resumes.getResumeTemplate(), this.resumes.getProfile()]);
     // Measure with the same contact line that will be rendered.
-    const ruled = (await this.resumes.applyResumeRules(body as unknown as Prisma.JsonValue)) as unknown as StructuredResume;
+    const ruled = (await this.resumes.applyResumeRules(body as unknown as Prisma.JsonValue, { trimToFit: false })) as unknown as StructuredResume;
     const content = { ...ruled, contactLine: buildContactLine(profile) || ruled.contactLine };
     const { fits, overflowPoints, bulletFont } = measureOverflow(content, template, profile.candidateName);
     return { fits, overflowLines: Math.ceil(overflowPoints / (bulletFont * 1.2)) };
