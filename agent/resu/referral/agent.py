@@ -416,6 +416,39 @@ async def run_referral(
         if best is None:
             raise RuntimeError(stopped_early or "Could not score the resume")
         best_resume, best_scores, best_violations = best
+
+        # Roles were dropped on the FIRST draft's scores, but the resume was revised
+        # afterwards (and the scorer is noisy), so a dropped role's frozen score is no
+        # longer comparable to a kept role's final one. Score the dropped roles against
+        # the final resume itself and keep the best FINAL_ROLES overall.
+        swaps: list[str] = []
+        if dropped:
+            await say("Re-checking the roles dropped earlier against the final resume...")
+            dropped_ids = {d.role_id for d in dropped}
+            try:
+                rescored = list(
+                    await asyncio.gather(
+                        *(_score_one(resume_to_text(best_resume), r) for r in roles if r.id in dropped_ids)
+                    )
+                )
+            except BudgetExceededError as exc:
+                stopped_early = stopped_early or str(exc)
+                rescored = []
+            if rescored:
+                pool = best_scores + rescored  # kept first, so a tie keeps the role already in
+                ranked = sorted(range(len(pool)), key=lambda i: (-pool[i].score, i))
+                keep = {pool[i].role_id for i in ranked[:FINAL_ROLES]}
+                by_id = {sc.role_id: sc for sc in pool}
+                old_kept = {sc.role_id for sc in best_scores}
+                for rid in keep - old_kept:
+                    out_id = next(k for k in old_kept if k not in keep)
+                    old_kept.discard(out_id)
+                    swaps.append(f"{by_id[rid].title} ({by_id[rid].score}%) replaced {by_id[out_id].title} ({by_id[out_id].score}%)")
+                    await say(f"  Swapping in {by_id[rid].title} ({by_id[rid].score}%) for {by_id[out_id].title} ({by_id[out_id].score}%)")
+                active = [r for r in roles if r.id in keep]
+                best_scores = [by_id[r.id] for r in active]
+                dropped = [by_id[r.id].model_copy(update={"dropped": True}) for r in roles if r.id not in keep]
+
         # The model was told each entry's bullet ceiling and given revisions to
         # meet it; anything still over is cut so the saved resume never exceeds it.
         if enforce_bullet_bounds(best_resume, entries):
@@ -440,6 +473,8 @@ async def run_referral(
 
     target_met = all(s_.score >= ATS_TARGET for s_ in best_scores)
     notes: list[str] = []
+    if swaps:
+        notes.append("After the final draft, " + "; ".join(swaps) + ", so the links are the best fits for the attached resume.")
     if dropped:
         notes.append(
             f"Dropped {len(dropped)} role(s) to land on {len(active)}: "
