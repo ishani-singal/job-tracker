@@ -139,6 +139,17 @@ export function findFit(
   return { scale: 0, marginCut: marginSpan, nameCut: Math.max(0, nameSpan) };
 }
 
+/** The resume's total content height (points) at an explicit fit — exported for calibration against
+ * the real Word/LibreOffice layout. */
+export function measureContentHeight(
+  content: StructuredResume,
+  template: ResumeTemplate,
+  fit: FitParams,
+  candidateName?: string | null,
+): number {
+  return measureHeight(content, template, fit, candidateName);
+}
+
 /**
  * Whether the resume fits one page after the fit search has given every field
  * all the room the template allows, and by how many points it overflows if not
