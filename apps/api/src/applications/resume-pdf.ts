@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import PDFDocument from 'pdfkit';
 import type { Prisma } from '@prisma/client';
 import type { ResumeTemplate as SharedResumeTemplate } from '@job-tracker/shared-types';
@@ -19,7 +20,27 @@ type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
  * fit is redone with a tighter height allowance (smaller fonts/spacing, then margins) and tried again.
  * The Word file returned is the very one that produced the one-page PDF.
  */
-async function renderVerified(
+const verifiedCache = new Map<string, Promise<{ docx: Buffer; pdf: Buffer }>>();
+const VERIFIED_CACHE_MAX = 16;
+
+/** Caches the verified pair by what determines it, so the PDF preview and the Word download of the
+ * same resume (and repeat downloads) reuse one render+convert+verify (~10s) instead of each paying it. */
+function renderVerified(
+  content: StructuredResume,
+  template: ResumeTemplate,
+  candidateName?: string | null,
+): Promise<{ docx: Buffer; pdf: Buffer }> {
+  const key = createHash('sha1').update(JSON.stringify([content, template, candidateName ?? null])).digest('hex');
+  const hit = verifiedCache.get(key);
+  if (hit) return hit;
+  const pending = renderVerifiedUncached(content, template, candidateName);
+  verifiedCache.set(key, pending);
+  pending.catch(() => verifiedCache.delete(key));
+  while (verifiedCache.size > VERIFIED_CACHE_MAX) verifiedCache.delete(verifiedCache.keys().next().value as string);
+  return pending;
+}
+
+async function renderVerifiedUncached(
   content: StructuredResume,
   template: ResumeTemplate,
   candidateName?: string | null,
