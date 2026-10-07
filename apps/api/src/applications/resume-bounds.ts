@@ -22,16 +22,24 @@ interface Bound {
  * a name match alone is ambiguous: the entry's title (the resume subtitle may
  * add words, or be retitled) and an MBA/intern hint break the tie, and each
  * Resume-tab entry is used at most once. Entries with no bound are untouched.
+ *
+ * Also: an EDUCATION entry carries no bullets unless that education is currently
+ * active (the Resume-tab entry's "present" flag; for an unmatched entry in an
+ * education section, a dateRange that reads Present/Current).
  */
 export async function enforceBulletBounds(
   prisma: PrismaService,
   resume: StructuredResume,
 ): Promise<StructuredResume> {
-  const [work, interns, projects] = await Promise.all([
+  const [work, interns, projects, education] = await Promise.all([
     prisma.workExperienceEntry.findMany({ select: { company: true, title: true, maxBullets: true } }),
     prisma.internshipEntry.findMany({ select: { company: true, title: true, maxBullets: true } }),
     prisma.projectEntry.findMany({ select: { name: true, maxBullets: true } }),
+    prisma.educationEntry.findMany({ select: { school: true, isPresent: true } }),
   ]);
+  const schools = education
+    .map((e) => ({ key: norm(e.school), active: e.isPresent }))
+    .filter((e) => e.key.length >= 3);
   const all: (Bound | null)[] = [
     ...work.map((w) => ({ kind: 'work' as const, key: norm(w.company), title: norm(w.title), max: w.maxBullets })),
     ...interns.map((i) => ({ kind: 'intern' as const, key: norm(i.company), title: norm(i.title), max: i.maxBullets })),
@@ -58,6 +66,11 @@ export async function enforceBulletBounds(
       entries: section.entries.map((entry) => {
         const name = norm(entry.name);
         if (name.length < 3) return entry;
+        const school = schools.find((s) => name.includes(s.key) || s.key.includes(name));
+        if (school || section.kind === 'education') {
+          const active = school ? school.active : /present|current|ongoing/i.test(entry.dateRange ?? '');
+          return active || entry.bullets.length === 0 ? entry : { ...entry, bullets: [] };
+        }
         const bound = pick(name, norm(entry.subtitle), `${entry.name} ${entry.subtitle ?? ''}`.toLowerCase());
         return bound && entry.bullets.length > bound.max ? { ...entry, bullets: entry.bullets.slice(0, bound.max) } : entry;
       }),

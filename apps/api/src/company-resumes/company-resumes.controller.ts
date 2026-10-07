@@ -35,7 +35,7 @@ export class CompanyResumesController {
       ? await this.resumes.getResumeTemplate()
       : undefined;
     const profile = await this.resumes.getProfile();
-    const pdf = await renderResumePdf(decoded, resume.resumeContent, template, profile.candidateName, buildContactLine(profile));
+    const pdf = await renderResumePdf(decoded, await this.resumes.applyResumeRules(resume.resumeContent), template, profile.candidateName, buildContactLine(profile));
     const safeName = decoded.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/pdf')
@@ -54,7 +54,7 @@ export class CompanyResumesController {
 
     const template = await this.resumes.getResumeTemplate();
     const profile = await this.resumes.getProfile();
-    const docx = await renderResumeDocx(resume.resumeContent, template, profile.candidateName, buildContactLine(profile));
+    const docx = await renderResumeDocx(await this.resumes.applyResumeRules(resume.resumeContent), template, profile.candidateName, buildContactLine(profile));
     const safeName = decoded.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')

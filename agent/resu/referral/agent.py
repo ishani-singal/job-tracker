@@ -182,7 +182,8 @@ _RULES_REMINDER = (
     "lines (30 words or fewer) in the number-first STAR structure with contextualised metrics, "
     "bold only newly incorporated keywords (or the whole bullet if regenerated), the dollar-figure "
     "formatting rules (no '+', K/M/B shorthand, no '~'), the [RETITLE ALLOWED/NOT ALLOWED] tags "
-    "with only one title shown, all required entries included, the exact contact line, plain-text "
+    "with only one title shown, no bullets under an education entry unless that education is currently "
+    "active (dates end 'Present'), all required entries included, the exact contact line, plain-text "
     "bullets without a leading bullet character, and a one-page-fitting resume."
 )
 

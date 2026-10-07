@@ -15,7 +15,7 @@ import { measureOverflow } from '../applications/structured-resume-pdf';
 import { buildContactLine } from '../applications/contact-line';
 import { MultipartValue } from '@fastify/multipart';
 import { ProfileFieldsInput, ResumeTemplateInput, ResumesService } from './resumes.service';
-import { StoryEntryType } from '@prisma/client';
+import { Prisma, StoryEntryType } from '@prisma/client';
 
 /** Reads the required "entryType"/"entryId" fields the upload form sends
  * alongside the file — the two-step dropdown the user picks (category, then
@@ -118,7 +118,8 @@ export class ResumesController {
   async fitCheck(@Body() body: StructuredResume) {
     const [template, profile] = await Promise.all([this.resumes.getResumeTemplate(), this.resumes.getProfile()]);
     // Measure with the same contact line that will be rendered.
-    const content = { ...body, contactLine: buildContactLine(profile) || body.contactLine };
+    const ruled = (await this.resumes.applyResumeRules(body as unknown as Prisma.JsonValue)) as unknown as StructuredResume;
+    const content = { ...ruled, contactLine: buildContactLine(profile) || ruled.contactLine };
     const { fits, overflowPoints, bulletFont } = measureOverflow(content, template, profile.candidateName);
     return { fits, overflowLines: Math.ceil(overflowPoints / (bulletFont * 1.2)) };
   }

@@ -72,7 +72,7 @@ export class ApplicationsController {
       ? await this.resumes.getResumeTemplate()
       : undefined;
     const profile = await this.resumes.getProfile();
-    const pdf = await renderResumePdf(title || 'Resume', application.resumeContent, template, profile.candidateName, buildContactLine(profile));
+    const pdf = await renderResumePdf(title || 'Resume', await this.resumes.applyResumeRules(application.resumeContent), template, profile.candidateName, buildContactLine(profile));
 
     const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
     // `inline=1` is used by the in-chat preview dialog, which embeds this in
@@ -99,7 +99,7 @@ export class ApplicationsController {
 
     const template = await this.resumes.getResumeTemplate();
     const profile = await this.resumes.getProfile();
-    const docx = await renderResumeDocx(application.resumeContent, template, profile.candidateName, buildContactLine(profile));
+    const docx = await renderResumeDocx(await this.resumes.applyResumeRules(application.resumeContent), template, profile.candidateName, buildContactLine(profile));
 
     const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
     res

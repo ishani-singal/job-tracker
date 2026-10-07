@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isStructuredResume } from '../applications/structured-resume-content';
+import { enforceBulletBounds } from '../applications/resume-bounds';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -119,6 +121,16 @@ export class ResumesService {
     return this.prisma.resumePromptTemplate.create({
       data: { name: 'default', templateBody: DEFAULT_TEMPLATE_BODY },
     });
+  }
+
+  /** Applies the Resume-tab rules the model can't be fully trusted with — per-entry
+   * bullet ceilings and "no bullets on finished education" — to a saved resume
+   * just before it's rendered, so every download (including resumes generated
+   * before a rule or limit was set) follows them. Non-structured content passes
+   * through untouched. */
+  async applyResumeRules(content: Prisma.JsonValue): Promise<Prisma.JsonValue> {
+    if (!isStructuredResume(content)) return content;
+    return (await enforceBulletBounds(this.prisma, content)) as unknown as Prisma.JsonValue;
   }
 
   async updateProfile(input: ProfileFieldsInput) {

@@ -54,7 +54,10 @@ INSTRUCTIONS = (
     "'Story: [none yet]' has no detailed document generated for it yet — for "
     "that entry only, you may call fetch_document_for_entry yourself if you "
     "suspect a document was generated after this prompt was built, but never "
-    "invent facts not grounded in that entry's own Story."
+    "invent facts not grounded in that entry's own Story.\n\n"
+    "Education entries: NEVER write bullets under an education entry unless that "
+    "education is currently active (its end date is Present). A completed degree is "
+    "only its school, degree/field, location and dates — leave its bullets list empty."
 )
 
 

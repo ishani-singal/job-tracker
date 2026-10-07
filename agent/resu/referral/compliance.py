@@ -98,6 +98,11 @@ def enforce_bullet_bounds(resume: StructuredResume, entries: dict) -> int:
     for section in resume.sections:
         for entry in section.entries:
             found = _match_entry(entry.name, entries, entry.subtitle, used)
+            if found and found[0] == "education":
+                if entry.bullets and not found[1].get("isPresent"):
+                    entry.bullets = []
+                    trimmed += 1
+                continue
             hi = found[1].get("maxBullets") if found else None
             if hi is not None and len(entry.bullets) > hi:
                 entry.bullets = entry.bullets[:hi]
@@ -135,6 +140,10 @@ def check_resume(resume: StructuredResume, entries: dict, profile: dict) -> list
             if not found:
                 continue
             group, e = found
+            if group == "education":
+                if entry.bullets and not e.get("isPresent"):
+                    problems.append(f"{label}: education has bullets but is not currently active — leave its bullets empty")
+                continue
             n = len(entry.bullets)
             lo, hi = e.get("minBullets"), e.get("maxBullets")
             if hi is not None and n > hi:

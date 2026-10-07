@@ -44,7 +44,7 @@ export class ReferralsController {
     const template = isStructuredResume(referral.resumeContent) ? await this.resumes.getResumeTemplate() : undefined;
     const profile = await this.resumes.getProfile();
     const company = referral.contact.company.name;
-    const pdf = await renderResumePdf(company, referral.resumeContent, template, profile.candidateName, buildContactLine(profile));
+    const pdf = await renderResumePdf(company, await this.resumes.applyResumeRules(referral.resumeContent), template, profile.candidateName, buildContactLine(profile));
     const safeName = company.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/pdf')
@@ -60,7 +60,7 @@ export class ReferralsController {
     }
     const template = await this.resumes.getResumeTemplate();
     const profile = await this.resumes.getProfile();
-    const docx = await renderResumeDocx(referral.resumeContent, template, profile.candidateName, buildContactLine(profile));
+    const docx = await renderResumeDocx(await this.resumes.applyResumeRules(referral.resumeContent), template, profile.candidateName, buildContactLine(profile));
     const safeName = referral.contact.company.name.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
