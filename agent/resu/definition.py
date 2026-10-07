@@ -12,6 +12,8 @@ triggered behavior.
 """
 from __future__ import annotations
 
+import re
+
 from .tools import (
     fetch_candidate_profile,
     fetch_candidate_resume,
@@ -63,7 +65,8 @@ INSTRUCTIONS = (
     "description of what the project is, drawn from that project's own Story — it is shown "
     "right after the project name, e.g. \"AI-Native predictive maintenance for Manufacturers\". "
     "Name the product or domain, not the work done: no verbs like \"built\" or \"developed\", no "
-    "tech-stack lists, and no more than 4-5 words.\n\n"
+    "tech-stack lists, and no more than 4-5 words. If the Story doesn't say what the project does "
+    "(it is marked THIN STORY), never guess a domain — describe it by its type and stack only.\n\n"
     "Bullet quality: every bullet must read as ONE clear, grammatical sentence a hiring manager "
     "understands on first read — a concrete action, how it was done, and what it achieved. Use JD "
     "keywords only where they naturally describe what was actually done. NEVER string keywords "
@@ -151,6 +154,16 @@ def build_profile_context(
     )
 
 
+def _is_thin_story(story: str) -> bool:
+    """True when a Story has no real prose — e.g. only a repository file/language
+    listing, which is all that's available for a private repo whose README can't be
+    read. Prose here = lines of 12+ words; a real description has plenty. Without
+    this guard the model fills the gap by guessing a purpose (and metrics) from the
+    entry's name alone."""
+    prose_words = sum(len(line.split()) for line in story.splitlines() if len(line.split()) >= 12)
+    return prose_words < 40
+
+
 def _bullet_bounds_suffix(e: dict) -> str:
     """Renders this specific entry's own bullet count bound (set per-entry in
     Settings, not shared across every entry of the same type) as a bracketed
@@ -212,7 +225,18 @@ def _render_entries(entries: dict, stories_by_entry: dict[tuple[str, str], str])
     def story_line(entry_type: str, e: dict) -> str:
         story = stories_by_entry.get((entry_type, e["id"]))
         if story:
-            return f"\n  Story: {story}"
+            line = f"\n  Story: {story}"
+            if _is_thin_story(story):
+                line += (
+                    "\n  [THIN STORY — it does not say what this actually does. Use ONLY the facts "
+                    "stated above (name, tech stack, structure, dates). Do NOT guess its purpose, "
+                    "domain, users, customers or outcomes, and do NOT invent any metric or number — "
+                    "even if the name resembles a known organisation or product. Keep its bullets "
+                    "short and factual (what is built, with which stack), and for a project's subtitle "
+                    "describe it by its type and stack only, e.g. \"Full-stack TypeScript and Python "
+                    "app\".]"
+                )
+            return line
         return "\n  Story: [none yet]"
 
     def render_group(label: str, entry_type: str, items: list[dict], line_fn) -> str:
