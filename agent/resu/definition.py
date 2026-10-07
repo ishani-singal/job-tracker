@@ -125,11 +125,11 @@ def build_profile_context(
         profile.get("candidateEmail"),
         location or None,
         profile.get("candidatePhone"),
-        profile.get("linkedinUrl"),
-        profile.get("githubUrl"),
-        # Rendered as the text "Portfolio", hyperlinked — keep the markdown link
-        # exactly as written here.
-        f"[Portfolio]({profile['portfolioUrl']})" if profile.get("portfolioUrl") else None,
+        # Each link is rendered as just its word ("LinkedIn", "GitHub", "Portfolio"),
+        # hyperlinked — keep these markdown links exactly as written here.
+        _md_link("LinkedIn", profile.get("linkedinUrl")),
+        _md_link("GitHub", profile.get("githubUrl")),
+        _md_link("Portfolio", profile.get("portfolioUrl")),
     ]
     contact_line_instruction = (
         "## Contact line\n"
@@ -152,6 +152,13 @@ def build_profile_context(
         f"{entries_section}"
         f"## Process template\n{profile.get('templateBody', '')}"
     )
+
+
+def _md_link(label: str, url: str | None) -> str | None:
+    """"[label](url)" with https:// added to a bare address, or None when there's no URL."""
+    if not url:
+        return None
+    return f"[{label}]({url if re.match(r'^https?://', url, re.I) else 'https://' + url})"
 
 
 def _is_thin_story(story: str) -> bool:

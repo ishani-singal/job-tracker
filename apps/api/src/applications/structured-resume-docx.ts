@@ -90,6 +90,11 @@ function buildDocument(content: StructuredResume, fields: ResolvedFields, candid
   }
 
   return new Document({
+    // Without a named font the .docx falls back to the viewer's default (a serif at 12pt in
+    // LibreOffice), so the PDF was laid out differently from the fit measurement, which uses
+    // Helvetica. Arial is metric-compatible with Helvetica (LibreOffice maps it to Liberation
+    // Sans), so the two agree on line breaks and heights.
+    styles: { default: { document: { run: { font: 'Arial' } } } },
     sections: [
       {
         properties: {

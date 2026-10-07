@@ -1,11 +1,16 @@
+/** Adds https:// to a bare address so it works as a link target. */
+function asUrl(u: string): string {
+  return /^https?:\/\//i.test(u) ? u : `https://${u}`;
+}
+
 /**
  * The resume's contact line, built from the CURRENT profile every time a resume
- * is rendered (not only when it was generated), so links added later — GitHub,
- * portfolio — show up on resumes that were already saved. Same value and order
- * the resume agent is told to use verbatim (agent/resu/definition.py):
- * email | location | phone | LinkedIn | GitHub | Portfolio. The portfolio is a
- * markdown link, [Portfolio](url), which the renderers show as the text
- * "Portfolio" hyperlinked to the URL; LinkedIn/GitHub show as their URLs, linked.
+ * is rendered (not only when it was generated), so links added later show up on
+ * resumes that were already saved. Same value and order the resume agent is told
+ * to use verbatim (agent/resu/definition.py):
+ * email | location | phone | LinkedIn | GitHub | Portfolio. The three links are
+ * markdown links — [LinkedIn](url), [GitHub](url), [Portfolio](url) — which the
+ * renderers show as just those words, hyperlinked to the URL.
  */
 export function buildContactLine(profile: {
   candidateEmail?: string | null;
@@ -22,9 +27,9 @@ export function buildContactLine(profile: {
     profile.candidateEmail,
     location || null,
     profile.candidatePhone,
-    profile.linkedinUrl,
-    profile.githubUrl,
-    profile.portfolioUrl ? `[Portfolio](${profile.portfolioUrl})` : null,
+    profile.linkedinUrl ? `[LinkedIn](${asUrl(profile.linkedinUrl)})` : null,
+    profile.githubUrl ? `[GitHub](${asUrl(profile.githubUrl)})` : null,
+    profile.portfolioUrl ? `[Portfolio](${asUrl(profile.portfolioUrl)})` : null,
   ]
     .filter(Boolean)
     .join(' | ');
