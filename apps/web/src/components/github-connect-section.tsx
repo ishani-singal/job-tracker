@@ -74,6 +74,21 @@ export function GithubConnectSection() {
             </button>
           </div>
 
+          {connection.tokenValid === false && (
+            <div className="border border-red-500 rounded p-2 text-xs text-red-600 dark:text-red-400 flex items-center justify-between gap-3">
+              <span>
+                GitHub is rejecting this connection (it was revoked or has expired), so repos — including private
+                ones — can&apos;t be read and their stories won&apos;t be refreshed. Reconnect to fix it.
+              </span>
+              <a
+                href={`${API_BASE}/auth/github/start`}
+                className="shrink-0 px-2 py-1 rounded bg-black text-white dark:bg-white dark:text-black"
+              >
+                Reconnect GitHub
+              </a>
+            </div>
+          )}
+
           {connectedRepos && connectedRepos.length > 0 && (
             <div className="flex flex-col gap-1">
               <h3 className="text-xs font-medium uppercase opacity-60">Connected</h3>

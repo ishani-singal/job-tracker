@@ -116,7 +116,7 @@ export const api = {
   deleteResumeFile: (id: string) => request<void>(`/resumes/files/${id}`, { method: 'DELETE' }),
 
   getGithubConnection: () =>
-    request<{ githubLogin: string } | null>('/github/connection'),
+    request<{ githubLogin: string; tokenValid?: boolean } | null>('/github/connection'),
   disconnectGithub: () => request<void>('/github/connection', { method: 'DELETE' }),
   listAvailableRepos: () =>
     request<{ fullName: string; description: string | null; private: boolean; updatedAt: string }[]>(

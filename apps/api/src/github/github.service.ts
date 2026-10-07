@@ -108,11 +108,54 @@ export class GithubService {
     });
   }
 
-  /** Connection status for the frontend — deliberately omits accessToken. */
-  async getConnection(): Promise<{ githubLogin: string; connectedAt: Date } | null> {
+  /** Connection status for the frontend — deliberately omits accessToken.
+   * `tokenValid` is false when GitHub rejects the saved token (revoked or
+   * expired): the row is still there, so without this the UI keeps saying
+   * "Connected" while every repo read quietly fails with a 401. A network error
+   * is treated as "unknown" (valid) rather than raising a false alarm. */
+  async getConnection(): Promise<{ githubLogin: string; connectedAt: Date; tokenValid: boolean } | null> {
     const connection = await this.prisma.githubConnection.findFirst();
     if (!connection) return null;
-    return { githubLogin: connection.githubLogin, connectedAt: connection.connectedAt };
+    let tokenValid = true;
+    try {
+      const res = await fetch(`${GITHUB_API_BASE}/user`, {
+        headers: { Authorization: `Bearer ${connection.accessToken}`, Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(8000),
+      });
+      tokenValid = res.status !== 401;
+    } catch {
+      /* unreachable — leave as valid */
+    }
+    return { githubLogin: connection.githubLogin, connectedAt: connection.connectedAt, tokenValid };
+  }
+
+  /**
+   * A repo with no README (this one has ARCHITECTURE.md and CLAUDE.md instead)
+   * would otherwise give the story nothing about what the project IS — only a
+   * file listing. Fall back to the first of these docs that exists.
+   */
+  private async fetchFallbackDoc(
+    fullName: string,
+    headers: Record<string, string>,
+    rootFiles: string[],
+  ): Promise<string> {
+    const candidates = ['ARCHITECTURE.md', 'CLAUDE.md', 'docs/README.md', 'docs/architecture.md', 'docs/overview.md'];
+    const lowerRoot = new Set(rootFiles.map((f) => f.toLowerCase()));
+    for (const path of candidates) {
+      // Root files are known from the listing; docs/* has to be tried.
+      if (!path.includes('/') && !lowerRoot.has(path.toLowerCase())) continue;
+      try {
+        const res = await fetch(`${GITHUB_API_BASE}/repos/${fullName}/contents/${path}`, {
+          headers: { ...headers, Accept: 'application/vnd.github.raw+json' },
+        });
+        if (!res.ok) continue;
+        const text = (await res.text()).trim();
+        if (text) return `[No README in this repo — using ${path}]\n\n${text.slice(0, 20000)}`;
+      } catch {
+        /* try the next candidate */
+      }
+    }
+    return '';
   }
 
   async disconnect() {
@@ -271,7 +314,7 @@ export class GithubService {
             ? ((await contentsRes.json()) as { name: string }[]).map((f) => f.name)
             : [];
 
-          const readme = readmeRes.ok ? await readmeRes.text() : '';
+          const readme = readmeRes.ok ? await readmeRes.text() : await this.fetchFallbackDoc(fullName, headers, rootFiles);
 
           return {
             repo: fullName,
@@ -320,7 +363,7 @@ export class GithubService {
       const rootFiles = contentsRes.ok
         ? ((await contentsRes.json()) as { name: string }[]).map((f) => f.name)
         : [];
-      const readme = readmeRes.ok ? await readmeRes.text() : '';
+      const readme = readmeRes.ok ? await readmeRes.text() : await this.fetchFallbackDoc(fullName, headers, rootFiles);
 
       return {
         repo: fullName,
