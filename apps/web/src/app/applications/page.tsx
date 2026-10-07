@@ -442,11 +442,20 @@ export default function ApplicationsPage() {
                     }
                   />
                   {roleByApplicationId.has(app.id) && (
-                    <div className="px-4">
+                    <div className="px-4 flex items-center gap-2">
                       <AtsScoreBadge
                         score={roleByApplicationId.get(app.id)?.atsScore ?? null}
                         invalidReasons={invalidConditionReasons(roleByApplicationId.get(app.id)!, profile, allowCanadaRemote)}
                       />
+                      {roleId && roleByApplicationId.get(app.id)?.atsScore === null && (
+                        <button
+                          className="px-2 py-0.5 text-xs rounded border"
+                          onClick={() => rescoreRole.mutate(roleId)}
+                          disabled={rescoreRole.isPending && rescoreRole.variables === roleId}
+                        >
+                          {rescoreRole.isPending && rescoreRole.variables === roleId ? 'Scoring...' : 'Score'}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
