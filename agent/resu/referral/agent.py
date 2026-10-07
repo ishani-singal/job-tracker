@@ -24,6 +24,7 @@ from ..agent import StructuredResume, _model as _resu_model, resu_agent
 from ..deps import ResuDeps
 from ..rate_limit import LLM_CONCURRENCY, retry_on_rate_limit
 from ..stories.agent import _report_progress
+from ..bullet_quality import issue_lines, review_bullets
 from .compliance import check_resume, enforce_bullet_bounds, expected_contact_line
 
 ATS_TARGET = 90
@@ -180,6 +181,8 @@ _RULES_REMINDER = (
     "the process template still applies exactly as for a single-application resume: follow the "
     "process steps in order, the per-entry [BULLET COUNT] ceilings/minimums, every bullet 1-2 "
     "lines (30 words or fewer) in the number-first STAR structure with contextualised metrics, "
+    "every bullet one coherent sentence (action, how, outcome) — never a string of keywords or a tacked-on "
+    "'using A, B, C' tail, and drop a keyword rather than force it — "
     "bold only newly incorporated keywords (or the whole bullet if regenerated), the dollar-figure "
     "formatting rules (no '+', K/M/B shorthand, no '~'), the [RETITLE ALLOWED/NOT ALLOWED] tags "
     "with only one title shown, no bullets under an education entry unless that education is currently "
@@ -244,7 +247,9 @@ def _revision_prompt(scores: list[RoleScore], dropped: list[RoleScore], violatio
             f"Revise the resume so EVERY job description reaches at least {ATS_TARGET}%. Work the "
             "missing keywords and requirements in only where the candidate's background genuinely "
             "supports them (reword bullets, reorder, surface relevant entries or projects) — never "
-            "invent experience. Keep the scores that are already OK from dropping."
+            "invent experience, and never list or tack keywords onto a bullet: each bullet must still read "
+            "as a coherent sentence, so drop a keyword that doesn't fit. Keep the scores that are already OK "
+            "from dropping."
         )
     else:
         parts.append(
@@ -332,6 +337,8 @@ async def run_referral(
         if contact_line:
             resume.contactLine = contact_line
         problems = check_resume(resume, entries, profile)
+        # Coherence: bullets that are keyword strings / don't make sense alone.
+        problems += [f"Rewrite as a coherent sentence — {line}" for line in issue_lines(await review_bullets(resume))]
         fit = await _fit_check(api_base_url, resume)
         if fit is not None and not fit["fits"]:
             problems.append(

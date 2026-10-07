@@ -63,7 +63,13 @@ INSTRUCTIONS = (
     "description of what the project is, drawn from that project's own Story — it is shown "
     "right after the project name, e.g. \"AI-Native predictive maintenance for Manufacturers\". "
     "Name the product or domain, not the work done: no verbs like \"built\" or \"developed\", no "
-    "tech-stack lists, and no more than 4-5 words."
+    "tech-stack lists, and no more than 4-5 words.\n\n"
+    "Bullet quality: every bullet must read as ONE clear, grammatical sentence a hiring manager "
+    "understands on first read — a concrete action, how it was done, and what it achieved. Use JD "
+    "keywords only where they naturally describe what was actually done. NEVER string keywords "
+    "together, never tack on a tail like \"using A, B, C and D\", and never use a buzzword without "
+    "the work behind it; if a keyword doesn't fit naturally, leave it out rather than forcing it. "
+    "A bullet that is just a combination of keywords is a failed bullet — rewrite it."
 )
 
 

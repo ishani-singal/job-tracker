@@ -195,6 +195,26 @@ async def _inject_profile(ctx: RunContext[ResuDeps]) -> str:
     return build_profile_context(profile, entries, stories)
 
 
+async def _fix_incoherent_bullets(result, deps: ResuDeps):
+    """One automatic revision when a reviewer finds bullets that are strings of
+    keywords or don't make sense on their own (see bullet_quality.py). Only for a
+    finished resume; if the rewrite doesn't come back finished, the original stands."""
+    output = result.output
+    if not (output.done and output.resume):
+        return result
+    from .bullet_quality import issue_lines, quality_fix_prompt, review_bullets
+
+    issues = await review_bullets(output.resume)
+    if not issues:
+        return result
+    fixed = await retry_on_rate_limit(
+        lambda: resu_agent.run(
+            quality_fix_prompt(issue_lines(issues)), deps=deps, message_history=result.all_messages()
+        )
+    )
+    return fixed if (fixed.output.done and fixed.output.resume) else result
+
+
 async def run_turn(
     application_id: str,
     api_base_url: str,
@@ -227,6 +247,7 @@ async def run_turn(
         result = await retry_on_rate_limit(
             lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
         )
+        result = await _fix_incoherent_bullets(result, deps)
     return result.output, result.all_messages()
 
 
@@ -255,4 +276,5 @@ async def run_company_turn(
         result = await retry_on_rate_limit(
             lambda: resu_agent.run(prompt, deps=deps, message_history=message_history)
         )
+        result = await _fix_incoherent_bullets(result, deps)
     return result.output, result.all_messages()
