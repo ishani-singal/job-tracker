@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import type { ResumeTemplate as SharedResumeTemplate, StructuredResume } from '@job-tracker/shared-types';
+import { parseContactLine } from './contact-line';
 
 // The renderer only reads the numeric range fields — never updatedAt — so it
 // accepts either the API's serialized shape (updatedAt: string) or Prisma's
@@ -59,11 +60,7 @@ export function resolvedFields(template: ResumeTemplate, fit: FitParams) {
   const bulletFont = Math.max(BULLET_FONT_HARD_FLOOR, lerp(template.bulletFontMin, template.bulletFontMax, scale));
   const nameFont =
     bulletFont + Math.max(template.nameFontOffsetMin, template.nameFontOffsetMax - fit.nameCut);
-  const sectionHeaderFont = bulletFont + lerp(
-    template.sectionHeaderFontOffsetMin,
-    template.sectionHeaderFontOffsetMax,
-    scale,
-  );
+  const sectionHeaderFont = lerp(template.sectionHeaderFontMin, template.sectionHeaderFontMax, scale);
   // Margins are stored in inches (how the Settings UI presents them) —
   // convert to points here, once, since everything downstream (pdfkit,
   // the docx renderer's pointsToTwips) works in points.
@@ -79,6 +76,8 @@ export function resolvedFields(template: ResumeTemplate, fit: FitParams) {
     spacingBeforeSection: lerp(template.spacingBeforeSectionMin, template.spacingBeforeSectionMax, scale),
     spacingAfterSection: lerp(template.spacingAfterSectionMin, template.spacingAfterSectionMax, scale),
     spacingBetweenBullets: lerp(template.spacingBetweenBulletsMin, template.spacingBetweenBulletsMax, scale),
+    spacingBeforeEntryHeader: lerp(template.spacingBeforeEntryHeaderMin, template.spacingBeforeEntryHeaderMax, scale),
+    spacingAfterEntryHeader: lerp(template.spacingAfterEntryHeaderMin, template.spacingAfterEntryHeaderMax, scale),
   };
 }
 
@@ -258,9 +257,9 @@ function layoutResume(
       .stroke();
     doc.moveDown(fields.spacingAfterSection / fields.bulletFont);
 
-    for (const entry of section.entries) {
-      layoutEntry(doc, entry, fields, isPlainEntry(entry, section.heading));
-    }
+    section.entries.forEach((entry, i) => {
+      layoutEntry(doc, entry, fields, isPlainEntry(entry, section.heading), i === 0);
+    });
   }
 }
 
@@ -289,9 +288,9 @@ const LINK_COLOR = '#0563C1'; // Word's standard hyperlink blue, matched here fo
  * plain text.
  */
 function layoutContactLine(doc: PDFKit.PDFDocument, contactLine: string, fontSize: number): void {
-  const parts = contactLine.split('|').map((p) => p.trim());
+  const parts = parseContactLine(contactLine);
   const SEP = '   |   ';
-  const widths = parts.map((p) => doc.widthOfString(p));
+  const widths = parts.map((p) => doc.widthOfString(p.text));
   const sepWidth = doc.widthOfString(SEP);
   const totalWidth = widths.reduce((a, b) => a + b, 0) + sepWidth * (parts.length - 1);
 
@@ -300,8 +299,7 @@ function layoutContactLine(doc: PDFKit.PDFDocument, contactLine: string, fontSiz
   const y = doc.y;
 
   parts.forEach((part, i) => {
-    const isLinkedIn = /linkedin\.com/i.test(part);
-    const url = isLinkedIn ? (part.startsWith('http') ? part : `https://${part}`) : undefined;
+    const url = part.url;
     if (url) doc.fillColor(LINK_COLOR);
     // Not passed via text()'s own `link`/`underline` options: both compute
     // their annotation/line geometry internally from `options.textWidth`,
@@ -310,7 +308,7 @@ function layoutContactLine(doc: PDFKit.PDFDocument, contactLine: string, fontSiz
     // crashing with "unsupported number: NaN". Drawing the link annotation
     // and underline manually with the width we already computed
     // (`widths[i]`) sidesteps that pdfkit bug entirely.
-    doc.text(part, x, y, { continued: false, lineBreak: false });
+    doc.text(part.text, x, y, { continued: false, lineBreak: false });
     if (url) {
       const underlineY = y + doc.currentLineHeight();
       doc.moveTo(x, underlineY).lineTo(x + widths[i], underlineY).lineWidth(0.5).stroke(LINK_COLOR);
@@ -354,7 +352,11 @@ function layoutEntry(
   entry: StructuredResume['sections'][number]['entries'][number],
   fields: ResolvedFields,
   plain = false,
+  first = false,
 ): void {
+  // Gap above this entry's header (the first entry sits right under its
+  // section header, whose own "after" spacing already covers it).
+  if (!first) doc.y += fields.spacingBeforeEntryHeader;
   if (plain) {
     const left = doc.page.margins.left;
     const width = doc.page.width - doc.page.margins.right - left;
@@ -365,7 +367,6 @@ function layoutEntry(
       doc.moveDown(fields.spacingBetweenBullets / fields.bulletFont);
     }
     doc.x = left;
-    doc.moveDown(fields.spacingAfterSection / fields.bulletFont / 2);
     return;
   }
 
@@ -417,7 +418,7 @@ function layoutEntry(
     doc.y = Math.max(doc.y, nameY + fields.bulletFont * 1.2);
   }
   doc.x = contentLeft;
-  doc.moveDown(0.15);
+  doc.y += fields.spacingAfterEntryHeader;
 
   const startX = doc.page.margins.left + fields.tabStop;
   const bulletWidth = doc.page.width - doc.page.margins.right - startX;
@@ -430,7 +431,6 @@ function layoutEntry(
     layoutBoldedText(doc, bullet, fields.bulletFont, bulletWidth);
     doc.moveDown(fields.spacingBetweenBullets / fields.bulletFont);
   }
-  doc.moveDown(fields.spacingAfterSection / fields.bulletFont / 2);
 }
 
 /**

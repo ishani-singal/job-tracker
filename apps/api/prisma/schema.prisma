@@ -166,6 +166,10 @@ model ResumePromptTemplate {
   candidateEmail        String?
   candidatePhone        String?
   linkedinUrl           String?
+  // Shown on the resume's contact line after LinkedIn: GitHub as its URL, the
+  // portfolio as the text "Portfolio" hyperlinked to this URL.
+  githubUrl             String?
+  portfolioUrl          String?
   targetRoleArchetype   String?
   disqualifierKeywords  String[] @default([])
   // Candidate's location, used to limit/flag scanning to matching roles.
@@ -351,6 +355,19 @@ model ResumeTemplate {
   // per the "same or up to 1pt larger" spec. Always bold.
   sectionHeaderFontOffsetMin Float @default(0)
   sectionHeaderFontOffsetMax Float @default(1)
+
+  // Absolute size (pt) of the section headers — WORK EXPERIENCE, PROJECTS &
+  // INTERNSHIPS, SKILLS & ACTIVITIES, EDUCATION. This is what the renderer uses;
+  // the offset columns above are kept only so older rows/migrations stay valid.
+  sectionHeaderFontMin Float @default(9)
+  sectionHeaderFontMax Float @default(12)
+
+  // Gap (pt) above and below each ENTRY header line (the "COMPANY | Title" row
+  // under a section header), separate from the section-header spacing.
+  spacingBeforeEntryHeaderMin Float @default(0.5)
+  spacingBeforeEntryHeaderMax Float @default(1.5)
+  spacingAfterEntryHeaderMin  Float @default(1)
+  spacingAfterEntryHeaderMax  Float @default(2)
 
   horizontalTabStop Float @default(36)
 

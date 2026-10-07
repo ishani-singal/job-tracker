@@ -10,6 +10,7 @@ import {
   BorderStyle,
 } from 'docx';
 import type { StructuredResume } from '@job-tracker/shared-types';
+import { parseContactLine } from './contact-line';
 import {
   findFit,
   isPlainEntry,
@@ -68,7 +69,10 @@ function buildDocument(content: StructuredResume, fields: ResolvedFields, candid
   for (const section of content.sections) {
     children.push(
       new Paragraph({
-        spacing: { before: pointsToTwips(fields.spacingBeforeSection) },
+        spacing: {
+          before: pointsToTwips(fields.spacingBeforeSection),
+          after: pointsToTwips(fields.spacingAfterSection),
+        },
         border: {
           bottom: { style: BorderStyle.SINGLE, size: 4, space: 2, color: '000000' },
         },
@@ -78,9 +82,11 @@ function buildDocument(content: StructuredResume, fields: ResolvedFields, candid
       }),
     );
 
-    for (const entry of section.entries) {
-      children.push(...layoutEntry(entry, fields, contentWidthTwips, tabStopTwips, isPlainEntry(entry, section.heading)));
-    }
+    section.entries.forEach((entry, i) => {
+      children.push(
+        ...layoutEntry(entry, fields, contentWidthTwips, tabStopTwips, isPlainEntry(entry, section.heading), i === 0),
+      );
+    });
   }
 
   return new Document({
@@ -103,23 +109,21 @@ function buildDocument(content: StructuredResume, fields: ResolvedFields, candid
   });
 }
 
-/** Mirrors layoutContactLine: " | "-joined, centered, LinkedIn segments become hyperlinks. */
+/** Mirrors layoutContactLine: " | "-joined, centered; LinkedIn/GitHub URLs and the portfolio text become hyperlinks. */
 function layoutContactLine(contactLine: string, fontPt: number): Paragraph {
-  const parts = contactLine.split('|').map((p) => p.trim());
+  const parts = parseContactLine(contactLine);
   const runs: (TextRun | ExternalHyperlink)[] = [];
 
   parts.forEach((part, i) => {
-    const isLinkedIn = /linkedin\.com/i.test(part);
-    if (isLinkedIn) {
-      const url = part.startsWith('http') ? part : `https://${part}`;
+    if (part.url) {
       runs.push(
         new ExternalHyperlink({
-          link: url,
-          children: [new TextRun({ text: part, size: pt(fontPt), color: '0563C1', underline: {} })],
+          link: part.url,
+          children: [new TextRun({ text: part.text, size: pt(fontPt), color: '0563C1', underline: {} })],
         }),
       );
     } else {
-      runs.push(new TextRun({ text: part, size: pt(fontPt) }));
+      runs.push(new TextRun({ text: part.text, size: pt(fontPt) }));
     }
     if (i < parts.length - 1) {
       runs.push(new TextRun({ text: '   |   ', size: pt(fontPt) }));
@@ -142,15 +146,19 @@ function layoutEntry(
   contentWidthTwips: number,
   tabStopTwips: number,
   plain = false,
+  first = false,
 ): Paragraph[] {
   const paragraphs: Paragraph[] = [];
+  // Gap above this entry's header (the first entry sits right under its
+  // section header, whose own "after" spacing already covers it).
+  const before = first ? 0 : pointsToTwips(fields.spacingBeforeEntryHeader);
 
   // Skills-style entry: labelled plain lines — no header, bullet or indent.
   if (plain) {
     return entry.bullets.map(
-      (line) =>
+      (line, i) =>
         new Paragraph({
-          spacing: { after: pointsToTwips(fields.spacingBetweenBullets) },
+          spacing: { before: i === 0 ? before : 0, after: pointsToTwips(fields.spacingBetweenBullets) },
           children: layoutBoldedRuns(line, fields.bulletFont),
         }),
     );
@@ -169,6 +177,7 @@ function layoutEntry(
     : new TextRun({ text: headerText, bold: true, size: pt(fields.bulletFont) });
   paragraphs.push(
     new Paragraph({
+      spacing: { before, after: pointsToTwips(fields.spacingAfterEntryHeader) },
       tabStops: [{ type: TabStopType.RIGHT, position: contentWidthTwips }],
       children: [
         entry.url ? new ExternalHyperlink({ link: entry.url, children: [headerRun] }) : headerRun,

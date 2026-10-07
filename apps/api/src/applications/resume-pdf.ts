@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import type { Prisma } from '@prisma/client';
 import type { ResumeTemplate as SharedResumeTemplate } from '@job-tracker/shared-types';
+import type { StructuredResume } from '@job-tracker/shared-types';
 import { isStructuredResume } from './structured-resume-content';
 import { renderStructuredResumeDocx } from './structured-resume-docx';
 import { convertDocxToPdf } from './docx-to-pdf';
@@ -9,6 +10,11 @@ import { convertDocxToPdf } from './docx-to-pdf';
 // the API's serialized shape (updatedAt: string) — the renderer only reads
 // the numeric range fields, so both are accepted here.
 type ResumeTemplate = Omit<SharedResumeTemplate, 'updatedAt'>;
+
+/** Swaps in the live contact line (see contact-line.ts) when one is given. */
+function withContactLine(content: StructuredResume, contactLine?: string): StructuredResume {
+  return contactLine ? { ...content, contactLine } : content;
+}
 
 /**
  * Renders generated resume content into a .docx — the primary rendered
@@ -22,11 +28,12 @@ export function renderResumeDocx(
   content: Prisma.JsonValue,
   template: ResumeTemplate,
   candidateName?: string | null,
+  contactLine?: string,
 ): Promise<Buffer> {
   if (!isStructuredResume(content)) {
     throw new Error('renderResumeDocx requires structured resume content');
   }
-  return renderStructuredResumeDocx(content, template, candidateName);
+  return renderStructuredResumeDocx(withContactLine(content, contactLine), template, candidateName);
 }
 
 /**
@@ -55,9 +62,10 @@ export async function renderResumePdf(
   content: Prisma.JsonValue,
   template?: ResumeTemplate,
   candidateName?: string | null,
+  contactLine?: string,
 ): Promise<Buffer> {
   if (isStructuredResume(content) && template) {
-    const docxBuffer = await renderStructuredResumeDocx(content, template, candidateName);
+    const docxBuffer = await renderStructuredResumeDocx(withContactLine(content, contactLine), template, candidateName);
     return convertDocxToPdf(docxBuffer);
   }
   const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);

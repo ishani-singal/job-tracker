@@ -32,7 +32,15 @@ def expected_contact_line(profile: dict) -> str:
     location = ", ".join(
         p for p in [profile.get("locationCity"), profile.get("locationState"), profile.get("locationCountry")] if p
     )
-    parts = [profile.get("candidateEmail"), location or None, profile.get("candidatePhone"), profile.get("linkedinUrl")]
+    portfolio = f"[Portfolio]({profile['portfolioUrl']})" if profile.get("portfolioUrl") else None
+    parts = [
+        profile.get("candidateEmail"),
+        location or None,
+        profile.get("candidatePhone"),
+        profile.get("linkedinUrl"),
+        profile.get("githubUrl"),
+        portfolio,
+    ]
     return " | ".join(p for p in parts if p)
 
 

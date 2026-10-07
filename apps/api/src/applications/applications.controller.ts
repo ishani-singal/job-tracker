@@ -18,6 +18,7 @@ import {
 } from './applications.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { renderResumeDocx, renderResumePdf } from './resume-pdf';
+import { buildContactLine } from './contact-line';
 import { isStructuredResume } from './structured-resume-content';
 import { ResumesService } from '../resumes/resumes.service';
 
@@ -71,7 +72,7 @@ export class ApplicationsController {
       ? await this.resumes.getResumeTemplate()
       : undefined;
     const profile = await this.resumes.getProfile();
-    const pdf = await renderResumePdf(title || 'Resume', application.resumeContent, template, profile.candidateName);
+    const pdf = await renderResumePdf(title || 'Resume', application.resumeContent, template, profile.candidateName, buildContactLine(profile));
 
     const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
     // `inline=1` is used by the in-chat preview dialog, which embeds this in
@@ -98,7 +99,7 @@ export class ApplicationsController {
 
     const template = await this.resumes.getResumeTemplate();
     const profile = await this.resumes.getProfile();
-    const docx = await renderResumeDocx(application.resumeContent, template, profile.candidateName);
+    const docx = await renderResumeDocx(application.resumeContent, template, profile.candidateName, buildContactLine(profile));
 
     const safeName = (application.company || 'resume').replace(/[^a-z0-9]+/gi, '-');
     res

@@ -13,6 +13,8 @@ export interface ProfileFieldsInput {
   candidateEmail?: string;
   candidatePhone?: string;
   linkedinUrl?: string;
+  githubUrl?: string;
+  portfolioUrl?: string;
   targetRoleArchetype?: string;
   disqualifierKeywords?: string[];
   locationCountry?: string | null;
@@ -126,6 +128,8 @@ export class ResumesService {
       ...(input.candidateEmail !== undefined && { candidateEmail: input.candidateEmail }),
       ...(input.candidatePhone !== undefined && { candidatePhone: input.candidatePhone }),
       ...(input.linkedinUrl !== undefined && { linkedinUrl: input.linkedinUrl }),
+      ...(input.githubUrl !== undefined && { githubUrl: input.githubUrl }),
+      ...(input.portfolioUrl !== undefined && { portfolioUrl: input.portfolioUrl }),
       ...(input.targetRoleArchetype !== undefined && {
         targetRoleArchetype: input.targetRoleArchetype,
       }),
@@ -174,6 +178,12 @@ export interface ResumeTemplateInput {
   nameFontOffsetMax?: number;
   sectionHeaderFontOffsetMin?: number;
   sectionHeaderFontOffsetMax?: number;
+  sectionHeaderFontMin?: number;
+  sectionHeaderFontMax?: number;
+  spacingBeforeEntryHeaderMin?: number;
+  spacingBeforeEntryHeaderMax?: number;
+  spacingAfterEntryHeaderMin?: number;
+  spacingAfterEntryHeaderMax?: number;
   horizontalTabStop?: number;
   spacingBeforeSectionMin?: number;
   spacingBeforeSectionMax?: number;

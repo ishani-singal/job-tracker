@@ -356,6 +356,8 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
     candidateEmail: profile.candidateEmail ?? '',
     candidatePhone: profile.candidatePhone ?? '',
     linkedinUrl: profile.linkedinUrl ?? '',
+    githubUrl: profile.githubUrl ?? '',
+    portfolioUrl: profile.portfolioUrl ?? '',
     targetRoleArchetype: profile.targetRoleArchetype ?? '',
     disqualifierKeywords: (profile.disqualifierKeywords ?? []).join(', '),
     locationCountry: profile.locationCountry ?? '',
@@ -382,6 +384,8 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
         candidateEmail: form.candidateEmail,
         candidatePhone: form.candidatePhone,
         linkedinUrl: form.linkedinUrl,
+        githubUrl: form.githubUrl,
+        portfolioUrl: form.portfolioUrl,
         targetRoleArchetype: form.targetRoleArchetype,
         disqualifierKeywords: form.disqualifierKeywords
           .split(',')
@@ -448,6 +452,28 @@ function ProfileForm({ profile }: { profile: ResumeProfile }) {
           value={form.linkedinUrl}
           onChange={(e) => setForm({ ...form, linkedinUrl: e.target.value })}
         />
+      </Field>
+      <Field label="GitHub URL">
+        <input
+          type="url"
+          placeholder="https://github.com/..."
+          className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+          value={form.githubUrl}
+          onChange={(e) => setForm({ ...form, githubUrl: e.target.value })}
+        />
+      </Field>
+      <Field label="Portfolio link">
+        <input
+          type="url"
+          placeholder="https://your-portfolio.com"
+          className="border rounded px-2 py-1 text-sm w-full bg-transparent"
+          value={form.portfolioUrl}
+          onChange={(e) => setForm({ ...form, portfolioUrl: e.target.value })}
+        />
+        <p className="text-xs opacity-60 mt-1">
+          Shown on the resume as the text &quot;Portfolio&quot;, hyperlinked to this address. GitHub and LinkedIn
+          appear as their links, in that order after your phone number.
+        </p>
       </Field>
       <Field label="Disqualifier Keywords (comma-separated)">
         <input

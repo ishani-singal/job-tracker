@@ -60,6 +60,8 @@ export interface ResumeProfile {
   candidateEmail: string | null;
   candidatePhone: string | null;
   linkedinUrl: string | null;
+  githubUrl: string | null;
+  portfolioUrl: string | null;
   targetRoleArchetype: string | null;
   disqualifierKeywords: string[];
   locationCountry: string | null;
@@ -158,6 +160,15 @@ export interface ResumeTemplate {
 
   sectionHeaderFontOffsetMin: number;
   sectionHeaderFontOffsetMax: number;
+
+  /** Absolute section-header size (pt) — what the renderer uses. */
+  sectionHeaderFontMin: number;
+  sectionHeaderFontMax: number;
+
+  spacingBeforeEntryHeaderMin: number;
+  spacingBeforeEntryHeaderMax: number;
+  spacingAfterEntryHeaderMin: number;
+  spacingAfterEntryHeaderMax: number;
 
   horizontalTabStop: number;
 

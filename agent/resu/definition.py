@@ -97,6 +97,8 @@ def build_profile_context(
             ("Email", profile.get("candidateEmail")),
             ("Phone", profile.get("candidatePhone")),
             ("LinkedIn URL", profile.get("linkedinUrl")),
+            ("GitHub URL", profile.get("githubUrl")),
+            ("Portfolio URL", profile.get("portfolioUrl")),
         ]
         if value
     )
@@ -106,6 +108,10 @@ def build_profile_context(
         location or None,
         profile.get("candidatePhone"),
         profile.get("linkedinUrl"),
+        profile.get("githubUrl"),
+        # Rendered as the text "Portfolio", hyperlinked — keep the markdown link
+        # exactly as written here.
+        f"[Portfolio]({profile['portfolioUrl']})" if profile.get("portfolioUrl") else None,
     ]
     contact_line_instruction = (
         "## Contact line\n"

@@ -42,10 +42,11 @@ const RANGE_GROUPS: { title: string; step?: string; fields: RangeField[] }[] = [
         hint: 'Entry headers (e.g. "DELL TECHNOLOGIES | Program Manager") always match the bullet text size, just bold — this offset only affects your own name at the top of the resume.',
       },
       {
-        key: 'sectionHeaderFontOffset',
-        label: 'Section header size, offset above bullet size (pt)',
-        minKey: 'sectionHeaderFontOffsetMin',
-        maxKey: 'sectionHeaderFontOffsetMax',
+        key: 'sectionHeaderFont',
+        label: 'Header font size (pt)',
+        minKey: 'sectionHeaderFontMin',
+        maxKey: 'sectionHeaderFontMax',
+        hint: 'Applies to the section headers: WORK EXPERIENCE, PROJECTS & INTERNSHIPS, SKILLS & ACTIVITIES and EDUCATION.',
       },
     ],
   },
@@ -54,15 +55,30 @@ const RANGE_GROUPS: { title: string; step?: string; fields: RangeField[] }[] = [
     fields: [
       {
         key: 'spacingBeforeSection',
-        label: 'Before each section',
+        label: 'Before each section header',
         minKey: 'spacingBeforeSectionMin',
         maxKey: 'spacingBeforeSectionMax',
+        hint: 'Above WORK EXPERIENCE, PROJECTS & INTERNSHIPS, SKILLS & ACTIVITIES, EDUCATION.',
       },
       {
         key: 'spacingAfterSection',
-        label: 'After section header',
+        label: 'After each section header',
         minKey: 'spacingAfterSectionMin',
         maxKey: 'spacingAfterSectionMax',
+      },
+      {
+        key: 'spacingBeforeEntryHeader',
+        label: 'Before each entry header',
+        minKey: 'spacingBeforeEntryHeaderMin',
+        maxKey: 'spacingBeforeEntryHeaderMax',
+        hint: 'Above each company / project / school line (e.g. "DELL TECHNOLOGIES | Program Manager"), except the first under a section header.',
+      },
+      {
+        key: 'spacingAfterEntryHeader',
+        label: 'After each entry header',
+        minKey: 'spacingAfterEntryHeaderMin',
+        maxKey: 'spacingAfterEntryHeaderMax',
+        hint: 'Between that line and its first bullet.',
       },
       {
         key: 'spacingBetweenBullets',

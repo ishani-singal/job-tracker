@@ -12,6 +12,7 @@ import {
 import { FastifyRequest } from 'fastify';
 import type { StructuredResume } from '@job-tracker/shared-types';
 import { measureOverflow } from '../applications/structured-resume-pdf';
+import { buildContactLine } from '../applications/contact-line';
 import { MultipartValue } from '@fastify/multipart';
 import { ProfileFieldsInput, ResumeTemplateInput, ResumesService } from './resumes.service';
 import { StoryEntryType } from '@prisma/client';
@@ -116,7 +117,9 @@ export class ResumesController {
   @Post('fit-check')
   async fitCheck(@Body() body: StructuredResume) {
     const [template, profile] = await Promise.all([this.resumes.getResumeTemplate(), this.resumes.getProfile()]);
-    const { fits, overflowPoints, bulletFont } = measureOverflow(body, template, profile.candidateName);
+    // Measure with the same contact line that will be rendered.
+    const content = { ...body, contactLine: buildContactLine(profile) || body.contactLine };
+    const { fits, overflowPoints, bulletFont } = measureOverflow(content, template, profile.candidateName);
     return { fits, overflowLines: Math.ceil(overflowPoints / (bulletFont * 1.2)) };
   }
 

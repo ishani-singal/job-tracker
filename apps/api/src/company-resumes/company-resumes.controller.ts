@@ -2,6 +2,7 @@ import { Controller, Get, NotFoundException, Param, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { CompanyResumesService } from './company-resumes.service';
 import { renderResumeDocx, renderResumePdf } from '../applications/resume-pdf';
+import { buildContactLine } from '../applications/contact-line';
 import { isStructuredResume } from '../applications/structured-resume-content';
 import { ResumesService } from '../resumes/resumes.service';
 
@@ -34,7 +35,7 @@ export class CompanyResumesController {
       ? await this.resumes.getResumeTemplate()
       : undefined;
     const profile = await this.resumes.getProfile();
-    const pdf = await renderResumePdf(decoded, resume.resumeContent, template, profile.candidateName);
+    const pdf = await renderResumePdf(decoded, resume.resumeContent, template, profile.candidateName, buildContactLine(profile));
     const safeName = decoded.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/pdf')
@@ -53,7 +54,7 @@ export class CompanyResumesController {
 
     const template = await this.resumes.getResumeTemplate();
     const profile = await this.resumes.getProfile();
-    const docx = await renderResumeDocx(resume.resumeContent, template, profile.candidateName);
+    const docx = await renderResumeDocx(resume.resumeContent, template, profile.candidateName, buildContactLine(profile));
     const safeName = decoded.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')

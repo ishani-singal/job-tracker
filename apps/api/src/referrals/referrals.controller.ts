@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, R
 import type { FastifyReply } from 'fastify';
 import { ContactInput, ReferralsService } from './referrals.service';
 import { renderResumeDocx, renderResumePdf } from '../applications/resume-pdf';
+import { buildContactLine } from '../applications/contact-line';
 import { isStructuredResume } from '../applications/structured-resume-content';
 import { ResumesService } from '../resumes/resumes.service';
 
@@ -43,7 +44,7 @@ export class ReferralsController {
     const template = isStructuredResume(referral.resumeContent) ? await this.resumes.getResumeTemplate() : undefined;
     const profile = await this.resumes.getProfile();
     const company = referral.contact.company.name;
-    const pdf = await renderResumePdf(company, referral.resumeContent, template, profile.candidateName);
+    const pdf = await renderResumePdf(company, referral.resumeContent, template, profile.candidateName, buildContactLine(profile));
     const safeName = company.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/pdf')
@@ -59,7 +60,7 @@ export class ReferralsController {
     }
     const template = await this.resumes.getResumeTemplate();
     const profile = await this.resumes.getProfile();
-    const docx = await renderResumeDocx(referral.resumeContent, template, profile.candidateName);
+    const docx = await renderResumeDocx(referral.resumeContent, template, profile.candidateName, buildContactLine(profile));
     const safeName = referral.contact.company.name.replace(/[^a-z0-9]+/gi, '-');
     res
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
