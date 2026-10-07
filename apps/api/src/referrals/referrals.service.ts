@@ -9,7 +9,7 @@ export const REFERRAL_CHANNELS = ['linkedin', 'whatsapp', 'text', 'email'] as co
 export type ReferralChannel = (typeof REFERRAL_CHANNELS)[number];
 
 /** One resume has to cover every selected JD, so the number of roles is capped. */
-export const MAX_REFERRAL_ROLES = 7;
+export const MAX_REFERRAL_ROLES = 10;
 
 export interface ContactInput {
   name?: string;

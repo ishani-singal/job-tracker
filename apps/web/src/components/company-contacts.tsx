@@ -31,7 +31,7 @@ import type {
 } from '@job-tracker/shared-types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
-const MAX_ROLES = 7;
+const MAX_ROLES = 10;
 const FINAL_ROLES = 5;
 const TONES: { value: ReferralTone; label: string; hint: string }[] = [
   { value: 'friend', label: 'Friend', hint: 'Warm and casual' },
