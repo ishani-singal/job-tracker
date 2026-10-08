@@ -1966,41 +1966,6 @@ export class CompanyRolesService implements OnModuleInit, OnModuleDestroy {
     return jdText;
   }
 
-  /** Adds specific postings (e.g. pasted job links) to a tracked company's roles, reading each
-   * page for its description; the title is the page's first line. Existing URLs are left alone. */
-  async addRolesByUrl(companyId: string, urls: string[]) {
-    const company = await this.prisma.trackedCompany.findUnique({ where: { id: companyId } });
-    if (!company) throw new NotFoundException(`Company ${companyId} not found`);
-    const added: { id: string; title: string; roleUrl: string }[] = [];
-    const failed: string[] = [];
-    for (const raw of [...new Set(urls.map((u) => u.trim()).filter(Boolean))]) {
-      const existing = await this.prisma.discoveredRole.findUnique({
-        where: { companyId_roleUrl: { companyId, roleUrl: raw } },
-      });
-      if (existing) {
-        // Postings already tracked may hold a poor description (the raw page scrape); redo it
-        // from the board's own API when there is one.
-        const better = await this.fetchEightfoldPosition(raw);
-        if (better) await this.prisma.discoveredRole.update({ where: { id: existing.id }, data: { jdText: better.text } });
-        continue;
-      }
-      const position = await this.fetchEightfoldPosition(raw);
-      const jdText = position?.text ?? (await this.fetchRoleJd(raw));
-      if (!jdText) {
-        failed.push(raw);
-        continue;
-      }
-      const firstLine = jdText.split('\n').map((l) => l.trim()).find((l) => l.length > 2) ?? '';
-      const title = (position?.title ?? firstLine).slice(0, 120) || 'Untitled role';
-      const role = await this.prisma.discoveredRole.create({
-        data: { companyId, title, roleUrl: raw, jdText },
-        select: { id: true, title: true, roleUrl: true },
-      });
-      added.push(role);
-    }
-    return { added, failed };
-  }
-
   /** Boards built on Eightfold's PCSX (e.g. Microsoft's apply.careers.microsoft.com/careers/job/<id>)
    * expose each posting as clean JSON; scraping the page instead returns mostly theme config. */
   private async fetchEightfoldPosition(roleUrl: string): Promise<{ title: string; text: string } | null> {

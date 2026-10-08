@@ -532,8 +532,6 @@ model GenerationSession {
   referralTone    String?
   referralChannel String?
   referralRoleIds String[]                @default([])
-  // Keep-every-role mode: no cap on roles; the roles whose ATS score is at least this stay.
-  referralMinScore Int?
   status        GenerationSessionStatus @default(RUNNING)
   errorMessage  String?
   // Opaque PydanticAI message-history JSON blob (from AgentRunResult.all_messages(),

@@ -25,11 +25,6 @@ export class CompanyRolesController {
     return this.companyRoles.rediscover(id);
   }
 
-  @Post('tracked-companies/:id/roles-by-url')
-  addRolesByUrl(@Param('id') id: string, @Body() body: { urls: string[] }) {
-    return this.companyRoles.addRolesByUrl(id, body.urls ?? []);
-  }
-
   @Delete('tracked-companies/:id')
   deleteCompany(@Param('id') id: string) {
     return this.companyRoles.deleteCompany(id);
