@@ -39,6 +39,10 @@ model Application {
   resumeContent    Json?
   resumeGeneratedAt DateTime?
 
+  // Interview progress, entered by hand once applied (status values: see shared-types).
+  interviewRounds Int?
+  interviewStatus String?
+
   // Who referred the user for this application (set when marking it applied).
   referredByContactId String?
   referredByContact   CompanyContact? @relation("ApplicationReferrer", fields: [referredByContactId], references: [id], onDelete: SetNull)

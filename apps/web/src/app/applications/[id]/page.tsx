@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Application } from '@job-tracker/shared-types';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
+import { InterviewProgress } from '@/components/interview-progress';
+import { AppliedDetails } from '@/components/applied-details';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
 
@@ -81,20 +83,8 @@ export default function ApplicationDetailPage({
 
       {application.status === 'APPLIED' && (
         <div className="text-sm flex flex-col gap-1">
-          <p>
-            <span className="opacity-60">Referred by:</span>{' '}
-            {application.referredByContact?.name ?? 'No referral'}
-          </p>
-          <p>
-            <span className="opacity-60">Resume applied with:</span>{' '}
-            {application.appliedResume ? (
-              <a href={`${API_BASE}/applications/${id}/applied-resume`} className="underline">
-                {application.appliedResume.filename}
-              </a>
-            ) : (
-              'Not uploaded'
-            )}
-          </p>
+          <AppliedDetails application={application} />
+          <InterviewProgress application={application} />
         </div>
       )}
 

@@ -18,6 +18,8 @@ export interface Application {
   rejectedDate: string | null;
   resumeContent: string | null;
   resumeGeneratedAt: string | null;
+  interviewRounds?: number | null;
+  interviewStatus?: string | null;
   referredByContactId?: string | null;
   /** Single-record reads (GET /applications/:id) only. */
   referredByContact?: { id: string; name: string } | null;

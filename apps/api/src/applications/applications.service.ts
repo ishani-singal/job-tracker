@@ -39,6 +39,8 @@ export interface UpdateApplicationInput extends Partial<CreateApplicationInput> 
   lastMessageReceivedDate?: string | null;
   rejectedDate?: string | null;
   referredByContactId?: string | null;
+  interviewRounds?: number | null;
+  interviewStatus?: string | null;
 }
 
 @Injectable()
@@ -50,7 +52,10 @@ export class ApplicationsService {
   ) {}
 
   list() {
-    return this.prisma.application.findMany({ orderBy: { createdAt: 'desc' } });
+    return this.prisma.application.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { appliedResume: { select: { filename: true, uploadedAt: true } } },
+    });
   }
 
   async get(id: string) {
@@ -190,6 +195,8 @@ export class ApplicationsService {
       ...(input.salaryRange !== undefined && { salaryRange: input.salaryRange }),
       ...(input.experienceLevel !== undefined && { experienceLevel: input.experienceLevel }),
       ...(input.status !== undefined && { status: input.status }),
+      ...(input.interviewRounds !== undefined && { interviewRounds: input.interviewRounds }),
+      ...(input.interviewStatus !== undefined && { interviewStatus: input.interviewStatus }),
       ...(input.referredByContactId !== undefined && {
         referredByContact: input.referredByContactId
           ? { connect: { id: input.referredByContactId } }

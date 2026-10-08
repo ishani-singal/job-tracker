@@ -7,6 +7,7 @@ import type { Application } from '@job-tracker/shared-types';
 import { api } from '@/lib/api';
 import { AddApplicationDialog } from './add-application-dialog';
 import { MarkAppliedDialog } from './mark-applied-dialog';
+import { InterviewProgress } from './interview-progress';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
@@ -49,6 +50,12 @@ export function ApplicationRow({
     },
   });
 
+  const uploadResume = useMutation({
+    mutationFn: (file: File) => api.uploadAppliedResume(application.id, file),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['applications'] }),
+    onError: (err) => alert(err instanceof Error ? err.message : String(err)),
+  });
+
   function handleDelete() {
     if (confirm(`Delete application at ${application.company}? This can't be undone.`)) {
       deleteApplication.mutate();
@@ -76,6 +83,7 @@ export function ApplicationRow({
                 ? ' · Stale'
                 : ''}
         </span>
+        {application.status === 'APPLIED' && <InterviewProgress application={application} />}
       </div>
       <div className="flex gap-2">
         {application.status !== 'APPLIED' && (
@@ -109,6 +117,29 @@ export function ApplicationRow({
             </a>
           </>
         )}
+        {application.appliedResume && (
+          <a
+            href={`${API_BASE}/applications/${application.id}/applied-resume`}
+            className="px-2 py-1 text-xs rounded border"
+            title={application.appliedResume.filename}
+          >
+            Applied Resume
+          </a>
+        )}
+        <label className="px-2 py-1 text-xs rounded border cursor-pointer">
+          {uploadResume.isPending ? 'Uploading...' : application.appliedResume ? 'Replace Resume' : 'Upload Resume'}
+          <input
+            type="file"
+            accept=".pdf,.doc,.docx"
+            className="hidden"
+            disabled={uploadResume.isPending}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) uploadResume.mutate(file);
+              e.target.value = '';
+            }}
+          />
+        </label>
         <button className="px-2 py-1 text-xs rounded border" onClick={() => setEditOpen(true)}>
           Edit
         </button>
