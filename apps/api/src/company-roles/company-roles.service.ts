@@ -1977,14 +1977,21 @@ export class CompanyRolesService implements OnModuleInit, OnModuleDestroy {
       const existing = await this.prisma.discoveredRole.findUnique({
         where: { companyId_roleUrl: { companyId, roleUrl: raw } },
       });
-      if (existing) continue;
-      const jdText = await this.fetchRoleJd(raw);
+      if (existing) {
+        // Postings already tracked may hold a poor description (the raw page scrape); redo it
+        // from the board's own API when there is one.
+        const better = await this.fetchEightfoldPosition(raw);
+        if (better) await this.prisma.discoveredRole.update({ where: { id: existing.id }, data: { jdText: better.text } });
+        continue;
+      }
+      const position = await this.fetchEightfoldPosition(raw);
+      const jdText = position?.text ?? (await this.fetchRoleJd(raw));
       if (!jdText) {
         failed.push(raw);
         continue;
       }
       const firstLine = jdText.split('\n').map((l) => l.trim()).find((l) => l.length > 2) ?? '';
-      const title = firstLine.slice(0, 120) || 'Untitled role';
+      const title = (position?.title ?? firstLine).slice(0, 120) || 'Untitled role';
       const role = await this.prisma.discoveredRole.create({
         data: { companyId, title, roleUrl: raw, jdText },
         select: { id: true, title: true, roleUrl: true },
@@ -1994,7 +2001,48 @@ export class CompanyRolesService implements OnModuleInit, OnModuleDestroy {
     return { added, failed };
   }
 
+  /** Boards built on Eightfold's PCSX (e.g. Microsoft's apply.careers.microsoft.com/careers/job/<id>)
+   * expose each posting as clean JSON; scraping the page instead returns mostly theme config. */
+  private async fetchEightfoldPosition(roleUrl: string): Promise<{ title: string; text: string } | null> {
+    try {
+      const u = new URL(roleUrl);
+      const id = u.pathname.match(/\/careers\/job\/(\d+)/)?.[1];
+      if (!id || !u.hostname.startsWith('apply.careers.')) return null;
+      const domain = u.hostname.split('.').slice(-2).join('.');
+      const res = await fetch(
+        `${u.origin}/api/pcsx/position_details?position_id=${id}&domain=${domain}&hl=en`,
+        { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; job-tracker/0.1)' }, signal: AbortSignal.timeout(30000) },
+      );
+      if (!res.ok) return null;
+      const data = ((await res.json()) as {
+        data?: { name?: string; standardizedLocations?: string[]; locations?: string[]; jobDescription?: string };
+      }).data;
+      if (!data?.name || !data.jobDescription) return null;
+      const description = data.jobDescription
+        .replace(/<\/(p|li|ul|ol|h\d|div)>|<br\s*\/?>/gi, '\n')
+        .replace(/<li>/gi, '- ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&#39;|&rsquo;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      const location = (data.standardizedLocations ?? data.locations ?? [])[0];
+      return {
+        title: location ? `${data.name} — ${location}` : data.name,
+        text: `${data.name}${location ? `\nLocation: ${location}` : ''}\n\n${description}`.slice(0, 20000),
+      };
+    } catch {
+      return null;
+    }
+  }
+
   private async fetchRoleJd(roleUrl: string): Promise<string> {
+    const position = await this.fetchEightfoldPosition(roleUrl);
+    if (position) return position.text;
     try {
       const pageText = await this.renderPageText(roleUrl, { requireSameOrigin: true });
       if (looksLikeSearchResultsFallback(pageText)) return '';
