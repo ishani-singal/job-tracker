@@ -510,3 +510,106 @@ async def run_referral(
         target_met=target_met,
         note=" ".join(notes) or None,
     )
+
+
+async def run_application_resume(
+    session_id: str, api_base_url: str, application_id: str
+) -> tuple[ResuTurnOutput, list] | None:
+    """Single-application resume with the referral pipeline's rigor — the
+    guideline checks, one-page fit check and ATS-score/revise loop — minus the
+    role selection and message writing. Posts the final ATS score to the chat as
+    its last progress line. Returns None when the JD hits a disqualifier keyword
+    (the caller falls back to the interactive agent, which asks about it)."""
+    from types import SimpleNamespace
+
+    from ..agent import ResuTurnOutput
+    from ..tools import fetch_job_description
+
+    async def say(message: str) -> None:
+        await _report_progress(api_base_url, session_id, message)
+
+    deps = ResuDeps(api_base_url=api_base_url)
+    jd = await fetch_job_description(SimpleNamespace(deps=deps), application_id)
+    if not jd:
+        return None
+    profile = await _get_json(api_base_url, "/resumes/profile")
+    entries = await _get_json(api_base_url, "/entries")
+    contact_line = expected_contact_line(profile)
+    if any(k.strip() and k.strip().lower() in jd.lower() for k in (profile.get("disqualifierKeywords") or [])):
+        return None
+
+    application = await _get_json(api_base_url, f"/applications/{application_id}")
+    role = RoleInput(
+        id=application_id,
+        title=" — ".join(x for x in [application.get("company"), application.get("role")] if x) or "this role",
+        url=application.get("jobUrl") or "",
+        jd_text=jd,
+    )
+
+    async def checked(resume: StructuredResume) -> list[str]:
+        if contact_line:
+            resume.contactLine = contact_line
+        problems = check_resume(resume, entries, profile)
+        problems += [f"Rewrite as a coherent sentence — {line}" for line in issue_lines(await review_bullets(resume))]
+        fit = await _fit_check(api_base_url, resume)
+        if fit is not None and not fit["fits"]:
+            problems.append(
+                f"The resume does not fit ONE page: it overflows by about {fit['overflowLines']} lines even with the "
+                "template's margins and fonts at their minimums. Cut it down — drop optional entries "
+                "(projects, advisory/side roles) that matter least for this JD and tighten bullets to a single "
+                "line where possible — while keeping every required entry and each entry's minimum bullets."
+            )
+        return problems
+
+    first_prompt = (
+        f"Generate a resume tailored to the following job description ({role.title}) that would score at "
+        f"least {ATS_TARGET}% ATS match. Cover its required skills and keywords first, but only where the "
+        "candidate's real background supports them — never fabricate experience. "
+        + _RULES_REMINDER
+        + " This is an automated run: if you would normally ask a clarifying question, make the most "
+        "reasonable assumption and finish with done=true.\n\n## Job description\n"
+        + jd[:8000]
+    )
+
+    best: tuple[StructuredResume, RoleScore, list[str]] | None = None
+    stopped_early: str | None = None
+    with run_scope():
+        await say(f"Building the resume for {role.title} — target {ATS_TARGET}% ATS...")
+        resume, history = await _generate(first_prompt, None, deps)
+        best_history = history
+        for draft in range(1, MAX_DRAFTS + 1):
+            violations = await checked(resume)
+            await say(f"Draft {draft}: checking ATS match...")
+            try:
+                score = await _score_one(resume_to_text(resume), role)
+            except BudgetExceededError as exc:
+                stopped_early = str(exc)
+                break
+            await say(f"  ATS {score.score}%" + (f", {len(violations)} guideline issue(s)" if violations else ""))
+            if best is None or (-len(violations), score.score) > (-len(best[2]), best[1].score):
+                best, best_history = (resume, score, violations), history
+            if score.score >= ATS_TARGET and not violations:
+                break
+            if draft == MAX_DRAFTS:
+                break
+            await say("Revising...")
+            try:
+                resume, history = await _generate(_revision_prompt([score], [], violations), history, deps)
+            except BudgetExceededError as exc:
+                stopped_early = str(exc)
+                break
+        if best is None:
+            raise RuntimeError(stopped_early or "Could not score the resume")
+        best_resume, best_score, best_violations = best
+        if enforce_bullet_bounds(best_resume, entries):
+            best_violations = await checked(best_resume)
+
+    if best_violations:
+        await say("Guideline checks still failing — review before sending: " + "; ".join(best_violations[:6]))
+    if stopped_early:
+        await say(f"(Stopped early: {stopped_early}.)")
+    gaps = f" Missing/weak: {', '.join(best_score.missing[:6])}." if best_score.missing else ""
+    await say(
+        f"ATS score: {best_score.score}% ({'target met' if best_score.score >= ATS_TARGET else f'below the {ATS_TARGET}% target'}).{gaps}"
+    )
+    return ResuTurnOutput(done=True, resume=best_resume), best_history

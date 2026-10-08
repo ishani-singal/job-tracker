@@ -525,6 +525,7 @@ export class SessionsService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         application_id: applicationId,
+        session_id: sessionId,
         message_history_json: priorHistoryJson,
         user_reply: userReply,
       }),

@@ -62,6 +62,8 @@ class RunTurnRequest(BaseModel):
     message_history_json: str | None = None
     # The user's reply to the agent's last question; None on the first turn.
     user_reply: str | None = None
+    # Lets the referral-style pipeline post live progress and the ATS score into the chat.
+    session_id: str | None = None
 
 
 class RunCompanyTurnRequest(BaseModel):
@@ -94,9 +96,17 @@ async def run_turn_endpoint(body: RunTurnRequest) -> RunTurnResponse:
         if body.message_history_json
         else None
     )
-    output, new_history = await run_turn(
-        body.application_id, API_BASE_URL, history, body.user_reply
-    )
+    piped = None
+    if history is None and body.session_id:
+        from .referral.agent import run_application_resume
+
+        piped = await run_application_resume(body.session_id, API_BASE_URL, body.application_id)
+    if piped is not None:
+        output, new_history = piped
+    else:
+        output, new_history = await run_turn(
+            body.application_id, API_BASE_URL, history, body.user_reply
+        )
     return RunTurnResponse(
         done=output.done,
         resume=output.resume,
