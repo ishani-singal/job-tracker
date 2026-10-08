@@ -27,10 +27,12 @@ class RunReferralRequest(BaseModel):
     uploaded_resume: str | None = None
     # Keep-every-role mode: no cap on roles; keep those scoring at least this.
     keep_min_score: int | None = None
+    # How many roles the final result keeps (default 5; capped by MAX_FINAL_ROLES).
+    final_roles: int | None = None
 
 
 @router.post("/run", response_model=ReferralResult)
 async def run_referral_endpoint(body: RunReferralRequest) -> ReferralResult:
     return await run_referral(
-        body.session_id, API_BASE_URL, body.company, body.contact_name, body.tone, body.channel, body.roles, body.uploaded_resume, body.keep_min_score
+        body.session_id, API_BASE_URL, body.company, body.contact_name, body.tone, body.channel, body.roles, body.uploaded_resume, body.keep_min_score, body.final_roles
     )

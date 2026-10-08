@@ -9,9 +9,6 @@ import { CompanyRolesService } from '../company-roles/company-roles.service';
 import { enforceBulletBounds } from '../applications/resume-bounds';
 import { extractTextFromBuffer } from '../resumes/extract-text';
 
-/** How many roles a referral's final result links (matches FINAL_ROLES in agent/resu/referral/agent.py). */
-const FINAL_REFERRAL_ROLES = 5;
-
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 /** Browsers often send .docx/.pdf as application/octet-stream — trust the extension. */
@@ -267,7 +264,14 @@ export class SessionsService {
 
   /** Starts an unattended REFERRAL session (see runReferralTurn) — the chat
    * shows its steps live; the result is saved as a ReferralRequest on finish. */
-  async startReferral(contactId: string, tone: string, channel: string, roleIds: string[], minScore?: number) {
+  async startReferral(
+    contactId: string,
+    tone: string,
+    channel: string,
+    roleIds: string[],
+    minScore?: number,
+    finalRoles?: number,
+  ) {
     const contact = await this.prisma.companyContact.findUnique({
       where: { id: contactId },
       include: { company: true },
@@ -282,6 +286,7 @@ export class SessionsService {
         referralChannel: channel,
         referralRoleIds: roleIds,
         referralMinScore: minScore ?? null,
+        referralFinalRoles: finalRoles ?? null,
         status: 'RUNNING',
       },
     });
@@ -461,6 +466,7 @@ export class SessionsService {
       referralChannel?: string | null;
       referralRoleIds?: string[];
       referralMinScore?: number | null;
+      referralFinalRoles?: number | null;
     },
     priorHistoryJson: string | null,
     userReply: string | null,
@@ -478,6 +484,7 @@ export class SessionsService {
           session.referralRoleIds ?? [],
           userReply ?? undefined,
           userReply ? undefined : (session.referralMinScore ?? undefined),
+          userReply ? undefined : (session.referralFinalRoles ?? undefined),
         );
       } else if (session.scope === 'COMPANY') {
         await this.runCompanyTurn(session.id, session.company!, priorHistoryJson, userReply);
@@ -679,9 +686,10 @@ export class SessionsService {
     roleIds: string[],
     uploadedResume?: string,
     minScore?: number,
+    finalRoles?: number,
   ) {
     // A final draft from an uploaded resume targets ONLY the roles the latest
-    // result kept (at most FINAL_REFERRAL_ROLES) — never the original, larger
+    // result kept — never the original, larger
     // pool, which would re-score and re-drop roles already decided and cost more.
     if (uploadedResume) {
       const latest = await this.prisma.referralRequest.findFirst({
@@ -692,7 +700,7 @@ export class SessionsService {
       if (keptIds.length === 0) {
         throw new Error('No earlier result was found for this chat, so there are no kept roles to build the final draft for');
       }
-      roleIds = keptIds.slice(0, FINAL_REFERRAL_ROLES);
+      roleIds = keptIds;
     }
     const contact = await this.prisma.companyContact.findUnique({
       where: { id: contactId },
@@ -742,6 +750,7 @@ export class SessionsService {
         roles,
         uploaded_resume: uploadedResume ?? null,
         keep_min_score: minScore ?? null,
+        final_roles: finalRoles ?? null,
       }),
       signal: this.agentCallSignal(sessionId, 20 * 60 * 1000),
       dispatcher: agentDispatcher,

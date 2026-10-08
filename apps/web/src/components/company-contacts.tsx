@@ -31,8 +31,8 @@ import type {
 } from '@job-tracker/shared-types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
-const MAX_ROLES = 10;
-const FINAL_ROLES = 5;
+const MAX_ROLES = 40;
+const DEFAULT_FINAL_ROLES = 5;
 const TONES: { value: ReferralTone; label: string; hint: string }[] = [
   { value: 'friend', label: 'Friend', hint: 'Warm and casual' },
   { value: 'colleague', label: 'Colleague', hint: 'Friendly but professional' },
@@ -358,6 +358,7 @@ function ReferralDialog({
     () => CHANNELS.find((c) => contact[c.needs])?.value ?? 'email',
   );
   const [selected, setSelected] = useState<string[]>([]);
+  const [finalRoles, setFinalRoles] = useState(DEFAULT_FINAL_ROLES);
   const [search, setSearch] = useState('');
   // Same location/experience toggles the Applications page has on.
   const [locationFilterOn] = usePersistedToggle(LOCATION_FILTER_KEY, true);
@@ -440,6 +441,7 @@ function ReferralDialog({
         tone,
         channel,
         chosen.map((r) => r.id),
+        finalRoles,
       ),
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -523,8 +525,8 @@ function ReferralDialog({
                 </p>
               )}
               <p className="text-xs opacity-60">
-                The final message links {FINAL_ROLES} roles. Pick up to {MAX_ROLES} and the weakest fits are dropped
-                automatically after the ATS check to help the rest reach 90%. Same filters as the Applications page;
+                The final message links as many roles as you choose on the next step. Pick up to {MAX_ROLES} and the
+                weakest fits are dropped automatically after the ATS check to help the rest reach 90%. Same filters as the Applications page;
                 unscored roles can be scored here, and discard removes a role you don&apos;t want.
               </p>
             </div>
@@ -593,10 +595,21 @@ function ReferralDialog({
 
               <div className="flex flex-col gap-1">
                 <div className="text-xs font-medium uppercase opacity-60">
-                  {chosen.length > FINAL_ROLES
-                    ? `${chosen.length} candidate roles — the weakest ${chosen.length - FINAL_ROLES} will be dropped`
+                  {chosen.length > finalRoles
+                    ? `${chosen.length} candidate roles — the weakest ${chosen.length - finalRoles} will be dropped`
                     : `Linking ${chosen.length} role(s)`}
                 </div>
+                <label className="flex items-center gap-1.5 text-xs opacity-70">
+                  Final number of roles to link
+                  <input
+                    type="number"
+                    min={1}
+                    max={MAX_ROLES}
+                    className="w-16 border rounded px-1.5 py-0.5 bg-transparent"
+                    value={finalRoles}
+                    onChange={(e) => setFinalRoles(Math.min(MAX_ROLES, Math.max(1, Math.floor(Number(e.target.value)) || 1)))}
+                  />
+                </label>
                 <ul className="text-sm list-disc pl-5">
                   {chosen.map((r) => (
                     <li key={r.id}>{r.title}</li>

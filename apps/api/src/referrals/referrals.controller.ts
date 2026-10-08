@@ -34,8 +34,11 @@ export class ReferralsController {
   }
 
   @Post('company-contacts/:id/referral')
-  startReferral(@Param('id') id: string, @Body() body: { tone: string; channel: string; roleIds: string[]; minScore?: number }) {
-    return this.referrals.startReferral(id, body.tone, body.channel, body.roleIds, body.minScore);
+  startReferral(
+    @Param('id') id: string,
+    @Body() body: { tone: string; channel: string; roleIds: string[]; minScore?: number; finalRoles?: number },
+  ) {
+    return this.referrals.startReferral(id, body.tone, body.channel, body.roleIds, body.minScore, body.finalRoles);
   }
 
   @Get('referrals/:id/resume.pdf')

@@ -28,9 +28,12 @@ from ..bullet_quality import issue_lines, review_bullets
 from .compliance import check_resume, enforce_bullet_bounds, expected_contact_line
 
 ATS_TARGET = 90
-# The caller may pass a pool larger than this; the weakest fits are dropped
-# (after the first scoring pass) until this many remain.
+# Default final role count when the caller doesn't choose one: the caller may pass
+# a pool larger than this and the weakest fits are dropped (after the first scoring
+# pass) until this many remain. `final_roles` on run_referral overrides it.
 FINAL_ROLES = 5
+# Upper bound for any caller-chosen final count (and for a final draft's role set).
+MAX_FINAL_ROLES = 40
 # The first draft plus up to three revisions (ATS gaps and/or guideline violations).
 MAX_DRAFTS = 4
 
@@ -198,6 +201,7 @@ def _first_draft_prompt(
     uploaded_resume: str | None = None,
     target: int = ATS_TARGET,
     select: bool = False,
+    final: int = FINAL_ROLES,
 ) -> str:
     if select:
         pool_note = (
@@ -207,9 +211,9 @@ def _first_draft_prompt(
         )
     else:
         pool_note = (
-            f" Only the best-fitting {FINAL_ROLES} of these roles will be kept — the rest are dropped "
+            f" Only the best-fitting {final} of these roles will be kept — the rest are dropped "
             "after an ATS check — so lead with what most of them share."
-            if len(roles) > FINAL_ROLES
+            if len(roles) > final
             else ""
         )
     jds = "\n\n---\n\n".join(f"## Job description {i}: {r.title}\n{r.jd_text[:8000]}" for i, r in enumerate(roles, 1))
@@ -325,15 +329,17 @@ async def run_referral(
     roles: list[RoleInput],
     uploaded_resume: str | None = None,
     keep_min_score: int | None = None,
+    final_roles: int | None = None,
 ) -> ReferralResult:
     select = keep_min_score is not None and not uploaded_resume
     target = keep_min_score if select else ATS_TARGET
+    if final_roles is not None and not 1 <= final_roles <= MAX_FINAL_ROLES:
+        raise RuntimeError(f"final_roles must be between 1 and {MAX_FINAL_ROLES}, got {final_roles}")
     async def say(message: str) -> None:
         await _report_progress(api_base_url, session_id, message)
 
-    if uploaded_resume and len(roles) > FINAL_ROLES:
-        # A final draft is for the roles the earlier result kept — never the wider pool.
-        raise RuntimeError(f"A final draft covers at most {FINAL_ROLES} roles, got {len(roles)}")
+    if uploaded_resume and len(roles) > MAX_FINAL_ROLES:
+        raise RuntimeError(f"A final draft covers at most {MAX_FINAL_ROLES} roles, got {len(roles)}")
 
     deps = ResuDeps(api_base_url=api_base_url)
     profile = await _get_json(api_base_url, "/resumes/profile")
@@ -353,6 +359,15 @@ async def run_referral(
     if not usable:
         raise RuntimeError("Every selected role's job description contains one of your disqualifier keywords")
     roles = usable
+
+    # How many roles the result keeps. A final draft keeps exactly the roles it is given (the
+    # earlier result already decided them); keep-every-role mode has no cap unless one is chosen.
+    if uploaded_resume:
+        limit: int | None = len(roles)
+    elif final_roles is not None:
+        limit = final_roles
+    else:
+        limit = None if select else FINAL_ROLES
 
     active = list(roles)
     dropped: list[RoleScore] = []
@@ -394,7 +409,7 @@ async def run_referral(
             + (f" — keeping every role that reaches {target}% ATS..." if select else f" — target {target}% ATS on each...")
         )
         resume, history = await _generate(
-            _first_draft_prompt(company, roles, uploaded_resume, target, select), None, deps
+            _first_draft_prompt(company, roles, uploaded_resume, target, select, limit or FINAL_ROLES), None, deps
         )
 
         for draft in range(1, MAX_DRAFTS + 1):
@@ -411,15 +426,15 @@ async def run_referral(
             if violations:
                 await say(f"  {len(violations)} resume-guideline issue(s) found")
 
-            if not select and len(active) > FINAL_ROLES:
+            if not select and limit is not None and len(active) > limit:
                 # Drop the weakest fits so the rest can reach the target; ties
                 # drop the later-listed role.
                 ranked = sorted(enumerate(scores), key=lambda p: (p[1].score, -p[0]))
-                out = {i for i, _ in ranked[: len(active) - FINAL_ROLES]}
+                out = {i for i, _ in ranked[: len(active) - limit]}
                 gone = [scores[i].model_copy(update={"dropped": True}) for i in sorted(out)]
                 dropped.extend(gone)
                 await say(
-                    f"Dropping the {len(gone)} weakest fit(s) to keep {FINAL_ROLES}: "
+                    f"Dropping the {len(gone)} weakest fit(s) to keep {limit}: "
                     + ", ".join(f"{g.title} ({g.score}%)" for g in gone)
                 )
                 active = [r for i, r in enumerate(active) if i not in out]
@@ -458,6 +473,10 @@ async def run_referral(
             kept_ids = {s_.role_id for s_ in best_scores if s_.score >= target}
             if not kept_ids:
                 kept_ids = {max(best_scores, key=lambda s_: s_.score).role_id}
+            elif limit is not None and len(kept_ids) > limit:
+                # A chosen final count caps the roles kept: the best scorers stay, earlier-listed on ties.
+                top = sorted((s_ for s_ in best_scores if s_.role_id in kept_ids), key=lambda s_: -s_.score)[:limit]
+                kept_ids = {s_.role_id for s_ in top}
             dropped = [s_.model_copy(update={"dropped": True}) for s_ in best_scores if s_.role_id not in kept_ids]
             best_scores = [s_ for s_ in best_scores if s_.role_id in kept_ids]
             active = [r_ for r_ in roles if r_.id in kept_ids]
@@ -466,9 +485,10 @@ async def run_referral(
         # Roles were dropped on the FIRST draft's scores, but the resume was revised
         # afterwards (and the scorer is noisy), so a dropped role's frozen score is no
         # longer comparable to a kept role's final one. Score the dropped roles against
-        # the final resume itself and keep the best FINAL_ROLES overall.
+        # the final resume itself and keep the best `limit` overall. (Keep-every-role mode scored every
+        # role against this same resume already, so there is nothing to re-check.)
         swaps: list[str] = []
-        if dropped:
+        if dropped and not select:
             await say("Re-checking the roles dropped earlier against the final resume...")
             dropped_ids = {d.role_id for d in dropped}
             try:
@@ -483,7 +503,7 @@ async def run_referral(
             if rescored:
                 pool = best_scores + rescored  # kept first, so a tie keeps the role already in
                 ranked = sorted(range(len(pool)), key=lambda i: (-pool[i].score, i))
-                keep = {pool[i].role_id for i in ranked[:FINAL_ROLES]}
+                keep = {pool[i].role_id for i in ranked[:limit]}
                 by_id = {sc.role_id: sc for sc in pool}
                 old_kept = {sc.role_id for sc in best_scores}
                 for rid in keep - old_kept:
