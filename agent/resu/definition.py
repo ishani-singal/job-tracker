@@ -72,7 +72,10 @@ INSTRUCTIONS = (
     "keywords only where they naturally describe what was actually done. NEVER string keywords "
     "together, never tack on a tail like \"using A, B, C and D\", and never use a buzzword without "
     "the work behind it; if a keyword doesn't fit naturally, leave it out rather than forcing it. "
-    "A bullet that is just a combination of keywords is a failed bullet — rewrite it."
+    "A bullet that is just a combination of keywords is a failed bullet — rewrite it.\n\n"
+    "Single-bullet entries: when a work experience, project or internship entry has only ONE bullet, "
+    "that bullet must run exactly 2 lines (about 150+ characters, still 30 words or fewer) — never one "
+    "short line. The resume must also fill exactly one page with no empty space at the bottom."
 )
 
 

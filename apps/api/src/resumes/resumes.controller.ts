@@ -113,15 +113,22 @@ export class ResumesController {
 
   /** Does this structured resume fit one page under the current template (with
    * every margin/font allowed to shrink to its minimum)? If not, by how many
-   * lines does it overflow. Used by the referral pipeline's guideline checks. */
+   * lines does it overflow, and how many empty lines it leaves at the bottom.
+   * Used by the referral pipeline's guideline checks. */
   @Post('fit-check')
   async fitCheck(@Body() body: StructuredResume) {
     const [template, profile] = await Promise.all([this.resumes.getResumeTemplate(), this.resumes.getProfile()]);
     // Measure with the same contact line that will be rendered.
     const ruled = (await this.resumes.applyResumeRules(body as unknown as Prisma.JsonValue, { trimToFit: false })) as unknown as StructuredResume;
     const content = { ...ruled, contactLine: buildContactLine(profile) || ruled.contactLine };
-    const { fits, overflowPoints, bulletFont } = measureOverflow(content, template, profile.candidateName);
-    return { fits, overflowLines: Math.ceil(overflowPoints / (bulletFont * 1.2)) };
+    const { fits, overflowPoints, sparePoints, bulletFont } = measureOverflow(content, template, profile.candidateName);
+    const lineHeight = bulletFont * 1.2;
+    return {
+      fits,
+      overflowLines: Math.ceil(overflowPoints / lineHeight),
+      // Empty lines left at the bottom even with every font/margin at its maximum.
+      spareLines: Math.floor(sparePoints / lineHeight),
+    };
   }
 
   @Patch('template')

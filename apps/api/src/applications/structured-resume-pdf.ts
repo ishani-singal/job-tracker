@@ -157,17 +157,25 @@ export function measureContentHeight(
  * Whether the resume fits one page after the fit search has given every field
  * all the room the template allows, and by how many points it overflows if not
  * (the resume agent's pipeline uses this to tell the model to cut content).
+ * `sparePoints` is the empty space left at the bottom once the fit search has
+ * given every field its maximum — i.e. real under-fill, which the pipeline uses
+ * to tell the model to add content so the page is full.
  */
 export function measureOverflow(
   content: StructuredResume,
   template: ResumeTemplate,
   candidateName?: string | null,
-): { fits: boolean; overflowPoints: number; bulletFont: number } {
+): { fits: boolean; overflowPoints: number; sparePoints: number; bulletFont: number } {
   const fit = findFit(content, template, candidateName);
   const fields = resolvedFields(template, fit);
   const used = measureHeight(content, template, fit, candidateName);
   const available = (PAGE_HEIGHT - fields.marginTop - fields.marginBottom) * HEIGHT_SAFETY;
-  return { fits: used <= available, overflowPoints: Math.max(0, used - available), bulletFont: fields.bulletFont };
+  return {
+    fits: used <= available,
+    overflowPoints: Math.max(0, used - available),
+    sparePoints: Math.max(0, available - used),
+    bulletFont: fields.bulletFont,
+  };
 }
 
 function fitsOnOnePage(

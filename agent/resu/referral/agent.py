@@ -188,8 +188,29 @@ _RULES_REMINDER = (
     "with only one title shown, no bullets under an education entry unless that education is currently "
     "active (dates end 'Present'), a 3-4 word description of what the project is in each project "
     "entry's subtitle (shown after its name), all required entries included, the exact contact line, plain-text "
-    "bullets without a leading bullet character, and a one-page-fitting resume."
+    "bullets without a leading bullet character, and a resume that fills exactly ONE page — no empty space "
+    "left at the bottom, so use the room for the most relevant optional entries and bullets (within each "
+    "entry's ceiling) rather than stopping short. An entry with only ONE bullet must make that bullet "
+    "exactly 2 lines long (about 150+ characters, still 30 words or fewer) — never a single short line."
 )
+
+# A short entry (header + a one- or two-line bullet) is about this many lines; leaving at least this
+# much empty is worth one revision to add a relevant optional entry.
+MIN_SPARE_LINES = 3
+
+
+def _spare_space_problem(fit: dict | None, scope: str) -> str | None:
+    """A guideline violation when the page is clearly under-filled (None otherwise, or when the
+    API is unreachable / predates spareLines). `scope` is "this JD" or "these JDs"."""
+    spare = (fit or {}).get("spareLines", 0)
+    if spare < MIN_SPARE_LINES:
+        return None
+    return (
+        f"The resume leaves about {spare} empty lines at the bottom of the page — it must fill exactly ONE page. "
+        f"Add the optional entries (projects, internships, advisory/side roles) most relevant to {scope} that are "
+        "not yet included, and/or extra bullets within each entry's ceiling, grounded only in the candidate's "
+        "Stories — never invent content. If every relevant entry is already included, leave it as is."
+    )
 
 
 def _first_draft_prompt(company: str, roles: list[RoleInput], uploaded_resume: str | None = None) -> str:
@@ -347,6 +368,8 @@ async def run_referral(
                 "(projects, advisory/side roles) that matter least for these JDs and tighten bullets to a single "
                 "line where possible — while keeping every required entry and each entry's minimum bullets."
             )
+        elif spare_problem := _spare_space_problem(fit, "these JDs"):
+            problems.append(spare_problem)
         return problems
 
     def quality(scores: list[RoleScore], violations: list[str]) -> tuple[int, int, float]:
@@ -559,6 +582,8 @@ async def run_application_resume(
                 "(projects, advisory/side roles) that matter least for this JD and tighten bullets to a single "
                 "line where possible — while keeping every required entry and each entry's minimum bullets."
             )
+        elif spare_problem := _spare_space_problem(fit, "this JD"):
+            problems.append(spare_problem)
         return problems
 
     first_prompt = (

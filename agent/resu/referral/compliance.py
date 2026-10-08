@@ -15,6 +15,9 @@ import re
 from ..agent import StructuredResume
 
 MAX_BULLET_WORDS = 30
+# A lone bullet must wrap to a second line. A rendered line holds ~125-135 characters even at the
+# template's smallest font, so this many characters guarantees 2 lines (30 words still caps it at 2).
+MIN_SOLE_BULLET_CHARS = 150
 
 _LEADING_GLYPH = re.compile(r"^\s*(?:[•·▪◦‣\-–—]|\*(?!\*))\s")
 _PLUS_SUFFIX = re.compile(r"\$\s?[\d.,]+\s?[KMB]?\+")
@@ -136,6 +139,15 @@ def check_resume(resume: StructuredResume, entries: dict, profile: dict) -> list
                 ):
                     if pattern.search(bullet):
                         problems.append(f"{label}: {why}")
+
+            if len(entry.bullets) == 1 and entry.name.strip() and section.kind != "education":
+                chars = len(re.sub(r"\*\*", "", entry.bullets[0]).strip())
+                if chars < MIN_SOLE_BULLET_CHARS:
+                    problems.append(
+                        f"{label}: its only bullet is {chars} characters, which renders as ONE line — a lone bullet "
+                        f"must run 2 lines (at least {MIN_SOLE_BULLET_CHARS} characters, still 30 words or fewer): "
+                        "add the how and a contextualized outcome"
+                    )
 
             found = _match_entry(entry.name, entries, entry.subtitle, matched_ids)
             if not found:
