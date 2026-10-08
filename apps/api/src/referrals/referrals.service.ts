@@ -10,6 +10,8 @@ export type ReferralChannel = (typeof REFERRAL_CHANNELS)[number];
 
 /** One resume has to cover every selected JD, so the number of roles is capped. */
 export const MAX_REFERRAL_ROLES = 10;
+/** With a minimum score, every role scoring above it is kept, so the pool can be larger. */
+export const MAX_REFERRAL_POOL_WITH_MIN_SCORE = 40;
 
 export interface ContactInput {
   name?: string;
@@ -100,7 +102,7 @@ export class ReferralsService {
 
   /** Validates the request and starts the REFERRAL chat session that fetches
    * the JDs, builds + ATS-checks the resume and drafts the message. */
-  async startReferral(contactId: string, tone: string, channel: string, roleIds: string[]) {
+  async startReferral(contactId: string, tone: string, channel: string, roleIds: string[], minScore?: number) {
     if (!(REFERRAL_TONES as readonly string[]).includes(tone)) {
       throw new BadRequestException(`tone must be one of: ${REFERRAL_TONES.join(', ')}`);
     }
@@ -108,8 +110,12 @@ export class ReferralsService {
       throw new BadRequestException(`channel must be one of: ${REFERRAL_CHANNELS.join(', ')}`);
     }
     const ids = [...new Set(roleIds ?? [])];
-    if (ids.length < 1 || ids.length > MAX_REFERRAL_ROLES) {
-      throw new BadRequestException(`Select between 1 and ${MAX_REFERRAL_ROLES} roles`);
+    if (minScore !== undefined && !(Number.isInteger(minScore) && minScore >= 50 && minScore <= 100)) {
+      throw new BadRequestException('minScore must be an integer between 50 and 100');
+    }
+    const maxRoles = minScore !== undefined ? MAX_REFERRAL_POOL_WITH_MIN_SCORE : MAX_REFERRAL_ROLES;
+    if (ids.length < 1 || ids.length > maxRoles) {
+      throw new BadRequestException(`Select between 1 and ${maxRoles} roles`);
     }
     const contact = await this.prisma.companyContact.findUnique({ where: { id: contactId } });
     if (!contact) throw new NotFoundException(`Contact ${contactId} not found`);
@@ -120,7 +126,7 @@ export class ReferralsService {
     if (roles.length !== ids.length) {
       throw new BadRequestException("Every selected role must belong to this contact's company");
     }
-    return this.sessions.startReferral(contactId, tone, channel, ids);
+    return this.sessions.startReferral(contactId, tone, channel, ids, minScore);
   }
 
   async getReferral(id: string) {

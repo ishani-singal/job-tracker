@@ -267,7 +267,7 @@ export class SessionsService {
 
   /** Starts an unattended REFERRAL session (see runReferralTurn) — the chat
    * shows its steps live; the result is saved as a ReferralRequest on finish. */
-  async startReferral(contactId: string, tone: string, channel: string, roleIds: string[]) {
+  async startReferral(contactId: string, tone: string, channel: string, roleIds: string[], minScore?: number) {
     const contact = await this.prisma.companyContact.findUnique({
       where: { id: contactId },
       include: { company: true },
@@ -281,6 +281,7 @@ export class SessionsService {
         referralTone: tone,
         referralChannel: channel,
         referralRoleIds: roleIds,
+        referralMinScore: minScore ?? null,
         status: 'RUNNING',
       },
     });
@@ -459,6 +460,7 @@ export class SessionsService {
       referralTone?: string | null;
       referralChannel?: string | null;
       referralRoleIds?: string[];
+      referralMinScore?: number | null;
     },
     priorHistoryJson: string | null,
     userReply: string | null,
@@ -475,6 +477,7 @@ export class SessionsService {
           session.referralChannel ?? 'email',
           session.referralRoleIds ?? [],
           userReply ?? undefined,
+          userReply ? undefined : (session.referralMinScore ?? undefined),
         );
       } else if (session.scope === 'COMPANY') {
         await this.runCompanyTurn(session.id, session.company!, priorHistoryJson, userReply);
@@ -675,6 +678,7 @@ export class SessionsService {
     channel: string,
     roleIds: string[],
     uploadedResume?: string,
+    minScore?: number,
   ) {
     // A final draft from an uploaded resume targets ONLY the roles the latest
     // result kept (at most FINAL_REFERRAL_ROLES) — never the original, larger
@@ -737,6 +741,7 @@ export class SessionsService {
         channel,
         roles,
         uploaded_resume: uploadedResume ?? null,
+        keep_min_score: minScore ?? null,
       }),
       signal: this.agentCallSignal(sessionId, 20 * 60 * 1000),
       dispatcher: agentDispatcher,

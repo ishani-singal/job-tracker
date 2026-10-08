@@ -192,13 +192,26 @@ _RULES_REMINDER = (
 )
 
 
-def _first_draft_prompt(company: str, roles: list[RoleInput], uploaded_resume: str | None = None) -> str:
-    pool_note = (
-        f" Only the best-fitting {FINAL_ROLES} of these roles will be kept — the rest are dropped "
-        "after an ATS check — so lead with what most of them share."
-        if len(roles) > FINAL_ROLES
-        else ""
-    )
+def _first_draft_prompt(
+    company: str,
+    roles: list[RoleInput],
+    uploaded_resume: str | None = None,
+    target: int = ATS_TARGET,
+    select: bool = False,
+) -> str:
+    if select:
+        pool_note = (
+            f" These {len(roles)} roles are a pool: the resume is kept for every one that scores at least "
+            f"{target}%, and the rest are dropped — so maximise how many reach {target}% by leading with the "
+            "skills and keywords most of them share. A role the candidate genuinely doesn't fit may be missed."
+        )
+    else:
+        pool_note = (
+            f" Only the best-fitting {FINAL_ROLES} of these roles will be kept — the rest are dropped "
+            "after an ATS check — so lead with what most of them share."
+            if len(roles) > FINAL_ROLES
+            else ""
+        )
     jds = "\n\n---\n\n".join(f"## Job description {i}: {r.title}\n{r.jd_text[:8000]}" for i, r in enumerate(roles, 1))
     upload_note = (
         "\n\nThe candidate has uploaded their OWN current resume, below as extracted text. Treat it as "
@@ -214,8 +227,8 @@ def _first_draft_prompt(company: str, roles: list[RoleInput], uploaded_resume: s
     return (
         f"Generate ONE resume for the candidate that is tailored to ALL {len(roles)} of the "
         f"following {company} job descriptions at once — a single resume that would score at "
-        f"least {ATS_TARGET}% ATS match on EACH of them. For this run the ATS target is "
-        f"{ATS_TARGET}% on every JD. Cover the skills and keywords the JDs share first, then each "
+        f"least {target}% ATS match on EACH of them. For this run the ATS target is "
+        f"{target}% on every JD. Cover the skills and keywords the JDs share first, then each "
         "JD's specific ones, but only where the candidate's real background supports them — never "
         "fabricate experience. " + _RULES_REMINDER + " This is an automated run: if you would "
         "normally ask a clarifying question, make the most reasonable assumption and finish with "
@@ -223,7 +236,13 @@ def _first_draft_prompt(company: str, roles: list[RoleInput], uploaded_resume: s
     )
 
 
-def _revision_prompt(scores: list[RoleScore], dropped: list[RoleScore], violations: list[str]) -> str:
+def _revision_prompt(
+    scores: list[RoleScore],
+    dropped: list[RoleScore],
+    violations: list[str],
+    target: int = ATS_TARGET,
+    select: bool = False,
+) -> str:
     parts: list[str] = []
     if dropped:
         parts.append(
@@ -234,17 +253,24 @@ def _revision_prompt(scores: list[RoleScore], dropped: list[RoleScore], violatio
     lines = []
     for s_ in scores:
         gaps = ", ".join(s_.missing) if s_.missing else "none listed"
-        flag = "OK" if s_.score >= ATS_TARGET else "BELOW TARGET"
+        flag = "OK" if s_.score >= target else "BELOW TARGET"
         lines.append(f"- {s_.title}: {s_.score}% ({flag}); missing/weak: {gaps}")
     parts.append("An independent ATS check of your last resume found:\n" + "\n".join(lines))
     if violations:
         parts.append(
             "It also breaks these resume guidelines — fix every one:\n" + "\n".join(f"- {v}" for v in violations)
         )
-    below = any(s_.score < ATS_TARGET for s_ in scores)
-    if below:
+    below = any(s_.score < target for s_ in scores)
+    if below and select:
         parts.append(
-            f"Revise the resume so EVERY job description reaches at least {ATS_TARGET}%. Work the "
+            f"Revise the resume to raise the NUMBER of job descriptions at or above {target}%. Work in the "
+            "missing keywords and requirements that several below-target JDs share, only where the candidate's "
+            "background genuinely supports them (reword bullets, reorder, surface relevant entries or projects) — "
+            "never invent experience or tack keywords onto a bullet, and don't lower the ones already OK."
+        )
+    elif below:
+        parts.append(
+            f"Revise the resume so EVERY job description reaches at least {target}%. Work the "
             "missing keywords and requirements in only where the candidate's background genuinely "
             "supports them (reword bullets, reorder, surface relevant entries or projects) — never "
             "invent experience, and never list or tack keywords onto a bullet: each bullet must still read "
@@ -253,7 +279,7 @@ def _revision_prompt(scores: list[RoleScore], dropped: list[RoleScore], violatio
         )
     else:
         parts.append(
-            f"The ATS scores are at or above {ATS_TARGET}% — fix only the guideline violations "
+            f"The ATS scores are at or above {target}% — fix only the guideline violations "
             "without lowering them."
         )
     parts.append(_RULES_REMINDER + " Return the complete revised resume with done=true.")
@@ -298,7 +324,10 @@ async def run_referral(
     channel: Channel,
     roles: list[RoleInput],
     uploaded_resume: str | None = None,
+    keep_min_score: int | None = None,
 ) -> ReferralResult:
+    select = keep_min_score is not None and not uploaded_resume
+    target = keep_min_score if select else ATS_TARGET
     async def say(message: str) -> None:
         await _report_progress(api_base_url, session_id, message)
 
@@ -350,7 +379,10 @@ async def run_referral(
         return problems
 
     def quality(scores: list[RoleScore], violations: list[str]) -> tuple[int, int, float]:
-        return (-len(violations), min(s.score for s in scores), sum(s.score for s in scores) / len(scores))
+        mean = sum(s.score for s in scores) / len(scores)
+        if select:
+            return (-len(violations), sum(1 for s in scores if s.score >= target), mean)
+        return (-len(violations), min(s.score for s in scores), mean)
 
     with run_scope():
         await say(
@@ -359,9 +391,11 @@ async def run_referral(
                 if uploaded_resume
                 else f"Building one resume for {len(roles)} role(s)"
             )
-            + f" — target {ATS_TARGET}% ATS on each..."
+            + (f" — keeping every role that reaches {target}% ATS..." if select else f" — target {target}% ATS on each...")
         )
-        resume, history = await _generate(_first_draft_prompt(company, roles, uploaded_resume), None, deps)
+        resume, history = await _generate(
+            _first_draft_prompt(company, roles, uploaded_resume, target, select), None, deps
+        )
 
         for draft in range(1, MAX_DRAFTS + 1):
             drafts_made = draft
@@ -377,7 +411,7 @@ async def run_referral(
             if violations:
                 await say(f"  {len(violations)} resume-guideline issue(s) found")
 
-            if len(active) > FINAL_ROLES:
+            if not select and len(active) > FINAL_ROLES:
                 # Drop the weakest fits so the rest can reach the target; ties
                 # drop the later-listed role.
                 ranked = sorted(enumerate(scores), key=lambda p: (p[1].score, -p[0]))
@@ -394,21 +428,23 @@ async def run_referral(
             if best is None or quality(scores, violations) > quality(best[1], best[2]):
                 best = (resume, scores, violations)
 
-            if all(s_.score >= ATS_TARGET for s_ in scores) and not violations:
-                await say(f"All {len(active)} remaining role(s) are at or above {ATS_TARGET}% and follow the guidelines.")
+            if all(s_.score >= target for s_ in scores) and not violations:
+                await say(f"All {len(active)} remaining role(s) are at or above {target}% and follow the guidelines.")
                 break
             if draft == MAX_DRAFTS:
                 break
 
-            gaps = sorted({k for s_ in scores if s_.score < ATS_TARGET for k in s_.missing})[:8]
+            gaps = sorted({k for s_ in scores if s_.score < target for k in s_.missing})[:8]
             reasons = []
-            if any(s_.score < ATS_TARGET for s_ in scores):
-                reasons.append(f"below {ATS_TARGET}% on at least one role" + (f" (gaps: {', '.join(gaps)})" if gaps else ""))
+            if any(s_.score < target for s_ in scores):
+                reasons.append(f"below {target}% on at least one role" + (f" (gaps: {', '.join(gaps)})" if gaps else ""))
             if violations:
                 reasons.append(f"{len(violations)} guideline issue(s)")
             await say("Revising — " + "; ".join(reasons) + "...")
             try:
-                resume, history = await _generate(_revision_prompt(scores, dropped, violations), history, deps)
+                resume, history = await _generate(
+                    _revision_prompt(scores, dropped, violations, target, select), history, deps
+                )
             except BudgetExceededError as exc:
                 stopped_early = str(exc)
                 break
@@ -416,6 +452,16 @@ async def run_referral(
         if best is None:
             raise RuntimeError(stopped_early or "Could not score the resume")
         best_resume, best_scores, best_violations = best
+
+        if select:
+            # Keep every role that reached the minimum (or, if none did, the single closest one).
+            kept_ids = {s_.role_id for s_ in best_scores if s_.score >= target}
+            if not kept_ids:
+                kept_ids = {max(best_scores, key=lambda s_: s_.score).role_id}
+            dropped = [s_.model_copy(update={"dropped": True}) for s_ in best_scores if s_.role_id not in kept_ids]
+            best_scores = [s_ for s_ in best_scores if s_.role_id in kept_ids]
+            active = [r_ for r_ in roles if r_.id in kept_ids]
+            await say(f"Keeping {len(active)} of {len(roles)} role(s) at {target}% or above.")
 
         # Roles were dropped on the FIRST draft's scores, but the resume was revised
         # afterwards (and the scorer is noisy), so a dropped role's frozen score is no
@@ -471,7 +517,7 @@ async def run_referral(
         if channel == "email" and written.output.subject:
             message = f"Subject: {written.output.subject.strip()}\n\n{message}"
 
-    target_met = all(s_.score >= ATS_TARGET for s_ in best_scores)
+    target_met = all(s_.score >= target for s_ in best_scores)
     notes: list[str] = []
     if swaps:
         notes.append("After the final draft, " + "; ".join(swaps) + ", so the links are the best fits for the attached resume.")
@@ -485,10 +531,10 @@ async def run_referral(
         below = "; ".join(
             f"{s_.title}: {s_.score}% (gaps: {', '.join(s_.missing[:6]) or 'none listed'})"
             for s_ in best_scores
-            if s_.score < ATS_TARGET
+            if s_.score < target
         )
         notes.append(
-            f"Couldn't reach {ATS_TARGET}% on every remaining role after {drafts_made} draft(s) without "
+            f"Couldn't reach {target}% on every remaining role after {drafts_made} draft(s) without "
             f"claiming experience your background doesn't show. Below target — {below}. The "
             "closest resume is attached; consider picking roles that overlap more, or add the "
             "missing skills to your entries if you genuinely have them."
