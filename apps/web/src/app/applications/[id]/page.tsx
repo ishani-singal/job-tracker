@@ -140,7 +140,7 @@ export default function ApplicationDetailPage({
         </div>
         {application.resumeContent ? (
           <pre className="text-sm whitespace-pre-wrap border rounded p-3">
-            {application.resumeContent}
+            {resumeText(application.resumeContent)}
           </pre>
         ) : (
           <p className="text-sm opacity-60">No resume generated yet.</p>
@@ -148,6 +148,28 @@ export default function ApplicationDetailPage({
       </div>
     </div>
   );
+}
+
+// resumeContent is a StructuredResume object for current resumes (a plain
+// markdown string only for pre-rework rows), so it can't be rendered directly.
+function resumeText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  const r = content as {
+    contactLine?: string;
+    sections?: {
+      heading: string;
+      entries: { name?: string; subtitle?: string; dateRange?: string; location?: string; bullets?: string[] }[];
+    }[];
+  };
+  const lines = [r.contactLine ?? ''];
+  for (const section of r.sections ?? []) {
+    lines.push('', section.heading.toUpperCase());
+    for (const e of section.entries ?? []) {
+      lines.push([e.name, e.subtitle, e.dateRange, e.location].filter(Boolean).join(' — '));
+      for (const b of e.bullets ?? []) lines.push(`  - ${b.replace(/\*\*/g, '')}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 function DateField({
