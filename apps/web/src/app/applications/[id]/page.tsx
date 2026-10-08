@@ -79,6 +79,25 @@ export default function ApplicationDetailPage({
         />
       </div>
 
+      {application.status === 'APPLIED' && (
+        <div className="text-sm flex flex-col gap-1">
+          <p>
+            <span className="opacity-60">Referred by:</span>{' '}
+            {application.referredByContact?.name ?? 'No referral'}
+          </p>
+          <p>
+            <span className="opacity-60">Resume applied with:</span>{' '}
+            {application.appliedResume ? (
+              <a href={`${API_BASE}/applications/${id}/applied-resume`} className="underline">
+                {application.appliedResume.filename}
+              </a>
+            ) : (
+              'Not uploaded'
+            )}
+          </p>
+        </div>
+      )}
+
       <div>
         <h2 className="text-sm font-medium mb-1">Job Description</h2>
         <p className="text-sm whitespace-pre-wrap opacity-80">

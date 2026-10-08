@@ -39,12 +39,28 @@ model Application {
   resumeContent    Json?
   resumeGeneratedAt DateTime?
 
+  // Who referred the user for this application (set when marking it applied).
+  referredByContactId String?
+  referredByContact   CompanyContact? @relation("ApplicationReferrer", fields: [referredByContactId], references: [id], onDelete: SetNull)
+  // The resume the user actually submitted with (uploaded when marking applied).
+  appliedResume ApplicationAppliedResume?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([company])
   @@index([status])
   @@index([jobId])
+  @@index([referredByContactId])
+}
+
+model ApplicationAppliedResume {
+  applicationId String      @id
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  filename      String
+  mimeType      String
+  data          Bytes
+  uploadedAt    DateTime    @default(now())
 }
 
 enum CompanyDiscoveryStatus {
@@ -651,6 +667,7 @@ model CompanyContact {
   phone       String?
 
   referrals ReferralRequest[]
+  referredApplications Application[] @relation("ApplicationReferrer")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

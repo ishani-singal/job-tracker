@@ -3,6 +3,7 @@ import type {
   AnalyticsTimeseriesPoint,
   Application,
   AppSettings,
+  ApplicationContact,
   CompanyContact,
   CompanyResume,
   DiscoveredRole,
@@ -65,6 +66,22 @@ export const api = {
     request<Application>('/applications', { method: 'POST', body: JSON.stringify(data) }),
   updateApplication: (id: string, data: Partial<Application>) =>
     request<Application>(`/applications/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  listApplicationContacts: (id: string) =>
+    request<ApplicationContact[]>(`/applications/${id}/contacts`),
+  addApplicationContact: (
+    id: string,
+    data: { name: string; linkedinUrl?: string; email?: string; phone?: string },
+  ) => request<ApplicationContact>(`/applications/${id}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
+  uploadAppliedResume: async (id: string, file: File) => {
+    // Multipart — can't go through request(), which sets a JSON content type.
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/applications/${id}/applied-resume`, { method: 'POST', body: form });
+    if (!res.ok) {
+      const body = await res.json().catch(() => undefined);
+      throw new ApiError((body as { message?: string })?.message ?? `Upload failed: ${res.status}`, res.status, body);
+    }
+  },
   deleteApplication: (id: string) =>
     request<void>(`/applications/${id}`, { method: 'DELETE' }),
 

@@ -18,6 +18,10 @@ export interface Application {
   rejectedDate: string | null;
   resumeContent: string | null;
   resumeGeneratedAt: string | null;
+  referredByContactId?: string | null;
+  /** Single-record reads (GET /applications/:id) only. */
+  referredByContact?: { id: string; name: string } | null;
+  appliedResume?: { filename: string; uploadedAt: string } | null;
   createdAt: string;
   updatedAt: string;
   /** Present on list responses (GET /applications) — omitted on single-record reads. */
@@ -267,6 +271,15 @@ export interface ReferralRequest {
   targetMet: boolean;
   note: string | null;
   createdAt: string;
+}
+
+/** A company contact as listed for an application (no referral history). */
+export interface ApplicationContact {
+  id: string;
+  name: string;
+  linkedinUrl: string | null;
+  email: string | null;
+  phone: string | null;
 }
 
 export interface CompanyContact {

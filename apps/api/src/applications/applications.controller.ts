@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,12 +9,14 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Res,
 } from '@nestjs/common';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   ApplicationsService,
   CreateApplicationInput,
+  NewContactInput,
   UpdateApplicationInput,
 } from './applications.service';
 import { AnalyticsService } from '../analytics/analytics.service';
@@ -54,6 +57,32 @@ export class ApplicationsController {
   @Delete(':id')
   delete(@Param('id') id: string) {
     return this.applications.delete(id);
+  }
+
+  @Get(':id/contacts')
+  listContacts(@Param('id') id: string) {
+    return this.applications.listCompanyContacts(id);
+  }
+
+  @Post(':id/contacts')
+  addContact(@Param('id') id: string, @Body() body: NewContactInput) {
+    return this.applications.addCompanyContact(id, body);
+  }
+
+  @Post(':id/applied-resume')
+  async uploadAppliedResume(@Param('id') id: string, @Req() req: FastifyRequest) {
+    const file = await req.file();
+    if (!file) throw new BadRequestException('no file provided');
+    return this.applications.saveAppliedResume(id, file.filename, file.mimetype, await file.toBuffer());
+  }
+
+  @Get(':id/applied-resume')
+  async downloadAppliedResume(@Param('id') id: string, @Res() res: FastifyReply) {
+    const row = await this.applications.getAppliedResume(id);
+    res
+      .header('Content-Type', row.mimeType)
+      .header('Content-Disposition', `attachment; filename="${row.filename.replace(/"/g, '')}"`)
+      .send(Buffer.from(row.data));
   }
 
   @Get(':id/resume.pdf')

@@ -469,6 +469,13 @@ export class CompanyRolesService implements OnModuleInit, OnModuleDestroy {
    * errors so it never blocks the Application create it's attached to.
    * If the Application had a jobUrl, its derived career-board root is tried
    * before the generic guess-list — a real known-good URL beats a guess. */
+  /** The tracked company matching a (possibly differently-punctuated) name, if any. */
+  async findTrackedCompany(name: string) {
+    const key = normalizeCompanyKey(name);
+    const all = await this.prisma.trackedCompany.findMany();
+    return all.find((c) => normalizeCompanyKey(c.name) === key) ?? null;
+  }
+
   async ensureCompanyTracked(name: string, seedJobUrl?: string): Promise<void> {
     const trimmed = name.trim();
     if (!trimmed) return;

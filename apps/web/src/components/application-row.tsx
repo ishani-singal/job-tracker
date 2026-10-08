@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Application } from '@job-tracker/shared-types';
 import { api } from '@/lib/api';
 import { AddApplicationDialog } from './add-application-dialog';
+import { MarkAppliedDialog } from './mark-applied-dialog';
 import { useSessionsPanel } from '@/lib/sessions-panel-context';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
@@ -33,14 +34,7 @@ export function ApplicationRow({
   const [editOpen, setEditOpen] = useState(false);
   const { openPanel } = useSessionsPanel();
 
-  const markApplied = useMutation({
-    mutationFn: () =>
-      api.updateApplication(application.id, {
-        status: 'APPLIED',
-        appliedDate: new Date().toISOString().slice(0, 10),
-      } as Partial<Application>),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['applications'] }),
-  });
+  const [markAppliedOpen, setMarkAppliedOpen] = useState(false);
 
   const deleteApplication = useMutation({
     mutationFn: () => api.deleteApplication(application.id),
@@ -71,7 +65,9 @@ export function ApplicationRow({
           {application.role ? ` — ${application.role}` : ''}
         </Link>
         <span className="text-xs opacity-60">
-          {application.status === 'APPLIED' ? 'Applied' : 'Not applied'}
+          {application.status === 'APPLIED'
+            ? `Applied${application.appliedDate ? ` ${application.appliedDate.slice(0, 10)}` : ''}`
+            : 'Not applied'}
           {application.rejectedDate
             ? ' · Rejected'
             : application.derivedStatus === 'inactive'
@@ -85,7 +81,7 @@ export function ApplicationRow({
         {application.status !== 'APPLIED' && (
           <button
             className="px-2 py-1 text-xs rounded border"
-            onClick={() => markApplied.mutate()}
+            onClick={() => setMarkAppliedOpen(true)}
           >
             Mark Applied
           </button>
@@ -134,6 +130,12 @@ export function ApplicationRow({
         </button>
       </div>
 
+      <MarkAppliedDialog
+        application={application}
+        open={markAppliedOpen}
+        onOpenChange={setMarkAppliedOpen}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['applications'] })}
+      />
       <AddApplicationDialog
         editApplication={application}
         open={editOpen}
