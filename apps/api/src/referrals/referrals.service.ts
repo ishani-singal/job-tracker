@@ -10,10 +10,8 @@ export type ReferralChannel = (typeof REFERRAL_CHANNELS)[number];
 
 /** One resume has to cover every selected JD, so the number of roles is capped. */
 export const MAX_REFERRAL_ROLES = 10;
-/** With a minimum score or a chosen final count, the pool can be larger. */
+/** With a minimum score, every role scoring above it is kept, so the pool can be larger. */
 export const MAX_REFERRAL_POOL_WITH_MIN_SCORE = 40;
-/** Largest final role count a caller can ask for (matches MAX_FINAL_ROLES in agent/resu/referral/agent.py). */
-export const MAX_REFERRAL_FINAL_ROLES = 40;
 
 export interface ContactInput {
   name?: string;
@@ -104,14 +102,7 @@ export class ReferralsService {
 
   /** Validates the request and starts the REFERRAL chat session that fetches
    * the JDs, builds + ATS-checks the resume and drafts the message. */
-  async startReferral(
-    contactId: string,
-    tone: string,
-    channel: string,
-    roleIds: string[],
-    minScore?: number,
-    finalRoles?: number,
-  ) {
+  async startReferral(contactId: string, tone: string, channel: string, roleIds: string[], minScore?: number) {
     if (!(REFERRAL_TONES as readonly string[]).includes(tone)) {
       throw new BadRequestException(`tone must be one of: ${REFERRAL_TONES.join(', ')}`);
     }
@@ -122,11 +113,7 @@ export class ReferralsService {
     if (minScore !== undefined && !(Number.isInteger(minScore) && minScore >= 50 && minScore <= 100)) {
       throw new BadRequestException('minScore must be an integer between 50 and 100');
     }
-    if (finalRoles !== undefined && !(Number.isInteger(finalRoles) && finalRoles >= 1 && finalRoles <= MAX_REFERRAL_FINAL_ROLES)) {
-      throw new BadRequestException(`finalRoles must be an integer between 1 and ${MAX_REFERRAL_FINAL_ROLES}`);
-    }
-    const maxRoles =
-      minScore !== undefined || finalRoles !== undefined ? MAX_REFERRAL_POOL_WITH_MIN_SCORE : MAX_REFERRAL_ROLES;
+    const maxRoles = minScore !== undefined ? MAX_REFERRAL_POOL_WITH_MIN_SCORE : MAX_REFERRAL_ROLES;
     if (ids.length < 1 || ids.length > maxRoles) {
       throw new BadRequestException(`Select between 1 and ${maxRoles} roles`);
     }
@@ -139,7 +126,7 @@ export class ReferralsService {
     if (roles.length !== ids.length) {
       throw new BadRequestException("Every selected role must belong to this contact's company");
     }
-    return this.sessions.startReferral(contactId, tone, channel, ids, minScore, finalRoles);
+    return this.sessions.startReferral(contactId, tone, channel, ids, minScore);
   }
 
   async getReferral(id: string) {
